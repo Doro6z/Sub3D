@@ -34,8 +34,11 @@ public:
 
 	// ── Submarine attachment ──────────────────────────────────────────────
 
-	UPROPERTY(BlueprintReadOnly, Replicated, Category = "Crew")
+	UPROPERTY(BlueprintReadOnly, ReplicatedUsing = OnRep_CurrentSubmarine, Category = "Crew")
 	ASubmarineBase* CurrentSubmarine;
+
+	UFUNCTION()
+	void OnRep_CurrentSubmarine();
 
 	// Set the submarine reference without any physical attachment
 	UFUNCTION(BlueprintCallable, Category = "Crew")

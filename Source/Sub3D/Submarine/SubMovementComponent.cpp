@@ -7,6 +7,8 @@
 #include "SubHullComponent.h"
 #include "SubmarineSystemsComponent.h"
 
+DEFINE_LOG_CATEGORY_STATIC(LogSubMovement, Log, All);
+
 static constexpr float G_SI = 9.81f;
 
 USubMovementComponent::USubMovementComponent()
@@ -236,8 +238,8 @@ void USubMovementComponent::ApplyPhysics(float DeltaTime)
 	{
 		Velocity = FMath::VInterpTo(Velocity, FVector::ZeroVector, DeltaTime, ContactVelocityDamping);
 	}
-	Owner->SetActorRotation(NewRotation, ETeleportType::None);
 
+	Owner->SetActorRotation(NewRotation, ETeleportType::None);
 	CurrentDepth = FMath::Max(0.f, -Owner->GetActorLocation().Z / 100.f);
 }
 
@@ -323,51 +325,85 @@ float USubMovementComponent::ComputeFloodedMassKg() const
 
 void USubMovementComponent::HandleReplicatedNetState(const FSubmarineNetState& NewState)
 {
-	if (!GetOwner() || GetOwner()->HasAuthority())
+	AActor* Owner = GetOwner();
+	if (!Owner || Owner->HasAuthority())
 	{
 		return;
 	}
+
+	const float FixedSimDt = FixedSimulationHz > KINDA_SMALL_NUMBER ? (1.f / FixedSimulationHz) : (1.f / 30.f);
+	const int32 PreviousFrame = bHasReceivedSnapshot ? TargetSnapshot.SimFrame : NewState.SimFrame;
+	const int32 FrameDelta = (bHasReceivedSnapshot && NewState.SimFrame >= PreviousFrame)
+		? (NewState.SimFrame - PreviousFrame)
+		: 1;
+	const float NewInterpDuration = FMath::Max(FixedSimDt, FrameDelta * FixedSimDt);
+	const float SnapshotDistanceCm = FVector::Dist(Owner->GetActorLocation(), NewState.WorldLocation);
+
+	UE_LOG(
+		LogSubMovement,
+		Log,
+		TEXT("Snapshot received | Frame=%d->%d | Loc=%s | Dist=%.1f | InterpDuration=%.3f"),
+		PreviousFrame,
+		NewState.SimFrame,
+		*NewState.WorldLocation.ToCompactString(),
+		SnapshotDistanceCm,
+		NewInterpDuration);
 
 	if (!bHasReceivedSnapshot)
 	{
 		PrevSnapshot = NewState;
 		TargetSnapshot = NewState;
 		InterpAlpha = 1.f;
-		InterpDuration = FixedSimulationHz > KINDA_SMALL_NUMBER ? (1.f / FixedSimulationHz) : (1.f / 30.f);
+		InterpDuration = NewInterpDuration;
+		DebugLogTimer = 0.f;
 		bHasReceivedSnapshot = true;
 
 		Velocity = NewState.LinearVelocity;
 		CurrentDepth = NewState.DepthMeters;
 		FloodedMassKg = NewState.FloodedMassKg;
-		GetOwner()->SetActorLocationAndRotation(NewState.WorldLocation, NewState.QuantizedRotation, false, nullptr, ETeleportType::TeleportPhysics);
+		Owner->SetActorLocationAndRotation(NewState.WorldLocation, NewState.QuantizedRotation, false, nullptr, ETeleportType::TeleportPhysics);
 		return;
 	}
 
-	PrevSnapshot = TargetSnapshot;
+	// Use the currently presented transform as the start of the new lerp,
+	// not the theoretical end of the previous one. This prevents visual jumps
+	// when a snapshot arrives before the previous lerp completes (alpha < 1).
+	PrevSnapshot.WorldLocation = Owner->GetActorLocation();
+	PrevSnapshot.QuantizedRotation = Owner->GetActorRotation();
 	TargetSnapshot = NewState;
 	InterpAlpha = 0.f;
-
-	const int32 FrameDelta = (TargetSnapshot.SimFrame >= PrevSnapshot.SimFrame)
-		? (TargetSnapshot.SimFrame - PrevSnapshot.SimFrame)
-		: 1;
-	const float FixedSimDt = FixedSimulationHz > KINDA_SMALL_NUMBER ? (1.f / FixedSimulationHz) : (1.f / 30.f);
-	InterpDuration = FMath::Max(FixedSimDt, FrameDelta * FixedSimDt);
+	InterpDuration = NewInterpDuration;
 
 	Velocity = TargetSnapshot.LinearVelocity;
 	CurrentDepth = TargetSnapshot.DepthMeters;
 	FloodedMassKg = TargetSnapshot.FloodedMassKg;
 
-	if (FVector::DistSquared(GetOwner()->GetActorLocation(), TargetSnapshot.WorldLocation) > FMath::Square(InterpSnapDistanceCm))
+	if (SnapshotDistanceCm > InterpSnapDistanceCm)
 	{
+		UE_LOG(
+			LogSubMovement,
+			Warning,
+			TEXT("SUBMARINE SNAP | Distance=%.1f cm | OldLoc=%s -> NewLoc=%s | Frame=%d"),
+			SnapshotDistanceCm,
+			*Owner->GetActorLocation().ToCompactString(),
+			*TargetSnapshot.WorldLocation.ToCompactString(),
+			TargetSnapshot.SimFrame);
+
+		OnSubmarineSnapped.Broadcast(SnapshotDistanceCm, NewState);
 		InterpAlpha = 1.f;
-		GetOwner()->SetActorLocationAndRotation(TargetSnapshot.WorldLocation, TargetSnapshot.QuantizedRotation, false, nullptr, ETeleportType::TeleportPhysics);
+		Owner->SetActorLocationAndRotation(TargetSnapshot.WorldLocation, TargetSnapshot.QuantizedRotation, false, nullptr, ETeleportType::TeleportPhysics);
 	}
 }
 
 void USubMovementComponent::InterpolateClient(float DeltaTime)
 {
-	if (!GetOwner() || !bHasReceivedSnapshot || InterpAlpha >= 1.f)
+	AActor* Owner = GetOwner();
+	if (!Owner || !bHasReceivedSnapshot || InterpAlpha >= 1.f)
 	{
+		if (!bDebugLogSubMovement)
+		{
+			DebugLogTimer = 0.f;
+		}
 		return;
 	}
 
@@ -382,7 +418,30 @@ void USubMovementComponent::InterpolateClient(float DeltaTime)
 		TargetSnapshot.QuantizedRotation,
 		InterpAlpha);
 
-	GetOwner()->SetActorLocationAndRotation(SmoothedLocation, SmoothedRotation, false, nullptr, ETeleportType::None);
+	Owner->SetActorLocationAndRotation(SmoothedLocation, SmoothedRotation, false, nullptr, ETeleportType::None);
+
+	if (bDebugLogSubMovement)
+	{
+		DebugLogTimer += DeltaTime;
+		if (DebugLogTimer >= 1.f)
+		{
+			DebugLogTimer = 0.f;
+			UE_LOG(
+				LogSubMovement,
+				Log,
+				TEXT("Interp | Alpha=%.3f | Duration=%.3f | Loc=%s -> %s | Rot=%s -> %s"),
+				InterpAlpha,
+				InterpDuration,
+				*PrevSnapshot.WorldLocation.ToCompactString(),
+				*TargetSnapshot.WorldLocation.ToCompactString(),
+				*PrevSnapshot.QuantizedRotation.ToCompactString(),
+				*TargetSnapshot.QuantizedRotation.ToCompactString());
+		}
+	}
+	else
+	{
+		DebugLogTimer = 0.f;
+	}
 }
 
 void USubMovementComponent::InitializeNeutralBuoyancy()

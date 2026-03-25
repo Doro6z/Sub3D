@@ -1,7 +1,10 @@
 #include "SubInteriorFrameComponent.h"
 
+#include "DrawDebugHelpers.h"
 #include "GameFramework/Actor.h"
 #include "SubMovementComponent.h"
+
+DEFINE_LOG_CATEGORY_STATIC(LogSubInteriorFrame, Log, All);
 
 USubInteriorFrameComponent::USubInteriorFrameComponent()
 {
@@ -13,21 +16,38 @@ void USubInteriorFrameComponent::BeginPlay()
 {
 	Super::BeginPlay();
 
-	if (const AActor* Owner = GetOwner())
+	const AActor* Owner = GetOwner();
+	if (Owner)
 	{
 		PreviousLocation = Owner->GetActorLocation();
 		PreviousRotation = Owner->GetActorRotation();
 		bFrameValid = true;
+
+		UE_LOG(
+			LogSubInteriorFrame,
+			Log,
+			TEXT("InteriorFrame initialized | Owner=%s | Location=%s | Rotation=%s | FrameValid=%d"),
+			*GetNameSafe(Owner),
+			*PreviousLocation.ToCompactString(),
+			*PreviousRotation.ToCompactString(),
+			bFrameValid ? 1 : 0);
 	}
 
-	// Tick after SubMovementComponent so the delta reflects this frame's motion.
-	if (const AActor* Owner = GetOwner())
+	bool bTickPrerequisiteSet = false;
+	if (Owner)
 	{
 		if (USubMovementComponent* SubMov = Owner->FindComponentByClass<USubMovementComponent>())
 		{
 			AddTickPrerequisiteComponent(SubMov);
+			bTickPrerequisiteSet = true;
 		}
 	}
+
+	UE_LOG(
+		LogSubInteriorFrame,
+		Log,
+		TEXT("Tick prerequisite set on SubMovementComponent: %s"),
+		bTickPrerequisiteSet ? TEXT("true") : TEXT("false"));
 }
 
 void USubInteriorFrameComponent::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
@@ -46,11 +66,55 @@ void USubInteriorFrameComponent::TickComponent(float DeltaTime, ELevelTick TickT
 	FrameLocationDelta = CurrentLocation - PreviousLocation;
 	FrameRotationDelta = (CurrentRotation - PreviousRotation).GetNormalized();
 
+	const float MaxAbsRotationDelta = FMath::Max3(
+		FMath::Abs(FrameRotationDelta.Pitch),
+		FMath::Abs(FrameRotationDelta.Yaw),
+		FMath::Abs(FrameRotationDelta.Roll));
+
+	if (bDebugLogFrame && (FrameLocationDelta.Size() > 1.f || MaxAbsRotationDelta > 0.1f))
+	{
+		UE_LOG(
+			LogSubInteriorFrame,
+			Log,
+			TEXT("InteriorFrame delta | Loc=%s | Rot=%s"),
+			*FrameLocationDelta.ToCompactString(),
+			*FrameRotationDelta.ToCompactString());
+	}
+
+	if (bDebugDrawFrame && GetWorld())
+	{
+		const FVector Origin = CurrentLocation;
+		DrawDebugSphere(GetWorld(), Origin, 20.f, 12, FColor::Green, false, 0.f, 0, 1.5f);
+		DrawDebugLine(GetWorld(), Origin, Origin + (Owner->GetActorForwardVector() * 100.f), FColor::Blue, false, 0.f, 0, 2.f);
+		DrawDebugLine(GetWorld(), Origin, Origin + (Owner->GetActorRightVector() * 80.f), FColor::Red, false, 0.f, 0, 2.f);
+		DrawDebugLine(GetWorld(), Origin, Origin + (Owner->GetActorUpVector() * 80.f), FColor::Yellow, false, 0.f, 0, 2.f);
+		DrawDebugDirectionalArrow(GetWorld(), Origin, Origin + FrameLocationDelta, 20.f, FColor::Cyan, false, 0.f, 0, 1.5f);
+	}
+
+	if (bDebugLogFrame)
+	{
+		DebugLogTimer += DeltaTime;
+		if (DebugLogTimer >= 1.f)
+		{
+			DebugLogTimer = 0.f;
+			UE_LOG(
+				LogSubInteriorFrame,
+				Log,
+				TEXT("InteriorFrame | Loc=%s | Rot=%s | DeltaLoc=%s | DeltaRot=%s"),
+				*CurrentLocation.ToCompactString(),
+				*CurrentRotation.ToCompactString(),
+				*FrameLocationDelta.ToCompactString(),
+				*FrameRotationDelta.ToCompactString());
+		}
+	}
+	else
+	{
+		DebugLogTimer = 0.f;
+	}
+
 	PreviousLocation = CurrentLocation;
 	PreviousRotation = CurrentRotation;
 }
-
-// ── Coordinate conversion ────────────────────────────────────────────────────
 
 FVector USubInteriorFrameComponent::WorldToLocal(const FVector& WorldPosition) const
 {
@@ -58,6 +122,7 @@ FVector USubInteriorFrameComponent::WorldToLocal(const FVector& WorldPosition) c
 	{
 		return Owner->GetActorTransform().InverseTransformPosition(WorldPosition);
 	}
+
 	return WorldPosition;
 }
 
@@ -67,6 +132,7 @@ FVector USubInteriorFrameComponent::LocalToWorld(const FVector& LocalPosition) c
 	{
 		return Owner->GetActorTransform().TransformPosition(LocalPosition);
 	}
+
 	return LocalPosition;
 }
 
@@ -78,6 +144,7 @@ FRotator USubInteriorFrameComponent::WorldToLocalRotation(const FRotator& WorldR
 		const FQuat WorldQuat = WorldRotation.Quaternion();
 		return (OwnerQuat.Inverse() * WorldQuat).Rotator();
 	}
+
 	return WorldRotation;
 }
 
@@ -89,6 +156,7 @@ FRotator USubInteriorFrameComponent::LocalToWorldRotation(const FRotator& LocalR
 		const FQuat LocalQuat = LocalRotation.Quaternion();
 		return (OwnerQuat * LocalQuat).Rotator();
 	}
+
 	return LocalRotation;
 }
 
@@ -98,5 +166,6 @@ FTransform USubInteriorFrameComponent::GetSubTransform() const
 	{
 		return Owner->GetActorTransform();
 	}
+
 	return FTransform::Identity;
 }

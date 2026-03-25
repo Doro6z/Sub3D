@@ -4,18 +4,12 @@
 #include "GameFramework/CharacterMovementComponent.h"
 #include "SubCrewMovementComponent.generated.h"
 
+class UPrimitiveComponent;
 class USubInteriorFrameComponent;
 
 /**
  * Crew movement component for interior submarine traversal.
- * Extends UCharacterMovementComponent with:
- *   - Explicit frame compensation (character follows the moving submarine)
- *   - Crew relative state (position/rotation in submarine-local space)
- *   - Snap recovery when the submarine teleports (network correction)
- *   - Controller yaw compensation for submarine rotation
- *
- * Stock CMC moving-base is disabled when embarked; our compensation is
- * the primary mechanism. CMC floor detection is still used for walking.
+ * Keeps relative state while relying on stock CMC based movement when embarked.
  */
 UCLASS()
 class SUB3D_API USubCrewMovementComponent : public UCharacterMovementComponent
@@ -27,25 +21,21 @@ public:
 
 	virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
 
-	// ── Relative crew state ──────────────────────────────────────────────
-
-	/** Crew position in submarine-local space (updated every frame when embarked). */
 	UPROPERTY(BlueprintReadOnly, Category = "Submarine|Crew")
 	FVector RelativeLocation = FVector::ZeroVector;
 
-	/** Crew rotation in submarine-local space. */
 	UPROPERTY(BlueprintReadOnly, Category = "Submarine|Crew")
 	FRotator RelativeRotation = FRotator::ZeroRotator;
 
-	// ── Tuning ───────────────────────────────────────────────────────────
-
-	/** If the submarine moves more than this in one frame, treat it as a teleport/snap. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Submarine|Crew")
 	float SnapThresholdCm = 200.f;
 
-	// ── Init ─────────────────────────────────────────────────────────────
+	UPROPERTY(EditAnywhere, Category = "Submarine|Debug")
+	bool bDebugLogCrewMovement = false;
 
-	/** Call after placing the character inside the submarine to seed the relative state. */
+	UPROPERTY(EditAnywhere, Category = "Submarine|Debug")
+	bool bDebugDrawCrewMovement = false;
+
 	void InitializeForSubmarine();
 
 	bool IsEmbarked() const;
@@ -56,9 +46,12 @@ protected:
 
 private:
 	USubInteriorFrameComponent* GetInteriorFrame() const;
-	void ApplySubmarineFrameCompensation();
 	void UpdateRelativeState();
+	void ApplyYawCompensation();
+	void CheckAndLogBaseChange();
+	void DebugDrawState();
+	void LogPeriodicState(float DeltaTime);
 
-	FTransform LastCompensatedSubTransform;
-	bool bHasLastCompensatedTransform = false;
+	TWeakObjectPtr<UPrimitiveComponent> LastKnownBase;
+	float DebugLogTimer = 0.f;
 };

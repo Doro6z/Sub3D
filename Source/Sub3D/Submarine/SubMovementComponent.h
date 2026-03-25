@@ -6,6 +6,8 @@
 #include "SubmarineTypes.h"
 #include "SubMovementComponent.generated.h"
 
+DECLARE_MULTICAST_DELEGATE_TwoParams(FOnSubmarineSnapped, float, const FSubmarineNetState&);
+
 UCLASS(ClassGroup = (Submarine), meta = (BlueprintSpawnableComponent))
 class SUB3D_API USubMovementComponent : public UActorComponent
 {
@@ -117,6 +119,11 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Net")
 	float InterpSnapDistanceCm = 500.f;
 
+	UPROPERTY(EditAnywhere, Category = "Submarine|Debug")
+	bool bDebugLogSubMovement = false;
+
+	FOnSubmarineSnapped OnSubmarineSnapped;
+
 	void SetThrustInput(float Value) { ThrustInput = FMath::Clamp(Value, -1.f, 1.f); }
 	void SetRudderInput(float Value) { RudderInput = FMath::Clamp(Value, -1.f, 1.f); }
 	void SetDivePlaneInput(float Value) { DivePlaneInput = FMath::Clamp(Value, -1.f, 1.f); }
@@ -152,6 +159,7 @@ private:
 	FSubmarineNetState TargetSnapshot;
 	float InterpAlpha = 1.f;
 	float InterpDuration = 1.f / 20.f;
+	float DebugLogTimer = 0.f;
 	bool bHasReceivedSnapshot = false;
 
 	void UpdateBallasts(float DeltaTime);

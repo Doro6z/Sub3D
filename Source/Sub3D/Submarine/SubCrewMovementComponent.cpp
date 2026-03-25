@@ -1,70 +1,63 @@
 #include "SubCrewMovementComponent.h"
 
 #include "SubCrewCharacter.h"
-#include "SubmarineBase.h"
 #include "SubInteriorFrameComponent.h"
+#include "SubmarineBase.h"
+#include "SubMovementComponent.h"
+#include "Components/PrimitiveComponent.h"
+#include "DrawDebugHelpers.h"
+#include "Engine/World.h"
 #include "GameFramework/Character.h"
 #include "GameFramework/Controller.h"
+
+DEFINE_LOG_CATEGORY_STATIC(LogSubCrewMovement, Log, All);
 
 USubCrewMovementComponent::USubCrewMovementComponent()
 {
 }
 
-// ── Tick ──────────────────────────────────────────────────────────────────────
-
 void USubCrewMovementComponent::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
 {
-	const bool bEmbarked = IsEmbarked();
-
-	// Apply submarine frame compensation BEFORE CMC runs its movement.
-	// Only for the locally controlled character — simulated proxies use
-	// stock replication + based-movement.
-	if (bEmbarked && CharacterOwner && CharacterOwner->IsLocallyControlled())
-	{
-		ApplySubmarineFrameCompensation();
-	}
-	else if (!bEmbarked)
-	{
-		bHasLastCompensatedTransform = false;
-	}
-
 	Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
 
-	// Update relative state AFTER CMC has moved the character (input, gravity, etc.).
-	if (bEmbarked)
+	if (IsEmbarked())
 	{
 		UpdateRelativeState();
+		ApplyYawCompensation();
+		CheckAndLogBaseChange();
+		LogPeriodicState(DeltaTime);
+		DebugDrawState();
+	}
+	else
+	{
+		if (LastKnownBase.IsValid())
+		{
+			const UPrimitiveComponent* PreviousBase = LastKnownBase.Get();
+			UE_LOG(
+				LogSubCrewMovement,
+				Log,
+				TEXT("Embark ended | clearing tracked base: %s on %s"),
+				*GetNameSafe(PreviousBase),
+				*GetNameSafe(PreviousBase ? PreviousBase->GetOwner() : nullptr));
+		}
+
+		LastKnownBase.Reset();
+		DebugLogTimer = 0.f;
 	}
 }
 
-// ── CMC overrides ────────────────────────────────────────────────────────────
-
 void USubCrewMovementComponent::UpdateBasedMovement(float DeltaSeconds)
 {
-	// When embarked and locally controlled, our explicit compensation in
-	// TickComponent handles following the submarine. Skip CMC stock
-	// based-movement to avoid double compensation.
-	if (IsEmbarked() && CharacterOwner && CharacterOwner->IsLocallyControlled())
-	{
-		return;
-	}
-
+	// D4: Stock based-movement re-enabled as the stabilization experiment.
 	Super::UpdateBasedMovement(DeltaSeconds);
 }
 
 void USubCrewMovementComponent::UpdateBasedRotation(FRotator& FinalRotation, const FRotator& ReducedRotation)
 {
-	// Yaw compensation is handled via controller rotation in our
-	// frame compensation. Skip stock based rotation when embarked.
-	if (IsEmbarked() && CharacterOwner && CharacterOwner->IsLocallyControlled())
-	{
-		return;
-	}
-
+	// D4: Stock based-rotation re-enabled.
+	// Controller yaw follow is handled separately in ApplyYawCompensation().
 	Super::UpdateBasedRotation(FinalRotation, ReducedRotation);
 }
-
-// ── Interior frame query ─────────────────────────────────────────────────────
 
 USubInteriorFrameComponent* USubCrewMovementComponent::GetInteriorFrame() const
 {
@@ -75,6 +68,7 @@ USubInteriorFrameComponent* USubCrewMovementComponent::GetInteriorFrame() const
 			return Sub->InteriorFrame;
 		}
 	}
+
 	return nullptr;
 }
 
@@ -82,69 +76,6 @@ bool USubCrewMovementComponent::IsEmbarked() const
 {
 	return GetInteriorFrame() != nullptr;
 }
-
-// ── Frame compensation ───────────────────────────────────────────────────────
-
-void USubCrewMovementComponent::ApplySubmarineFrameCompensation()
-{
-	USubInteriorFrameComponent* Frame = GetInteriorFrame();
-	if (!Frame || !Frame->IsFrameValid() || !CharacterOwner || !UpdatedComponent)
-	{
-		return;
-	}
-
-	const FTransform CurrentSubTransform = Frame->GetSubTransform();
-
-	if (!bHasLastCompensatedTransform)
-	{
-		// First frame after boarding — seed state, no compensation yet.
-		LastCompensatedSubTransform = CurrentSubTransform;
-		bHasLastCompensatedTransform = true;
-		UpdateRelativeState();
-		return;
-	}
-
-	// --- Positional compensation ---
-	// Compute where the character should be to maintain its relative position.
-	const FVector DesiredWorldPos = CurrentSubTransform.TransformPosition(RelativeLocation);
-	const FVector CurrentWorldPos = UpdatedComponent->GetComponentLocation();
-	const FVector Compensation = DesiredWorldPos - CurrentWorldPos;
-
-	const float CompensationSize = Compensation.Size();
-
-	if (CompensationSize > SnapThresholdCm)
-	{
-		// Submarine teleported (network snap) — teleport character with it.
-		UpdatedComponent->SetWorldLocation(DesiredWorldPos, false, nullptr, ETeleportType::TeleportPhysics);
-	}
-	else if (CompensationSize > KINDA_SMALL_NUMBER)
-	{
-		// Normal compensation: move character with the submarine (no sweep).
-		MoveUpdatedComponent(Compensation, UpdatedComponent->GetComponentRotation(), false);
-	}
-
-	// --- Yaw compensation ---
-	// When the submarine rotates, rotate the controller so the player's
-	// view stays consistent relative to the interior.
-	const FQuat PrevQuat = LastCompensatedSubTransform.GetRotation();
-	const FQuat CurrQuat = CurrentSubTransform.GetRotation();
-	const FQuat DeltaQuat = CurrQuat * PrevQuat.Inverse();
-	const float YawDelta = DeltaQuat.Rotator().Yaw;
-
-	if (FMath::Abs(YawDelta) > KINDA_SMALL_NUMBER)
-	{
-		if (AController* PC = CharacterOwner->GetController())
-		{
-			FRotator ControlRot = PC->GetControlRotation();
-			ControlRot.Yaw += YawDelta;
-			PC->SetControlRotation(ControlRot);
-		}
-	}
-
-	LastCompensatedSubTransform = CurrentSubTransform;
-}
-
-// ── Relative state ───────────────────────────────────────────────────────────
 
 void USubCrewMovementComponent::UpdateRelativeState()
 {
@@ -156,15 +87,215 @@ void USubCrewMovementComponent::UpdateRelativeState()
 
 	RelativeLocation = Frame->WorldToLocal(CharacterOwner->GetActorLocation());
 	RelativeRotation = Frame->WorldToLocalRotation(CharacterOwner->GetActorRotation());
+
+	if (bDebugLogCrewMovement)
+	{
+		UE_LOG(
+			LogSubCrewMovement,
+			Log,
+			TEXT("RelativeState | WorldLoc=%s | RelLoc=%s | RelRot=%s"),
+			*CharacterOwner->GetActorLocation().ToCompactString(),
+			*RelativeLocation.ToCompactString(),
+			*RelativeRotation.ToCompactString());
+	}
+}
+
+void USubCrewMovementComponent::ApplyYawCompensation()
+{
+	if (!CharacterOwner || !CharacterOwner->IsLocallyControlled())
+	{
+		return;
+	}
+
+	const USubInteriorFrameComponent* Frame = GetInteriorFrame();
+	if (!Frame || !Frame->IsFrameValid())
+	{
+		return;
+	}
+
+	const float YawDelta = Frame->GetFrameRotationDelta().Yaw;
+	if (FMath::Abs(YawDelta) <= KINDA_SMALL_NUMBER)
+	{
+		return;
+	}
+
+	if (AController* Controller = CharacterOwner->GetController())
+	{
+		FRotator ControlRotation = Controller->GetControlRotation();
+		ControlRotation.Yaw = FRotator::NormalizeAxis(ControlRotation.Yaw + YawDelta);
+		Controller->SetControlRotation(ControlRotation);
+
+		if (bDebugLogCrewMovement)
+		{
+			UE_LOG(
+				LogSubCrewMovement,
+				Log,
+				TEXT("YawCompensation | DeltaYaw=%.3f | NewControlYaw=%.3f"),
+				YawDelta,
+				ControlRotation.Yaw);
+		}
+	}
+}
+
+void USubCrewMovementComponent::CheckAndLogBaseChange()
+{
+	if (!CharacterOwner)
+	{
+		return;
+	}
+
+	UPrimitiveComponent* CurrentBase = CharacterOwner->GetMovementBase();
+	UPrimitiveComponent* PreviousBase = LastKnownBase.Get();
+
+	if (CurrentBase == PreviousBase)
+	{
+		return;
+	}
+
+	if (!PreviousBase && CurrentBase)
+	{
+		UE_LOG(
+			LogSubCrewMovement,
+			Log,
+			TEXT("Base acquired: %s on %s"),
+			*GetNameSafe(CurrentBase),
+			*GetNameSafe(CurrentBase->GetOwner()));
+	}
+	else if (PreviousBase && !CurrentBase)
+	{
+		UE_LOG(
+			LogSubCrewMovement,
+			Warning,
+			TEXT("Base lost! Was: %s on %s"),
+			*GetNameSafe(PreviousBase),
+			*GetNameSafe(PreviousBase->GetOwner()));
+	}
+	else if (PreviousBase && CurrentBase)
+	{
+		UE_LOG(
+			LogSubCrewMovement,
+			Log,
+			TEXT("Base changed: %s on %s -> %s on %s"),
+			*GetNameSafe(PreviousBase),
+			*GetNameSafe(PreviousBase->GetOwner()),
+			*GetNameSafe(CurrentBase),
+			*GetNameSafe(CurrentBase->GetOwner()));
+	}
+
+	LastKnownBase = CurrentBase;
+}
+
+void USubCrewMovementComponent::DebugDrawState()
+{
+	const USubInteriorFrameComponent* Frame = GetInteriorFrame();
+	if (!bDebugDrawCrewMovement || !Frame || !Frame->IsFrameValid() || !CharacterOwner || !GetWorld())
+	{
+		return;
+	}
+
+	const FTransform SubTransform = Frame->GetSubTransform();
+	const FVector FrameOrigin = SubTransform.GetLocation();
+	const FVector ExpectedWorldPosition = Frame->LocalToWorld(RelativeLocation);
+	const FVector ActualWorldPosition = CharacterOwner->GetActorLocation();
+
+	DrawDebugSphere(GetWorld(), FrameOrigin, 24.f, 12, FColor::Green, false, 0.f, 0, 1.5f);
+	DrawDebugSphere(GetWorld(), ExpectedWorldPosition, 16.f, 12, FColor::Cyan, false, 0.f, 0, 1.25f);
+	DrawDebugSphere(GetWorld(), ActualWorldPosition, 16.f, 12, FColor::Yellow, false, 0.f, 0, 1.25f);
+	DrawDebugLine(GetWorld(), ExpectedWorldPosition, ActualWorldPosition, FColor::Red, false, 0.f, 0, 1.25f);
+	DrawDebugDirectionalArrow(
+		GetWorld(),
+		FrameOrigin,
+		FrameOrigin + (SubTransform.GetUnitAxis(EAxis::X) * 100.f),
+		20.f,
+		FColor::Blue,
+		false,
+		0.f,
+		0,
+		2.f);
+}
+
+void USubCrewMovementComponent::LogPeriodicState(float DeltaTime)
+{
+	if (!bDebugLogCrewMovement || !CharacterOwner)
+	{
+		DebugLogTimer = 0.f;
+		return;
+	}
+
+	DebugLogTimer += DeltaTime;
+	if (DebugLogTimer < 1.f)
+	{
+		return;
+	}
+
+	DebugLogTimer = 0.f;
+
+	const USubInteriorFrameComponent* Frame = GetInteriorFrame();
+	const UPrimitiveComponent* CurrentBase = CharacterOwner->GetMovementBase();
+	const FTransform SubTransform = Frame ? Frame->GetSubTransform() : FTransform::Identity;
+	const FVector FrameDeltaLocation = Frame ? Frame->GetFrameLocationDelta() : FVector::ZeroVector;
+	const FRotator FrameDeltaRotation = Frame ? Frame->GetFrameRotationDelta() : FRotator::ZeroRotator;
+
+	UE_LOG(
+		LogSubCrewMovement,
+		Log,
+		TEXT("CrewState | Embarked=%d | Mode=%s | Base=%s on %s | WorldLoc=%s | RelLoc=%s | RelRot=%s | SubLoc=%s | FrameDeltaLoc=%s | FrameDeltaRot=%s"),
+		IsEmbarked() ? 1 : 0,
+		*GetMovementName(),
+		*GetNameSafe(CurrentBase),
+		*GetNameSafe(CurrentBase ? CurrentBase->GetOwner() : nullptr),
+		*CharacterOwner->GetActorLocation().ToCompactString(),
+		*RelativeLocation.ToCompactString(),
+		*RelativeRotation.ToCompactString(),
+		*SubTransform.GetLocation().ToCompactString(),
+		*FrameDeltaLocation.ToCompactString(),
+		*FrameDeltaRotation.ToCompactString());
 }
 
 void USubCrewMovementComponent::InitializeForSubmarine()
 {
 	USubInteriorFrameComponent* Frame = GetInteriorFrame();
-	if (Frame && Frame->IsFrameValid() && CharacterOwner)
+	const ASubCrewCharacter* Crew = Cast<ASubCrewCharacter>(CharacterOwner);
+	const bool bFrameValid = Frame && Frame->IsFrameValid() && CharacterOwner;
+
+	if (bFrameValid)
 	{
-		LastCompensatedSubTransform = Frame->GetSubTransform();
-		bHasLastCompensatedTransform = true;
 		UpdateRelativeState();
 	}
+
+	// Tick ordering fix: ensure this CMC ticks AFTER the submarine has moved AND after the frame delta is computed.
+	// Without this, UpdateBasedMovement sees zero base delta because the sub
+	// hasn't simulated yet this frame, causing one-frame-lag jitter.
+	// We also depend on the InteriorFrame to ensure Yaw compensation uses fresh deltas.
+	bool bSubTickSet = false;
+	bool bFrameTickSet = false;
+	
+	if (Crew && Crew->CurrentSubmarine)
+	{
+		if (USubMovementComponent* SubMov = Crew->CurrentSubmarine->SubMovement)
+		{
+			AddTickPrerequisiteComponent(SubMov);
+			bSubTickSet = true;
+		}
+
+		if (USubInteriorFrameComponent* FrameComp = Crew->CurrentSubmarine->InteriorFrame)
+		{
+			AddTickPrerequisiteComponent(FrameComp);
+			bFrameTickSet = true;
+		}
+	}
+
+	LastKnownBase.Reset();
+	DebugLogTimer = 0.f;
+
+	UE_LOG(
+		LogSubCrewMovement,
+		Log,
+		TEXT("InitializeForSubmarine | Sub=%s | CharacterLoc=%s | RelLoc=%s | FrameValid=%d | SubPrereq=%d | FramePrereq=%d"),
+		*GetNameSafe(Crew ? Crew->CurrentSubmarine : nullptr),
+		CharacterOwner ? *CharacterOwner->GetActorLocation().ToCompactString() : TEXT("None"),
+		*RelativeLocation.ToCompactString(),
+		bFrameValid ? 1 : 0,
+		bSubTickSet ? 1 : 0,
+		bFrameTickSet ? 1 : 0);
 }

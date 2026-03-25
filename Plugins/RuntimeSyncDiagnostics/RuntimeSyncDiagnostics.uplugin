@@ -1,0 +1,23 @@
+{
+  "FileVersion": 3,
+  "Version": 1,
+  "VersionName": "0.1.0",
+  "FriendlyName": "Runtime Sync Diagnostics",
+  "Description": "Runtime multiplayer coherence diagnostics for UE5.",
+  "Category": "Debugging",
+  "CreatedBy": "DXV Systems",
+  "CreatedByURL": "",
+  "DocsURL": "",
+  "MarketplaceURL": "",
+  "SupportURL": "",
+  "CanContainContent": false,
+  "IsBetaVersion": true,
+  "Installed": false,
+  "Modules": [
+    {
+      "Name": "RuntimeSyncDiagnostics",
+      "Type": "Runtime",
+      "LoadingPhase": "Default"
+    }
+  ]
+}

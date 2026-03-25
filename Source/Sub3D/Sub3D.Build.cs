@@ -18,7 +18,8 @@ public class Sub3D : ModuleRules
 			"NetCore",
 			"ProceduralMeshComponent",
 			"GameplayTags",
-			"PCG"
+			"PCG",
+			"RuntimeSyncDiagnostics"
 		});
 
 		if (Target.bBuildEditor)
@@ -35,7 +36,8 @@ public class Sub3D : ModuleRules
 		{
 			"Sub3D",
 			"Sub3D/Submarine",
-			"Sub3D/WorldGen"
+			"Sub3D/WorldGen",
+			"Sub3D/Diagnostics"
 		});
 	}
 }
