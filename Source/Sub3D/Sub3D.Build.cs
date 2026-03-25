@@ -1,0 +1,41 @@
+using UnrealBuildTool;
+
+public class Sub3D : ModuleRules
+{
+	public Sub3D(ReadOnlyTargetRules Target) : base(Target)
+	{
+		PCHUsage = PCHUsageMode.UseExplicitOrSharedPCHs;
+
+		PublicDependencyModuleNames.AddRange(new string[]
+		{
+			"Core",
+			"CoreUObject",
+			"Engine",
+			"InputCore",
+			"EnhancedInput",
+			"UMG",
+			"Slate",
+			"NetCore",
+			"ProceduralMeshComponent",
+			"GameplayTags",
+			"PCG"
+		});
+
+		if (Target.bBuildEditor)
+		{
+			PrivateDependencyModuleNames.AddRange(new string[]
+			{
+				"AssetRegistry",
+				"MeshDescription",
+				"StaticMeshDescription"
+			});
+		}
+
+		PublicIncludePaths.AddRange(new string[]
+		{
+			"Sub3D",
+			"Sub3D/Submarine",
+			"Sub3D/WorldGen"
+		});
+	}
+}

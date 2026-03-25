@@ -1,0 +1,27 @@
+{
+	"FileVersion": 3,
+	"Version": 1,
+	"VersionName": "1.0",
+	"FriendlyName": "Level Switcher",
+	"Description": "A compact editor tool to switch levels quickly, manage favorites, and set startup level.",
+	"Category": "Editor",
+	"CreatedBy": "DXV Systems",
+	"CreatedByURL": "https://fab.com/sellers/dxv-systems",
+	"DocsURL": "https://github.com/Doro6z/LevelSwitcher/blob/main/Docs/LevelSwitcher_UserGuide.md",
+	"FabURL": "com.epicgames.launcher://ue/Fab/product/a34f6283-38be-4b6f-b64f-963b13ad163b",
+	"MarketplaceURL": "",
+	"SupportURL": "https://fab.com/sellers/dxv-systems",
+	"EngineVersion": "5.7.0",
+	"CanContainContent": false,
+	"IsBetaVersion": false,
+	"IsExperimentalVersion": false,
+	"Installed": false,
+	"Modules": [
+		{
+			"Name": "LevelSwitcher",
+			"Type": "Editor",
+			"LoadingPhase": "Default",
+			"PlatformAllowList": [ "Win64" ]
+		}
+	]
+}
