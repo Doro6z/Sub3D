@@ -2,6 +2,7 @@
 
 #include "CoreMinimal.h"
 #include "GameFramework/PlayerController.h"
+#include "SubSonarV2Types.h"
 #include "SubmarineTypes.h"
 #include "SubPlayerController.generated.h"
 
@@ -58,11 +59,22 @@ public:
 
 	// Force mode change on client to react visually (camera, HUD)
 	UFUNCTION(BlueprintCallable, Client, Reliable, Category = "Crew Control")
-	void ClientSetControlMode(ECrewControlMode Mode);
+	void ClientSetControlMode(ECrewControlMode Mode, ESubStationType StationType);
 
 	// BP hook called on client each time control mode is changed.
 	UFUNCTION(BlueprintImplementableEvent, Category = "Crew Control")
-	void BP_OnControlModeChanged(ECrewControlMode NewMode);
+	void BP_OnControlModeChanged(ECrewControlMode NewMode, ESubStationType StationType);
+
+	// Local-only lean state for sonar CRT focus. No server RPC.
+	UPROPERTY(BlueprintReadOnly, Category = "Crew Control|Sonar")
+	bool bSonarLeanActive = false;
+
+	// Toggle lean state from IA_SonarLean input (Pressed=true / Released=false).
+	UFUNCTION(BlueprintCallable, Category = "Crew Control|Sonar")
+	void SetSonarLeanActive(bool bActive);
+
+	UFUNCTION(BlueprintImplementableEvent, Category = "Crew Control|Sonar")
+	void BP_OnSonarLeanChanged(bool bActive);
 
 	// Route driving inputs directly from controller to station or sub
 	UFUNCTION(BlueprintCallable, Server, Unreliable, Category = "Crew Control")
@@ -82,7 +94,16 @@ public:
 	void ServerRouteBallastByIndex(int32 Index, float Target);
 
 	UFUNCTION(BlueprintCallable, Server, Reliable, Category = "Crew Control")
+	void ServerRouteBallastActive(bool bActive);
+
+	UFUNCTION(BlueprintCallable, Server, Reliable, Category = "Crew Control")
 	void ServerRoutePumpActive(bool bActive);
+
+	UFUNCTION(BlueprintCallable, Server, Reliable, Category = "Crew Control")
+	void ServerRoutePumpPower(float Value);
+
+	UFUNCTION(BlueprintCallable, Server, Reliable, Category = "Crew Control")
+	void ServerRouteEngineBoost(float Value);
 
 	UFUNCTION(BlueprintCallable, Server, Unreliable, Category = "Crew Control")
 	void ServerRouteTurretAim(FRotator Aim);
@@ -90,6 +111,51 @@ public:
 	UFUNCTION(BlueprintCallable, Server, Reliable, Category = "Crew Control")
 	void ServerRouteTurretFire(bool bHeld);
 
-private:
+	UFUNCTION(BlueprintCallable, Server, Reliable, Category = "Crew Control")
+	void ServerRouteDoorToggle(FName DoorId, bool bClosed);
+
+	// Fire a sonar ping — only accepted when CurrentControlMode == HelmDriving
+	UFUNCTION(BlueprintCallable, Server, Reliable, Category = "Crew Control")
+	void ServerRouteSonarPing();
+
+	// Hold sonar ping (Pressed=true / Released=false).
+	UFUNCTION(BlueprintCallable, Server, Reliable, Category = "Crew Control")
+	void ServerSetSonarPingHeld(bool bHeld);
+
+	// Local BP-facing helper: routes to server RPC.
+	UFUNCTION(BlueprintCallable, Category = "Crew Control|Sonar")
+	void TriggerSonarPing();
+
+	// Local BP-facing helper: routes to server RPC.
+	UFUNCTION(BlueprintCallable, Category = "Crew Control|Sonar")
+	void SetSonarPingHeld(bool bHeld);
+
+	UFUNCTION(BlueprintCallable, Server, Reliable, Category = "Crew Control|Sonar")
+	void ServerSetSonarMode(ESonarMode NewMode);
+
+	UFUNCTION(BlueprintCallable, Server, Reliable, Category = "Crew Control|Sonar")
+	void ServerSetSonarFocusBearing(float NewBearingDeg);
+
+	UFUNCTION(BlueprintCallable, Server, Reliable, Category = "Crew Control|Sonar")
+	void ServerSetSonarRangePreset(int32 NewPresetIndex);
+
+	UFUNCTION(BlueprintCallable, Server, Reliable, Category = "Crew Control|Sonar")
+	void ServerMarkSonarPriorityTrack(int32 TrackId, bool bPriority);
+
+	UFUNCTION(BlueprintCallable, Category = "Crew Control|Sonar")
+	void SetSonarMode(ESonarMode NewMode);
+
+	UFUNCTION(BlueprintCallable, Category = "Crew Control|Sonar")
+	void SetSonarFocusBearing(float NewBearingDeg);
+
+	UFUNCTION(BlueprintCallable, Category = "Crew Control|Sonar")
+	void SetSonarRangePreset(int32 NewPresetIndex);
+
+	UFUNCTION(BlueprintCallable, Category = "Crew Control|Sonar")
+	void MarkSonarPriorityTrack(int32 TrackId, bool bPriority);
+
+	UFUNCTION(BlueprintPure, Category = "Crew Control")
+	ASubmarineBase* GetResolvedCurrentSubmarine() const;
+
 	ASubmarineBase* ResolveCurrentSubmarine() const;
 };

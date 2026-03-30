@@ -12,7 +12,14 @@ class USubmarineCompartmentComponent;
 class USubmarineStationManagerComponent;
 class USubmarineRadarComponent;
 class USubInteriorFrameComponent;
+class UBreachVfxManagerComponent;
+class UFloodWaterVisualsComponent;
+class USubmarineFeedbackDirectorComponent;
+class USubSonarComponent;
+class USubSonarSystemComponent;
 class ATurretActor;
+class ASubDoorActor;
+class UPrimitiveComponent;
 
 /**
  * The submarine entity. APawn, not ACharacter.
@@ -31,6 +38,7 @@ public:
 	virtual void OnConstruction(const FTransform& Transform) override;
 	virtual void BeginPlay() override;
 	virtual void Tick(float DeltaSeconds) override;
+	virtual float TakeDamage(float DamageAmount, struct FDamageEvent const& DamageEvent, AController* EventInstigator, AActor* DamageCauser) override;
 
 	// ── Components ────────────────────────────────────────────────────────
 
@@ -58,9 +66,27 @@ public:
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
 	USubInteriorFrameComponent* InteriorFrame;
 
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
+	UBreachVfxManagerComponent* BreachVfxManager;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
+	UFloodWaterVisualsComponent* FloodWaterVisuals;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components", meta = (DisplayName = "Feedback Director"))
+	USubmarineFeedbackDirectorComponent* FeedbackManager;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
+	USubSonarComponent* Sonar;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
+	USubSonarSystemComponent* SonarSystem;
+
 	// Attach point inside the sub for the helm station
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
 	USceneComponent* HelmSocket;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
+	USceneComponent* CrewSpawnSocketP1;
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
 	USceneComponent* TurretHardpoint;
@@ -92,6 +118,12 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Submarine|Damage")
 	float HullImpactRadiusCm = 18.f;
 
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Submarine|Damage")
+	float HullWeaponDamageRadiusCm = 35.f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Replicated, Category = "Submarine|Debug")
+	bool bFreezeMovementForTesting = false;
+
 	// Callback for hull collisions
 	UFUNCTION()
 	void OnHullHit(UPrimitiveComponent* HitComp, AActor* OtherActor,
@@ -100,6 +132,15 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Submarine|Collision")
 	void ApplyHullCollisionDefaults();
 
+	UFUNCTION(BlueprintPure, Category = "Submarine|Collision")
+	virtual UPrimitiveComponent* GetMovementCollisionComponent() const;
+
+	UFUNCTION(BlueprintCallable, Category = "Submarine|Collision")
+	void RefreshMovementCollisionBinding();
+
+	UFUNCTION(BlueprintCallable, CallInEditor, Category = "Submarine|Damage|Debug")
+	bool CreateDebugBreachOnFirstExteriorSheet(float DamageAmount = 150.f);
+
 	UFUNCTION(BlueprintCallable, Category = "Submarine")
 	void RefreshRepState();
 
@@ -107,13 +148,32 @@ public:
 	float GetCurrentDepthMeters() const;
 
 	UFUNCTION(BlueprintPure, Category = "Submarine")
+	FTransform GetPrimaryCrewSpawnTransform() const;
+
+	UFUNCTION(BlueprintPure, Category = "Submarine")
 	float GetTotalFloodWaterMassKg() const;
 
 	UFUNCTION(BlueprintCallable, Category = "Submarine")
 	void ResolveExteriorTurret();
 
+	UFUNCTION(BlueprintCallable, Category = "Submarine|Debug")
+	void SetFreezeMovementForTesting(bool bFreeze);
+
+	UFUNCTION(BlueprintPure, Category = "Submarine|Collision")
+	virtual bool IsMovementCollisionReady() const;
+
+	UFUNCTION(BlueprintCallable, Category = "Submarine|Collision")
+	virtual bool ValidateSpawnCollision() const;
+
+	UFUNCTION(BlueprintPure, Category = "Submarine|Doors")
+	ASubDoorActor* FindAttachedDoorById(FName DoorId) const;
+
 	UFUNCTION()
 	void OnRep_RepState();
 
 	virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const override;
+
+private:
+	UPROPERTY(Transient)
+	TWeakObjectPtr<UPrimitiveComponent> BoundMovementCollisionComponent;
 };

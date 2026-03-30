@@ -1,100 +1,167 @@
 #include "SubHelmWidget.h"
-#include "SubCrewCharacter.h"
+
+#include "Blueprint/UserWidget.h"
+#include "Blueprint/WidgetTree.h"
 #include "SubPlayerController.h"
+#include "SubSonarComponent.h"
+#include "SubSonarDisplayWidget.h"
+#include "SubSonarSystemComponent.h"
 #include "SubmarineBase.h"
-#include "SubMovementComponent.h"
 
-void USubHelmWidget::InitForCrew(ASubCrewCharacter* Crew)
+void USubHelmWidget::NativeConstruct()
 {
-	OwnerCrew = Crew;
-	OwnerController = Crew ? Cast<ASubPlayerController>(Crew->GetController()) : nullptr;
-	if (Crew && Crew->CurrentSubmarine)
-		SubMovement = Crew->CurrentSubmarine->SubMovement;
+	Super::NativeConstruct();
+	TryBindSonarDisplay();
 }
 
-void USubHelmWidget::ResolveRuntimeRefs()
+void USubHelmWidget::NativeTick(const FGeometry& MyGeometry, float InDeltaTime)
 {
-	if (!OwnerController)
-	{
-		OwnerController = Cast<ASubPlayerController>(GetOwningPlayer());
-	}
-
-	if (!OwnerCrew && OwnerController)
-	{
-		OwnerCrew = Cast<ASubCrewCharacter>(OwnerController->GetPawn());
-	}
-
-	if (!SubMovement && OwnerCrew && OwnerCrew->CurrentSubmarine)
-	{
-		SubMovement = OwnerCrew->CurrentSubmarine->SubMovement;
-	}
+	Super::NativeTick(MyGeometry, InDeltaTime);
+	TryBindSonarDisplay();
 }
 
-// ── Ballast control ───────────────────────────────────────────────────────────
+void USubHelmWidget::NativeDestruct()
+{
+	if (bOwnsAutoCreatedSonarDisplay && SonarDisplay)
+	{
+		SonarDisplay->RemoveFromParent();
+		SonarDisplay = nullptr;
+		bOwnsAutoCreatedSonarDisplay = false;
+	}
 
-void USubHelmWidget::SetGlobalBallast(float Target)
+	BoundSonar.Reset();
+	BoundSonarSystem.Reset();
+	Super::NativeDestruct();
+}
+
+void USubHelmWidget::RouteSonarPing()
 {
 	ResolveRuntimeRefs();
-	const float Clamped = FMath::Clamp(Target, 0.f, 1.f);
-
-	if (OwnerController)
+	if (OwnerController.IsValid())
 	{
-		OwnerController->ServerRouteBallastGlobal(Clamped);
+		OwnerController->ServerRouteSonarPing();
+	}
+}
+
+void USubHelmWidget::RouteSonarPingHeldStart()
+{
+	ResolveRuntimeRefs();
+	if (OwnerController.IsValid())
+	{
+		OwnerController->ServerSetSonarPingHeld(true);
+	}
+}
+
+void USubHelmWidget::RouteSonarPingHeldStop()
+{
+	ResolveRuntimeRefs();
+	if (OwnerController.IsValid())
+	{
+		OwnerController->ServerSetSonarPingHeld(false);
+	}
+}
+
+bool USubHelmWidget::IsSonarDisplayBound() const
+{
+	return SonarDisplay && BoundSonar.IsValid() && BoundSonarSystem.IsValid();
+}
+
+void USubHelmWidget::RouteSetSonarMode(ESonarMode NewMode)
+{
+	ResolveRuntimeRefs();
+	if (OwnerController.IsValid())
+	{
+		OwnerController->SetSonarMode(NewMode);
+	}
+}
+
+void USubHelmWidget::RouteSetSonarFocusBearing(float BearingDeg)
+{
+	ResolveRuntimeRefs();
+	if (OwnerController.IsValid())
+	{
+		OwnerController->SetSonarFocusBearing(BearingDeg);
+	}
+}
+
+void USubHelmWidget::RouteSetSonarRangePreset(int32 PresetIndex)
+{
+	ResolveRuntimeRefs();
+	if (OwnerController.IsValid())
+	{
+		OwnerController->SetSonarRangePreset(PresetIndex);
+	}
+}
+
+void USubHelmWidget::RouteMarkPriorityTrack(int32 TrackId, bool bPriority)
+{
+	ResolveRuntimeRefs();
+	if (OwnerController.IsValid())
+	{
+		OwnerController->MarkSonarPriorityTrack(TrackId, bPriority);
+	}
+}
+
+void USubHelmWidget::TryBindSonarDisplay()
+{
+	if (!SonarDisplay)
+	{
+		if (WidgetTree)
+		{
+			WidgetTree->ForEachWidget([this](UWidget* Widget)
+			{
+				if (!SonarDisplay)
+				{
+					SonarDisplay = Cast<USubSonarDisplayWidget>(Widget);
+				}
+			});
+		}
+
+		if (bAutoCreateSonarDisplayIfMissing)
+		{
+			APlayerController* PC = GetOwningPlayer();
+			if (PC)
+			{
+				UClass* DisplayClass = SonarDisplayClass ? SonarDisplayClass.Get() : USubSonarDisplayWidget::StaticClass();
+				USubSonarDisplayWidget* CreatedDisplay = CreateWidget<USubSonarDisplayWidget>(PC, DisplayClass);
+				if (CreatedDisplay)
+				{
+					CreatedDisplay->AddToViewport(AutoCreatedSonarDisplayZOrder);
+					SonarDisplay = CreatedDisplay;
+					bOwnsAutoCreatedSonarDisplay = true;
+				}
+			}
+		}
+
+		if (!SonarDisplay)
+		{
+			if (!bLoggedMissingSonarDisplay)
+			{
+				UE_LOG(LogTemp, Warning, TEXT("[%s] TryBindSonarDisplay: no USubSonarDisplayWidget found in widget tree and auto-create disabled."), *GetName());
+				bLoggedMissingSonarDisplay = true;
+			}
+			return;
+		}
+	}
+
+	ResolveRuntimeRefs();
+	if (!OwnerController.IsValid())
+	{
 		return;
 	}
 
-	if (OwnerCrew)
+	ASubmarineBase* Submarine = OwnerController->GetResolvedCurrentSubmarine();
+	if (!Submarine || !Submarine->Sonar || !Submarine->SonarSystem)
 	{
-		// Legacy fallback
-		OwnerCrew->Server_ResyncBallasts(Clamped);
-	}
-}
-
-void USubHelmWidget::SetBallastByIndex(int32 Index, float Target)
-{
-	ResolveRuntimeRefs();
-	const float Clamped = FMath::Clamp(Target, 0.f, 1.f);
-
-	if (OwnerController)
-	{
-		OwnerController->ServerRouteBallastByIndex(Index, Clamped);
 		return;
 	}
 
-	if (OwnerCrew)
+	if (BoundSonar.Get() == Submarine->Sonar && BoundSonarSystem.Get() == Submarine->SonarSystem)
 	{
-		// Legacy fallback
-		OwnerCrew->Server_SetBallastTarget(Index, Clamped);
+		return;
 	}
-}
 
-// ── Read state ────────────────────────────────────────────────────────────────
-
-float USubHelmWidget::GetBallastFillLevel(int32 Index) const
-{
-	const_cast<USubHelmWidget*>(this)->ResolveRuntimeRefs();
-	if (!SubMovement || !SubMovement->Ballasts.IsValidIndex(Index)) return -1.f;
-	return SubMovement->Ballasts[Index].FillLevel;
-}
-
-float USubHelmWidget::GetDepth() const
-{
-	const_cast<USubHelmWidget*>(this)->ResolveRuntimeRefs();
-	return SubMovement ? SubMovement->CurrentDepth : 0.f;
-}
-
-float USubHelmWidget::GetSpeedKmh() const
-{
-	const_cast<USubHelmWidget*>(this)->ResolveRuntimeRefs();
-	if (!SubMovement || !SubMovement->GetOwner()) return 0.f;
-	// Helm speed should reflect longitudinal speed, not total velocity magnitude.
-	const FVector LocalVelocity = SubMovement->GetOwner()->GetActorTransform().InverseTransformVector(SubMovement->Velocity);
-	return FMath::Abs(LocalVelocity.X) * 0.036f;
-}
-
-float USubHelmWidget::GetPitch() const
-{
-	const_cast<USubHelmWidget*>(this)->ResolveRuntimeRefs();
-	if (!SubMovement) return 0.f;
-	return SubMovement->GetOwner() ? SubMovement->GetOwner()->GetActorRotation().Pitch : 0.f;
+	SonarDisplay->InitForSonarSources(Submarine->Sonar, Submarine->SonarSystem);
+	BoundSonar = Submarine->Sonar;
+	BoundSonarSystem = Submarine->SonarSystem;
 }

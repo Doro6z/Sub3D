@@ -22,6 +22,9 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Submarine|Stations")
 	void UnregisterStation(ASubStationBase* Station);
 
+	UFUNCTION(BlueprintCallable, Category = "Submarine|Stations")
+	void DiscoverAttachedStations();
+
 	UFUNCTION(BlueprintPure, Category = "Submarine|Stations")
 	ASubStationBase* GetFirstStationOfType(ESubStationType StationType) const;
 

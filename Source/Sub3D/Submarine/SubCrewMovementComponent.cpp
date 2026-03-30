@@ -299,3 +299,30 @@ void USubCrewMovementComponent::InitializeForSubmarine()
 		bSubTickSet ? 1 : 0,
 		bFrameTickSet ? 1 : 0);
 }
+
+void USubCrewMovementComponent::RefreshEmbarkedFlooring()
+{
+	if (!CharacterOwner || !UpdatedComponent)
+	{
+		return;
+	}
+
+	SetMovementMode(MOVE_Walking);
+	Velocity = FVector::ZeroVector;
+	bForceNextFloorCheck = true;
+	FindFloor(UpdatedComponent->GetComponentLocation(), CurrentFloor, false);
+	SetBaseFromFloor(CurrentFloor);
+	UpdateFloorFromAdjustment();
+	CheckAndLogBaseChange();
+
+	UE_LOG(
+		LogSubCrewMovement,
+		Log,
+		TEXT("RefreshEmbarkedFlooring | Base=%s on %s | FloorWalkable=%d | FloorDist=%.2f | LineDist=%.2f | Loc=%s"),
+		*GetNameSafe(CharacterOwner->GetMovementBase()),
+		*GetNameSafe(CharacterOwner->GetMovementBase() ? CharacterOwner->GetMovementBase()->GetOwner() : nullptr),
+		CurrentFloor.IsWalkableFloor() ? 1 : 0,
+		CurrentFloor.FloorDist,
+		CurrentFloor.LineDist,
+		*CharacterOwner->GetActorLocation().ToCompactString());
+}

@@ -31,6 +31,9 @@ public:
 	bool IsDoorClosed(FName DoorId) const;
 
 	UFUNCTION(BlueprintPure, Category = "Submarine|Compartments")
+	bool TryGetDoorState(FName DoorId, FDoorState& OutDoorState) const;
+
+	UFUNCTION(BlueprintPure, Category = "Submarine|Compartments")
 	float GetCompartmentFlood01(FName CompartmentId) const;
 
 	UFUNCTION(BlueprintPure, Category = "Submarine|Compartments")

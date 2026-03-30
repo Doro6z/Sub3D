@@ -16,6 +16,7 @@
 #include "SkeletonResolver.h"
 #include "SonarFieldComponent.h"
 #include "TraversalTopologyGenerator.h"
+#include "Components/ArrowComponent.h"
 #include "Components/StaticMeshComponent.h"
 #include "Engine/StaticMesh.h"
 #include "Engine/CollisionProfile.h"
@@ -37,6 +38,61 @@ DEFINE_LOG_CATEGORY(LogRouteGen);
 namespace
 {
 static const TCHAR* BakedRouteComponentName = TEXT("BakedRouteMesh");
+static const TCHAR* GeneratedRouteComponentTag = TEXT("GeneratedRoutePMC");
+static const TCHAR* GeneratedRouteSectionPrefix = TEXT("RouteSection_");
+
+void ConfigureEndpointMarker(UArrowComponent* Marker, const FColor& Color)
+{
+	if (!IsValid(Marker))
+	{
+		return;
+	}
+
+	Marker->ArrowColor = Color;
+	Marker->ArrowLength = 600.f;
+	Marker->ArrowSize = 1.5f;
+	Marker->SetHiddenInGame(true);
+	Marker->SetIsVisualizationComponent(true);
+	Marker->bTreatAsASprite = true;
+	Marker->bUseInEditorScaling = false;
+	Marker->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+}
+
+void ConfigurePlacedEndpointOverrideMarker(UArrowComponent* Marker, const FColor& Color)
+{
+	if (!IsValid(Marker))
+	{
+		return;
+	}
+
+	Marker->ArrowColor = Color;
+	Marker->ArrowLength = 800.f;
+	Marker->ArrowSize = 2.f;
+	Marker->SetHiddenInGame(true);
+	Marker->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+}
+
+void ApplySubmarineCollisionResponses(UPrimitiveComponent* PrimitiveComponent)
+{
+	if (!IsValid(PrimitiveComponent))
+	{
+		return;
+	}
+
+	PrimitiveComponent->SetCollisionResponseToChannel(ECC_GameTraceChannel1, ECR_Block);
+	PrimitiveComponent->SetCollisionResponseToChannel(ECC_GameTraceChannel2, ECR_Ignore);
+}
+
+bool IsManagedGeneratedRouteMeshComponent(const UProceduralMeshComponent* PMC)
+{
+	if (!IsValid(PMC))
+	{
+		return false;
+	}
+
+	return PMC->ComponentHasTag(FName(GeneratedRouteComponentTag))
+		|| PMC->GetName().StartsWith(GeneratedRouteSectionPrefix);
+}
 
 void MixHash(uint32& H, uint32 V)
 {
@@ -405,6 +461,48 @@ ATraversalRouteActor::ATraversalRouteActor()
 	SetRootComponent(Root);
 
 	SonarField = CreateDefaultSubobject<USonarFieldComponent>(TEXT("SonarField"));
+
+	RouteStartMarker = CreateDefaultSubobject<UArrowComponent>(TEXT("RouteStartMarker"));
+	RouteStartMarker->SetupAttachment(RootComponent);
+	ConfigureEndpointMarker(RouteStartMarker, FColor::Green);
+
+	RouteStartDockMarker = CreateDefaultSubobject<UArrowComponent>(TEXT("RouteStartDockMarker"));
+	RouteStartDockMarker->SetupAttachment(RootComponent);
+	ConfigureEndpointMarker(RouteStartDockMarker, FColor::Cyan);
+
+	RouteEndMarker = CreateDefaultSubobject<UArrowComponent>(TEXT("RouteEndMarker"));
+	RouteEndMarker->SetupAttachment(RootComponent);
+	ConfigureEndpointMarker(RouteEndMarker, FColor(255, 196, 0));
+
+	RouteEndDockMarker = CreateDefaultSubobject<UArrowComponent>(TEXT("RouteEndDockMarker"));
+	RouteEndDockMarker->SetupAttachment(RootComponent);
+	ConfigureEndpointMarker(RouteEndDockMarker, FColor::Magenta);
+
+	PlacedRouteStartOverride = CreateDefaultSubobject<UArrowComponent>(TEXT("PlacedRouteStartOverride"));
+	PlacedRouteStartOverride->SetupAttachment(RootComponent);
+	ConfigurePlacedEndpointOverrideMarker(PlacedRouteStartOverride, FColor::Green);
+
+	PlacedRouteStartDockOverride = CreateDefaultSubobject<UArrowComponent>(TEXT("PlacedRouteStartDockOverride"));
+	PlacedRouteStartDockOverride->SetupAttachment(RootComponent);
+	ConfigurePlacedEndpointOverrideMarker(PlacedRouteStartDockOverride, FColor::Cyan);
+
+	PlacedRouteEndOverride = CreateDefaultSubobject<UArrowComponent>(TEXT("PlacedRouteEndOverride"));
+	PlacedRouteEndOverride->SetupAttachment(RootComponent);
+	ConfigurePlacedEndpointOverrideMarker(PlacedRouteEndOverride, FColor(255, 196, 0));
+
+	PlacedRouteEndDockOverride = CreateDefaultSubobject<UArrowComponent>(TEXT("PlacedRouteEndDockOverride"));
+	PlacedRouteEndDockOverride->SetupAttachment(RootComponent);
+	ConfigurePlacedEndpointOverrideMarker(PlacedRouteEndDockOverride, FColor::Magenta);
+
+	RefreshEndpointDebugMarkers();
+	RefreshPlacedEndpointOverrideMarkers();
+}
+
+void ATraversalRouteActor::OnConstruction(const FTransform& Transform)
+{
+	Super::OnConstruction(Transform);
+	RefreshEndpointDebugMarkers();
+	RefreshPlacedEndpointOverrideMarkers();
 }
 
 void ATraversalRouteActor::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const
@@ -417,7 +515,13 @@ void ATraversalRouteActor::BeginPlay()
 {
 	Super::BeginPlay();
 
-	if ((BakedStaticMeshAsset && BakedRouteHash != 0) || (bAutoResolveBakedAssetFromHash && ResolveBuildHashForCurrentState() != 0))
+	RefreshEndpointDebugMarkers();
+	RefreshPlacedEndpointOverrideMarkers();
+
+	SetBakedStaticMeshRuntimeActive(bUseBakedStaticMeshAtRuntime);
+
+	if (bUseBakedStaticMeshAtRuntime
+		&& ((BakedStaticMeshAsset && BakedRouteHash != 0) || (bAutoResolveBakedAssetFromHash && ResolveBuildHashForCurrentState() != 0)))
 	{
 		TryResolveBakedAssetForHash(ResolveBuildHashForCurrentState());
 	}
@@ -463,6 +567,7 @@ void ATraversalRouteActor::EnsureBakedStaticMeshComponent()
 	AddInstanceComponent(BakedStaticMeshComponent);
 	BakedStaticMeshComponent->AttachToComponent(GetRootComponent(), FAttachmentTransformRules::KeepRelativeTransform);
 	BakedStaticMeshComponent->SetCollisionProfileName(UCollisionProfile::BlockAll_ProfileName);
+	ApplySubmarineCollisionResponses(BakedStaticMeshComponent);
 	BakedStaticMeshComponent->SetMobility(EComponentMobility::Static);
 	BakedStaticMeshComponent->RegisterComponent();
 }
@@ -476,15 +581,28 @@ void ATraversalRouteActor::ApplyBakedStaticMeshAsset(UStaticMesh* InMeshAsset)
 		BakedStaticMeshComponent->SetStaticMesh(InMeshAsset);
 		BakedStaticMeshComponent->EmptyOverrideMaterials();
 		RefreshVisualDebugMaterials();
-		const bool bHasMesh = IsValid(InMeshAsset);
-		const ERouteMeshCollisionMode ActiveBakedCollisionMode = ResolveCollisionModeForStrategy(SurfaceBuildSettings, true);
-		BakedStaticMeshComponent->SetVisibility(bHasMesh);
-		BakedStaticMeshComponent->SetHiddenInGame(!bHasMesh);
-		BakedStaticMeshComponent->SetCollisionEnabled(
-			bHasMesh
-				? RuntimeCollisionEnabledFromMode(ActiveBakedCollisionMode)
-				: ECollisionEnabled::NoCollision);
+		ApplySubmarineCollisionResponses(BakedStaticMeshComponent);
+		SetBakedStaticMeshRuntimeActive(bUseBakedStaticMeshAtRuntime);
 	}
+}
+
+void ATraversalRouteActor::SetBakedStaticMeshRuntimeActive(bool bActive)
+{
+	if (!IsValid(BakedStaticMeshComponent))
+	{
+		return;
+	}
+
+	const bool bHasMesh = IsValid(BakedStaticMeshAsset) && IsValid(BakedStaticMeshComponent->GetStaticMesh());
+	const bool bShouldBeActive = bActive && bHasMesh;
+	const ERouteMeshCollisionMode ActiveBakedCollisionMode = ResolveCollisionModeForStrategy(SurfaceBuildSettings, true);
+
+	BakedStaticMeshComponent->SetVisibility(bShouldBeActive);
+	BakedStaticMeshComponent->SetHiddenInGame(!bShouldBeActive);
+	BakedStaticMeshComponent->SetCollisionEnabled(
+		bShouldBeActive
+			? RuntimeCollisionEnabledFromMode(ActiveBakedCollisionMode)
+			: ECollisionEnabled::NoCollision);
 }
 
 void ATraversalRouteActor::ConfigureCampaignDebugView(bool bEnableSegmentTint,
@@ -644,6 +762,11 @@ FString ATraversalRouteActor::BuildBakedAssetObjectPath(uint32 BuildHash) const
 
 bool ATraversalRouteActor::TryResolveBakedAssetForHash(uint32 BuildHash)
 {
+	if (!bUseBakedStaticMeshAtRuntime)
+	{
+		return false;
+	}
+
 	if (BuildHash == 0)
 	{
 		return false;
@@ -682,7 +805,7 @@ void ATraversalRouteActor::RebuildManagedMeshComponentList()
 
 	for (UProceduralMeshComponent* PMC : FoundComponents)
 	{
-		if (!IsValid(PMC))
+		if (!IsManagedGeneratedRouteMeshComponent(PMC))
 		{
 			continue;
 		}
@@ -846,26 +969,222 @@ void ATraversalRouteActor::UpdateRouteEndpointTransforms(const TArray<FTraversal
 			}
 		}
 	}
+
+	RefreshEndpointDebugMarkers();
+	LogRouteEndpointDebugSummaryInternal();
 }
 
 FTransform ATraversalRouteActor::GetRouteStartTransformWorld() const
 {
+	if (bUsePlacedEndpointOverrides && IsValid(PlacedRouteStartOverride))
+	{
+		return PlacedRouteStartOverride->GetComponentTransform();
+	}
+
 	return RouteStartTransform * GetActorTransform();
 }
 
 FTransform ATraversalRouteActor::GetRouteEndTransformWorld() const
 {
+	if (bUsePlacedEndpointOverrides && IsValid(PlacedRouteEndOverride))
+	{
+		return PlacedRouteEndOverride->GetComponentTransform();
+	}
+
 	return RouteEndTransform * GetActorTransform();
 }
 
 FTransform ATraversalRouteActor::GetRouteStartDockTransformWorld() const
 {
+	if (bUsePlacedEndpointOverrides && IsValid(PlacedRouteStartDockOverride))
+	{
+		return PlacedRouteStartDockOverride->GetComponentTransform();
+	}
+
 	return RouteStartDockTransform * GetActorTransform();
 }
 
 FTransform ATraversalRouteActor::GetRouteEndDockTransformWorld() const
 {
+	if (bUsePlacedEndpointOverrides && IsValid(PlacedRouteEndDockOverride))
+	{
+		return PlacedRouteEndDockOverride->GetComponentTransform();
+	}
+
 	return RouteEndDockTransform * GetActorTransform();
+}
+
+void ATraversalRouteActor::LogRouteEndpointDebugSummary()
+{
+	LogRouteEndpointDebugSummaryInternal();
+}
+
+void ATraversalRouteActor::CopyComputedEndpointsToPlacedOverrides()
+{
+	if (IsValid(PlacedRouteStartOverride))
+	{
+		PlacedRouteStartOverride->SetRelativeTransform(RouteStartTransform);
+	}
+
+	if (IsValid(PlacedRouteStartDockOverride))
+	{
+		PlacedRouteStartDockOverride->SetRelativeTransform(RouteStartDockTransform);
+	}
+
+	if (IsValid(PlacedRouteEndOverride))
+	{
+		PlacedRouteEndOverride->SetRelativeTransform(RouteEndTransform);
+	}
+
+	if (IsValid(PlacedRouteEndDockOverride))
+	{
+		PlacedRouteEndDockOverride->SetRelativeTransform(RouteEndDockTransform);
+	}
+
+	bUsePlacedEndpointOverrides = true;
+	RefreshPlacedEndpointOverrideMarkers();
+	LogRouteEndpointDebugSummaryInternal();
+}
+
+void ATraversalRouteActor::RefreshEndpointDebugMarkers()
+{
+	UpdateEndpointDebugMarker(RouteStartMarker, RouteStartTransform, bHasRouteStartTransform, RouteStartRadiusCm);
+	UpdateEndpointDebugMarker(RouteStartDockMarker, RouteStartDockTransform, bHasRouteStartDockTransform, RouteStartDockRadiusCm);
+	UpdateEndpointDebugMarker(RouteEndMarker, RouteEndTransform, bHasRouteEndTransform, RouteEndRadiusCm);
+	UpdateEndpointDebugMarker(RouteEndDockMarker, RouteEndDockTransform, bHasRouteEndDockTransform, RouteEndDockRadiusCm);
+}
+
+void ATraversalRouteActor::RefreshPlacedEndpointOverrideMarkers()
+{
+	const bool bShowPlacedMarkers = bUsePlacedEndpointOverrides;
+	if (IsValid(PlacedRouteStartOverride))
+	{
+		PlacedRouteStartOverride->SetVisibility(bShowPlacedMarkers);
+	}
+	if (IsValid(PlacedRouteStartDockOverride))
+	{
+		PlacedRouteStartDockOverride->SetVisibility(bShowPlacedMarkers);
+	}
+	if (IsValid(PlacedRouteEndOverride))
+	{
+		PlacedRouteEndOverride->SetVisibility(bShowPlacedMarkers);
+	}
+	if (IsValid(PlacedRouteEndDockOverride))
+	{
+		PlacedRouteEndDockOverride->SetVisibility(bShowPlacedMarkers);
+	}
+}
+
+void ATraversalRouteActor::UpdateEndpointDebugMarker(UArrowComponent* Marker,
+	const FTransform& EndpointTransform,
+	bool bHasTransform,
+	float RadiusCm)
+{
+	if (!IsValid(Marker))
+	{
+		return;
+	}
+
+	const bool bShowMarker = bShowEndpointDebugMarkers && bHasTransform;
+	Marker->SetVisibility(bShowMarker);
+	Marker->SetHiddenInGame(true);
+
+	if (!bShowMarker)
+	{
+		return;
+	}
+
+	Marker->SetRelativeTransform(EndpointTransform);
+	Marker->ArrowLength = FMath::Clamp(RadiusCm * 0.4f, 300.f, 3000.f);
+	Marker->ArrowSize = FMath::Clamp(RadiusCm / 2000.f, 1.f, 4.f);
+}
+
+void ATraversalRouteActor::LogRouteEndpointDebugSummaryInternal() const
+{
+	const FTransform ActorTransform = GetActorTransform();
+	const FTransform StartWorld = RouteStartTransform * ActorTransform;
+	const FTransform StartDockWorld = RouteStartDockTransform * ActorTransform;
+	const FTransform EndWorld = RouteEndTransform * ActorTransform;
+	const FTransform EndDockWorld = RouteEndDockTransform * ActorTransform;
+
+	const float StartDockOffsetCm = bHasRouteStartTransform && bHasRouteStartDockTransform
+		? FVector::Distance(StartWorld.GetLocation(), StartDockWorld.GetLocation())
+		: 0.f;
+	const float EndDockOffsetCm = bHasRouteEndTransform && bHasRouteEndDockTransform
+		? FVector::Distance(EndWorld.GetLocation(), EndDockWorld.GetLocation())
+		: 0.f;
+
+	UE_LOG(
+		LogRouteGen,
+		Log,
+		TEXT("[RouteEndpoints] Override=%d | Start=%d StartDock=%d End=%d EndDock=%d | StartRadius=%.0f StartDockRadius=%.0f EndRadius=%.0f EndDockRadius=%.0f | StartDockOffset=%.0f EndDockOffset=%.0f"),
+		bUsePlacedEndpointOverrides ? 1 : 0,
+		bHasRouteStartTransform ? 1 : 0,
+		bHasRouteStartDockTransform ? 1 : 0,
+		bHasRouteEndTransform ? 1 : 0,
+		bHasRouteEndDockTransform ? 1 : 0,
+		RouteStartRadiusCm,
+		RouteStartDockRadiusCm,
+		RouteEndRadiusCm,
+		RouteEndDockRadiusCm,
+		StartDockOffsetCm,
+		EndDockOffsetCm);
+
+	if (bHasRouteStartTransform)
+	{
+		UE_LOG(
+			LogRouteGen,
+			Log,
+			TEXT("[RouteEndpoints] StartWorld=(%.0f, %.0f, %.0f) Forward=(%.2f, %.2f, %.2f)"),
+			StartWorld.GetLocation().X,
+			StartWorld.GetLocation().Y,
+			StartWorld.GetLocation().Z,
+			StartWorld.GetRotation().GetForwardVector().X,
+			StartWorld.GetRotation().GetForwardVector().Y,
+			StartWorld.GetRotation().GetForwardVector().Z);
+	}
+
+	if (bHasRouteStartDockTransform)
+	{
+		UE_LOG(
+			LogRouteGen,
+			Log,
+			TEXT("[RouteEndpoints] StartDockWorld=(%.0f, %.0f, %.0f) Forward=(%.2f, %.2f, %.2f)"),
+			StartDockWorld.GetLocation().X,
+			StartDockWorld.GetLocation().Y,
+			StartDockWorld.GetLocation().Z,
+			StartDockWorld.GetRotation().GetForwardVector().X,
+			StartDockWorld.GetRotation().GetForwardVector().Y,
+			StartDockWorld.GetRotation().GetForwardVector().Z);
+	}
+
+	if (bHasRouteEndTransform)
+	{
+		UE_LOG(
+			LogRouteGen,
+			Log,
+			TEXT("[RouteEndpoints] EndWorld=(%.0f, %.0f, %.0f) Forward=(%.2f, %.2f, %.2f)"),
+			EndWorld.GetLocation().X,
+			EndWorld.GetLocation().Y,
+			EndWorld.GetLocation().Z,
+			EndWorld.GetRotation().GetForwardVector().X,
+			EndWorld.GetRotation().GetForwardVector().Y,
+			EndWorld.GetRotation().GetForwardVector().Z);
+	}
+
+	if (bHasRouteEndDockTransform)
+	{
+		UE_LOG(
+			LogRouteGen,
+			Log,
+			TEXT("[RouteEndpoints] EndDockWorld=(%.0f, %.0f, %.0f) Forward=(%.2f, %.2f, %.2f)"),
+			EndDockWorld.GetLocation().X,
+			EndDockWorld.GetLocation().Y,
+			EndDockWorld.GetLocation().Z,
+			EndDockWorld.GetRotation().GetForwardVector().X,
+			EndDockWorld.GetRotation().GetForwardVector().Y,
+			EndDockWorld.GetRotation().GetForwardVector().Z);
+	}
 }
 
 uint32 ATraversalRouteActor::ComputeBuildHash(const FRouteGenSpec& Spec, const FRouteSeedCascade& Seeds) const
@@ -1276,9 +1595,20 @@ void ATraversalRouteActor::SpawnMeshComponentSection(const TArray<FRouteMeshChun
 		this,
 		UProceduralMeshComponent::StaticClass(),
 		FName(*FString::Printf(TEXT("RouteSection_%03d"), SectionIndex)));
-	UProceduralMeshComponent* PMC = NewObject<UProceduralMeshComponent>(this, ComponentName);
-	PMC->CreationMethod = EComponentCreationMethod::Instance;
-	AddInstanceComponent(PMC);
+	const EObjectFlags RouteMeshFlags = bPersistGeneratedRouteMeshInLevel
+		? RF_Transactional
+		: RF_Transient | RF_TextExportTransient;
+	UProceduralMeshComponent* PMC = NewObject<UProceduralMeshComponent>(this, ComponentName, RouteMeshFlags);
+	PMC->ComponentTags.AddUnique(FName(GeneratedRouteComponentTag));
+	if (bPersistGeneratedRouteMeshInLevel)
+	{
+		PMC->CreationMethod = EComponentCreationMethod::Instance;
+		AddInstanceComponent(PMC);
+	}
+	else
+	{
+		AddOwnedComponent(PMC);
+	}
 	PMC->AttachToComponent(GetRootComponent(), FAttachmentTransformRules::KeepRelativeTransform);
 	PMC->RegisterComponent();
 
@@ -1292,6 +1622,8 @@ void ATraversalRouteActor::SpawnMeshComponentSection(const TArray<FRouteMeshChun
 		Tangents,
 		HasAuthority() && bSectionCollision && ResolveCollisionModeForStrategy(SurfaceBuildSettings, false) != ERouteMeshCollisionMode::None);
 	PMC->SetCollisionEnabled(RuntimeCollisionEnabledFromMode(ResolveCollisionModeForStrategy(SurfaceBuildSettings, false)));
+	PMC->SetCollisionProfileName(UCollisionProfile::BlockAll_ProfileName);
+	ApplySubmarineCollisionResponses(PMC);
 
 	if (bUseDebugVertexColorMaterial && IsValid(DebugVertexColorMaterial))
 	{
@@ -1337,6 +1669,7 @@ void ATraversalRouteActor::ClearMeshComponents()
 	{
 		if (IsValid(PMC))
 		{
+			RemoveOwnedComponent(PMC);
 			RemoveInstanceComponent(PMC);
 			PMC->DestroyComponent();
 		}
@@ -1380,6 +1713,24 @@ void ATraversalRouteActor::RebakeInEditor()
 #endif
 }
 
+void ATraversalRouteActor::PurgeGeneratedRouteMeshComponents()
+{
+#if WITH_EDITOR
+	Modify();
+	RebuildManagedMeshComponentList();
+	const int32 PurgedComponentCount = MeshComponents.Num();
+	const int32 PurgedTriangleCount = TotalTriangles;
+	ClearMeshComponents();
+	MarkPackageDirty();
+	UE_LOG(LogRouteGen, Warning,
+		TEXT("[Persistence] Purged %d generated route PMCs from %s. PurgedTriangles=%d PersistInLevel=%d"),
+		PurgedComponentCount,
+		*GetName(),
+		PurgedTriangleCount,
+		bPersistGeneratedRouteMeshInLevel ? 1 : 0);
+#endif
+}
+
 void ATraversalRouteActor::BakeCurrentRouteToStaticMeshAsset()
 {
 #if WITH_EDITOR
@@ -1397,7 +1748,7 @@ void ATraversalRouteActor::BakeCurrentRouteToStaticMeshAsset()
 		UE_LOG(LogRouteGen, Log, TEXT("[Bake] Reusing existing baked asset %s"), *ObjectPath);
 		BakedRouteHash = (int32)BuildHash;
 		ApplyBakedStaticMeshAsset(ExistingAsset);
-		if (bReplaceGeneratedMeshWithBakedAsset)
+		if (bUseBakedStaticMeshAtRuntime && bReplaceGeneratedMeshWithBakedAsset)
 		{
 			ClearMeshComponents();
 		}
@@ -1515,7 +1866,7 @@ void ATraversalRouteActor::BakeCurrentRouteToStaticMeshAsset()
 	UE_LOG(LogRouteGen, Log, TEXT("[Bake] Created baked route asset %s Triangles=%d"), *ObjectPath, TriangleCount);
 	BakedRouteHash = (int32)BuildHash;
 	ApplyBakedStaticMeshAsset(StaticMesh);
-	if (bReplaceGeneratedMeshWithBakedAsset)
+	if (bUseBakedStaticMeshAtRuntime && bReplaceGeneratedMeshWithBakedAsset)
 	{
 		ClearMeshComponents();
 	}

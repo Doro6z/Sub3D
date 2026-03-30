@@ -38,6 +38,14 @@
 		{
 			"Name": "RuntimeSyncDiagnostics",
 			"Enabled": true
+		},
+		{
+			"Name": "Niagara",
+			"Enabled": true
+		},
+		{
+			"Name": "UnrealMCP",
+			"Enabled": true
 		}
 	]
 }

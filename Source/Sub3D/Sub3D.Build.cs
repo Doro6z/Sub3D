@@ -15,9 +15,11 @@ public class Sub3D : ModuleRules
 			"EnhancedInput",
 			"UMG",
 			"Slate",
+			"SlateCore",
 			"NetCore",
 			"ProceduralMeshComponent",
 			"GameplayTags",
+			"Niagara",
 			"PCG",
 			"RuntimeSyncDiagnostics"
 		});

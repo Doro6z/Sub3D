@@ -28,6 +28,30 @@ void USubmarineStationManagerComponent::UnregisterStation(ASubStationBase* Stati
 	RegisteredStations.Remove(Station);
 }
 
+void USubmarineStationManagerComponent::DiscoverAttachedStations()
+{
+	AActor* Owner = GetOwner();
+	if (!Owner)
+	{
+		return;
+	}
+
+	TArray<AActor*> AttachedActors;
+	Owner->GetAttachedActors(AttachedActors, true);
+
+	RegisteredStations.Empty();
+
+	for (AActor* Actor : AttachedActors)
+	{
+		if (ASubStationBase* Station = Cast<ASubStationBase>(Actor))
+		{
+			RegisterStation(Station);
+		}
+	}
+
+	UE_LOG(LogTemp, Log, TEXT("[%s] DiscoverAttachedStations: Registered %d stations."), *Owner->GetName(), RegisteredStations.Num());
+}
+
 ASubStationBase* USubmarineStationManagerComponent::GetFirstStationOfType(ESubStationType StationType) const
 {
 	for (ASubStationBase* Station : RegisteredStations)

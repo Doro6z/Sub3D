@@ -1,0 +1,51 @@
+<svg viewBox="0 0 1800 1280" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="title desc">
+  <title id="title">Systeme de symboles et regles de lecture</title>
+  <desc id="desc">Legende de symboles et mini exemple de lecture pour les planches du sous-marin.</desc>
+
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#f4efe6"/>
+    </marker>
+    <style><![CDATA[
+      .bg { fill: #0f1419; }
+      .panel { fill: #172028; stroke: #43525d; stroke-width: 2; }
+      .panelAlt { fill: #131b22; stroke: #34414a; stroke-width: 2; }
+      .frame { fill: none; stroke: #9ca8af; stroke-width: 4; }
+      .grid { fill: none; stroke: #34414a; stroke-width: 1; stroke-dasharray: 6 8; opacity: 0.45; }
+      .bulkhead { stroke: #98a4ad; stroke-width: 8; }
+      .doorGap { stroke: #0f1419; stroke-width: 14; }
+      .repair { fill: none; stroke: #ead59b; stroke-width: 4; stroke-dasharray: 12 10; }
+      .pathBand { fill: #f0eadb; opacity: 0.12; stroke: #f4efe6; stroke-width: 2; }
+      .dim { fill: none; stroke: #f4efe6; stroke-width: 2.2; }
+      .danger { fill: #de5a49; }
+      .ok { fill: #82c97b; }
+      .warn { fill: #e3b65b; }
+      .title { fill: #f4efe6; font: 700 42px Arial, 'Segoe UI', sans-serif; }
+      .subtitle { fill: #d1c9b8; font: 19px Arial, 'Segoe UI', sans-serif; }
+      .h1 { fill: #f4efe6; font: 700 28px Arial, 'Segoe UI', sans-serif; }
+      .h2 { fill: #f4efe6; font: 700 22px Arial, 'Segoe UI', sans-serif; }
+      .text { fill: #f4efe6; font: 19px Arial, 'Segoe UI', sans-serif; }
+      .small { fill: #d1c9b8; font: 17px Arial, 'Segoe UI', sans-serif; }
+      .mono { fill: #f4efe6; font: 17px Consolas, 'Courier New', monospace; }
+      .navFill { fill: #4a3b17; stroke: #d4a93a; stroke-width: 2.5; }
+      .ballFill { fill: #274854; stroke: #66b7c8; stroke-width: 2.5; }
+      .propFill { fill: #233c61; stroke: #5a95dc; stroke-width: 2.5; }
+      .confFill { fill: #4f3022; stroke: #c66e3a; stroke-width: 2.5; }
+      .senseFill { fill: #4a341a; stroke: #bb8638; stroke-width: 2.5; }
+      .navSolid { fill: #d4a93a; }
+      .ballSolid { fill: #66b7c8; }
+      .propSolid { fill: #5a95dc; }
+      .confSolid { fill: #c66e3a; }
+      .senseSolid { fill: #bb8638; }
+      .whiteStroke { fill: none; stroke: #f4efe6; stroke-width: 3; }
+      .tank { fill: #66b7c8; stroke: #d8f3fb; stroke-width: 2; }
+      .tag { fill: #e7d8a2; }
+      .tag2 { fill: #6a7c86; }
+      .tagText { fill: #0f1419; font: 700 16px Arial, 'Segoe UI', sans-serif; }
+      .tableLine { stroke: #34414a; stroke-width: 2; }
+    ]]></style>
+  </defs>
+
+  <rect class="bg" x="0" y="0" width="1800" height="1280"/>
+<text class="title" x="60" y="62">Planche 8 - Systeme de symboles et regles de lecture</text><text class="subtitle" x="60" y="98">Cette planche explique la grammaire graphique. Chaque signe a une seule signification et reste stable d&apos;une page a l&apos;autre.</text><rect class="panel" x="60" y="150" width="760" height="1020" rx="20" /><text class="h1" x="88" y="188" text-anchor="start"><tspan x="88" dy="0">Legende des symboles</tspan></text><rect class="ballFill" x="96" y="226" width="88" height="52" rx="12" /><text class="h2" x="210" y="246" text-anchor="start"><tspan x="210" dy="0">Compartiment ballast / pompage</tspan></text><text class="small" x="210" y="276" text-anchor="start"><tspan x="210" dy="0">zone dediee a l&apos;eau, au pompage et au trim.</tspan></text><rect class="navFill" x="96" y="330" width="88" height="52" rx="12" /><text class="h2" x="210" y="350" text-anchor="start"><tspan x="210" dy="0">Compartiment commande</tspan></text><text class="small" x="210" y="380" text-anchor="start"><tspan x="210" dy="0">volume ou le helm sert de repere principal.</tspan></text><rect class="propFill" x="96" y="434" width="88" height="52" rx="12" /><text class="h2" x="210" y="454" text-anchor="start"><tspan x="210" dy="0">Compartiment machine</tspan></text><text class="small" x="210" y="484" text-anchor="start"><tspan x="210" dy="0">masse lourde, energie, moteur, bruit.</tspan></text><rect class="confFill" x="96" y="538" width="88" height="52" rx="12" /><text class="h2" x="210" y="558" text-anchor="start"><tspan x="210" dy="0">Compartiment confinement / sas</tspan></text><text class="small" x="210" y="588" text-anchor="start"><tspan x="210" dy="0">porte, service arriere, tronc, fermeture.</tspan></text><rect class="tank" x="96" y="642" width="88" height="52" rx="12" /><text class="h2" x="210" y="662" text-anchor="start"><tspan x="210" dy="0">Ballast</tspan></text><text class="small" x="210" y="692" text-anchor="start"><tspan x="210" dy="0">masse d&apos;eau identifiee. Toujours avant ou arriere.</tspan></text><rect class="panelAlt" x="96" y="746" width="88" height="52" rx="12" /><text class="h2" x="210" y="766" text-anchor="start"><tspan x="210" dy="0">Surface technique</tspan></text><text class="small" x="210" y="796" text-anchor="start"><tspan x="210" dy="0">mur ou bloc de maintenance, jamais lecture principale.</tspan></text><line class="tableLine" x1="88" y1="874" x2="792" y2="874" /><text class="h2" x="88" y="916" text-anchor="start"><tspan x="88" dy="0">Autres signes</tspan></text><line class="bulkhead" x1="120" y1="970" x2="204" y2="970" /><line class="doorGap" x1="162" y1="948" x2="162" y2="992" /><text class="h2" x="228" y="964" text-anchor="start"><tspan x="228" dy="0">Cloison + ouverture de porte</tspan></text><text class="small" x="228" y="994" text-anchor="start"><tspan x="228" dy="0">Le trait epais dit : decision de confinement.</tspan></text><path class="repair" d="M114 1048 L206 1048" /><text class="h2" x="228" y="1042" text-anchor="start"><tspan x="228" dy="0">Frontage reparable</tspan></text><text class="small" x="228" y="1072" text-anchor="start"><tspan x="228" dy="0">Toujours contre un mur ou un panneau reserve.</tspan></text><polygon class="danger" points="132,1122 148,1154 116,1154" /><text class="h2" x="228" y="1144" text-anchor="start"><tspan x="228" dy="0">Triangle danger / breche</tspan></text><text class="small" x="228" y="1174" text-anchor="start"><tspan x="228" dy="0">Signale fuite, succion ou exposition verticale.</tspan></text><rect class="panel" x="860" y="150" width="880" height="620" rx="20" /><text class="h1" x="888" y="188" text-anchor="start"><tspan x="888" dy="0">Exemple minimal de lecture correcte</tspan></text><rect class="frame" x="900" y="282" width="640" height="260" rx="72" /><line class="grid" x1="1038" y1="300" x2="1038" y2="524" /><line class="grid" x1="1220" y1="300" x2="1220" y2="524" /><line class="grid" x1="1388" y1="300" x2="1388" y2="524" /><line class="bulkhead" x1="1080" y1="316" x2="1080" y2="506" /><line class="doorGap" x1="1080" y1="392" x2="1080" y2="450" /><line class="bulkhead" x1="1318" y1="316" x2="1318" y2="506" /><line class="doorGap" x1="1318" y1="392" x2="1318" y2="450" /><rect class="ballFill" x="938" y="332" width="190" height="190" rx="18" /><rect class="navFill" x="1130" y="332" width="200" height="190" rx="18" /><rect class="propFill" x="1332" y="332" width="158" height="190" rx="18" /><rect class="confFill" x="1492" y="332" width="108" height="190" rx="18" /><rect class="tank" x="960" y="362" width="132" height="56" rx="14" /><text class="mono" x="975" y="396" text-anchor="start"><tspan x="975" dy="0">Ballast avant</tspan></text><path class="navSolid" d="M1182 498 Q1214 452 1246 498 L1246 522 L1182 522 Z" /><rect class="senseSolid" x="1180" y="360" width="124" height="48" rx="12" /><rect class="propSolid" x="1372" y="360" width="108" height="48" rx="14" /><rect class="confSolid" x="1492" y="454" width="84" height="52" rx="14" /><rect class="ballSolid" x="1444" y="360" width="86" height="48" rx="14" /><rect class="panelAlt" x="1542" y="454" width="62" height="70" rx="12" /><rect class="pathBand" x="984" y="416" width="530" height="66" rx="18" /><path class="repair" d="M946 338 L946 514" /><path class="repair" d="M1260 338 L1260 514" /><path class="repair" d="M1494 338 L1494 514" /><polygon class="danger" points="1160,298 1176,330 1144,330" /><text class="small" x="1190" y="324" text-anchor="start"><tspan x="1190" dy="0">Exemple : danger plafond</tspan></text><text class="small" x="888" y="662" text-anchor="start"><tspan x="888" dy="0">Lecture attendue :</tspan><tspan x="888" dy="24">on identifie d&apos;abord les volumes,</tspan><tspan x="888" dy="24">puis la spine, puis les stations, puis les dangers.</tspan></text><rect class="panel" x="860" y="810" width="880" height="360" rx="20" /><text class="h1" x="888" y="848" text-anchor="start"><tspan x="888" dy="0">Regles d&apos;usage</tspan></text><text class="text" x="888" y="900" text-anchor="start"><tspan x="888" dy="0">1. Un symbole = une fonction. Ne jamais reutiliser le meme signe pour deux sens.</tspan><tspan x="888" dy="34">2. Le plan et le profil partagent la meme grille en X.</tspan><tspan x="888" dy="34">3. Le texte ne compense pas un symbole flou. Si le texte devient long, le signe est mauvais.</tspan><tspan x="888" dy="34">4. Les couleurs marquent la famille. La forme marque l&apos;objet exact.</tspan><tspan x="888" dy="34">5. Une porte etanche doit toujours rester plus lisible qu&apos;un tuyau ou qu&apos;une lampe.</tspan><tspan x="888" dy="34">6. Si deux libelles se chevauchent, la densite de la planche est deja trop forte.</tspan></text>
+</svg>

@@ -21,6 +21,10 @@ public:
 	UFUNCTION(BlueprintCallable)
 	bool SampleOcclusionAlongRay(const FVector& Start, const FVector& End, float& OutBlockage) const;
 
+	// Returns coarse water/edge points around a center for Sonar V2 topological seeding.
+	UFUNCTION(BlueprintCallable)
+	void CollectCoarseWaterSurfacePoints(const FVector& Center, float RadiusCm, int32 MaxPoints, TArray<FVector>& OutPoints) const;
+
 	// Debug: how many sonar voxels are loaded
 	UFUNCTION(BlueprintCallable)
 	int32 GetSonarVoxelCount() const;

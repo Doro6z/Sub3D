@@ -1,7 +1,11 @@
 #include "SubPlayerController.h"
 #include "SubStationInterface.h"
 #include "SubmarineBase.h"
+#include "SubSonarComponent.h"
+#include "SubSonarSystemComponent.h"
+#include "SubDoorActor.h"
 #include "SubmarineSystemsComponent.h"
+#include "SubmarineCompartmentComponent.h"
 #include "SubMovementComponent.h"
 #include "SubCrewCharacter.h"
 #include "Net/UnrealNetwork.h"
@@ -51,8 +55,17 @@ void ASubPlayerController::ServerEnterStation_Implementation(AActor* Station)
 
 	CurrentStation = Station;
 	CurrentStationType = ISubStationInterface::Execute_GetStationType(Station);
+	ASubmarineBase* StationSubmarine = ISubStationInterface::Execute_GetOwningSubmarine(Station);
 
 	ISubStationInterface::Execute_RequestEnterStation(Station, this);
+
+	if (ASubCrewCharacter* Crew = Cast<ASubCrewCharacter>(GetPawn()))
+	{
+		if (StationSubmarine && Crew->CurrentSubmarine != StationSubmarine)
+		{
+			Crew->SetCurrentSubmarine(StationSubmarine);
+		}
+	}
 
 	if (CurrentStationType == ESubStationType::Helm)
 	{
@@ -64,7 +77,17 @@ void ASubPlayerController::ServerEnterStation_Implementation(AActor* Station)
 	}
 	else
 	{
+		if (StationSubmarine && StationSubmarine->Sonar)
+		{
+			StationSubmarine->Sonar->StopContinuousPing();
+		}
+
 		CurrentControlMode = ECrewControlMode::StationUI;
+		if (bSonarLeanActive)
+		{
+			bSonarLeanActive = false;
+			BP_OnSonarLeanChanged(false);
+		}
 	}
 
 	UE_LOG(
@@ -77,7 +100,7 @@ void ASubPlayerController::ServerEnterStation_Implementation(AActor* Station)
 		static_cast<int32>(CurrentControlMode)
 	);
 
-	ClientSetControlMode(CurrentControlMode);
+	ClientSetControlMode(CurrentControlMode, CurrentStationType);
 }
 
 void ASubPlayerController::ServerEnterHelm_Implementation(AActor* Station)
@@ -97,6 +120,12 @@ void ASubPlayerController::ServerExitStation_Implementation()
 		static_cast<int32>(CurrentStationType)
 	);
 
+	ASubmarineBase* CurrentSubmarine = ResolveCurrentSubmarine();
+	if (CurrentSubmarine && CurrentSubmarine->Sonar)
+	{
+		CurrentSubmarine->Sonar->StopContinuousPing();
+	}
+
 	if (CurrentStation && CurrentStation->Implements<USubStationInterface>())
 	{
 		ISubStationInterface::Execute_RequestExitStation(CurrentStation, this);
@@ -105,6 +134,11 @@ void ASubPlayerController::ServerExitStation_Implementation()
 	CurrentStation = nullptr;
 	CurrentStationType = ESubStationType::None;
 	CurrentControlMode = ECrewControlMode::OnFoot;
+	if (bSonarLeanActive)
+	{
+		bSonarLeanActive = false;
+		BP_OnSonarLeanChanged(false);
+	}
 
 	if (ASubCrewCharacter* Crew = Cast<ASubCrewCharacter>(GetPawn()))
 	{
@@ -113,7 +147,7 @@ void ASubPlayerController::ServerExitStation_Implementation()
 
 	UE_LOG(LogSubController, Log, TEXT("[%s] ServerExitStation applied | Mode=OnFoot"), *GetName());
 
-	ClientSetControlMode(CurrentControlMode);
+	ClientSetControlMode(CurrentControlMode, ESubStationType::None);
 }
 
 void ASubPlayerController::ServerExitHelm_Implementation()
@@ -122,18 +156,37 @@ void ASubPlayerController::ServerExitHelm_Implementation()
 	ServerExitStation_Implementation();
 }
 
-void ASubPlayerController::ClientSetControlMode_Implementation(ECrewControlMode Mode)
+void ASubPlayerController::ClientSetControlMode_Implementation(ECrewControlMode Mode, ESubStationType StationType)
 {
 	UE_LOG(
 		LogSubController,
 		Log,
-		TEXT("[%s] ClientSetControlMode | Old=%d -> New=%d"),
+		TEXT("[%s] ClientSetControlMode | Old=%d -> New=%d | StationType=%d"),
 		*GetName(),
 		static_cast<int32>(CurrentControlMode),
-		static_cast<int32>(Mode)
+		static_cast<int32>(Mode),
+		static_cast<int32>(StationType)
 	);
 	CurrentControlMode = Mode;
-	BP_OnControlModeChanged(Mode);
+	if (CurrentControlMode != ECrewControlMode::HelmDriving && bSonarLeanActive)
+	{
+		bSonarLeanActive = false;
+		BP_OnSonarLeanChanged(false);
+	}
+	BP_OnControlModeChanged(Mode, StationType);
+}
+
+void ASubPlayerController::SetSonarLeanActive(bool bActive)
+{
+	const bool bAllowLean = (CurrentControlMode == ECrewControlMode::HelmDriving);
+	const bool bNewValue = bAllowLean ? bActive : false;
+	if (bSonarLeanActive == bNewValue)
+	{
+		return;
+	}
+
+	bSonarLeanActive = bNewValue;
+	BP_OnSonarLeanChanged(bSonarLeanActive);
 }
 
 void ASubPlayerController::ServerRouteHelmThrust_Implementation(float Value)
@@ -320,6 +373,22 @@ void ASubPlayerController::ServerRouteBallastByIndex_Implementation(int32 Index,
 	}
 }
 
+void ASubPlayerController::ServerRouteBallastActive_Implementation(bool bActive)
+{
+	if (CurrentControlMode == ECrewControlMode::OnFoot)
+	{
+		return;
+	}
+
+	if (ASubmarineBase* Submarine = ResolveCurrentSubmarine())
+	{
+		if (Submarine->Systems)
+		{
+			Submarine->Systems->SetBallastsActive(bActive);
+		}
+	}
+}
+
 void ASubPlayerController::ServerRoutePumpActive_Implementation(bool bActive)
 {
 	UE_LOG(
@@ -342,6 +411,38 @@ void ASubPlayerController::ServerRoutePumpActive_Implementation(bool bActive)
 		if (Submarine->Systems)
 		{
 			Submarine->Systems->SetPumpActive(bActive);
+		}
+	}
+}
+
+void ASubPlayerController::ServerRoutePumpPower_Implementation(float Value)
+{
+	if (CurrentControlMode == ECrewControlMode::OnFoot)
+	{
+		return;
+	}
+
+	if (ASubmarineBase* Submarine = ResolveCurrentSubmarine())
+	{
+		if (Submarine->Systems)
+		{
+			Submarine->Systems->SetPumpPower01(Value);
+		}
+	}
+}
+
+void ASubPlayerController::ServerRouteEngineBoost_Implementation(float Value)
+{
+	if (CurrentControlMode == ECrewControlMode::OnFoot)
+	{
+		return;
+	}
+
+	if (ASubmarineBase* Submarine = ResolveCurrentSubmarine())
+	{
+		if (Submarine->Systems)
+		{
+			Submarine->Systems->SetEngineBoost(Value);
 		}
 	}
 }
@@ -376,6 +477,165 @@ void ASubPlayerController::ServerRouteTurretFire_Implementation(bool bHeld)
 			Submarine->Systems->SetTurretFireHeld(bHeld);
 		}
 	}
+}
+
+void ASubPlayerController::ServerRouteDoorToggle_Implementation(FName DoorId, bool bClosed)
+{
+	if (ASubmarineBase* Submarine = ResolveCurrentSubmarine())
+	{
+		if (ASubDoorActor* DoorActor = Submarine->FindAttachedDoorById(DoorId))
+		{
+			DoorActor->SetDoorClosed(bClosed);
+			return;
+		}
+
+		if (Submarine->Compartments)
+		{
+			Submarine->Compartments->SetDoorClosed(DoorId, bClosed);
+		}
+	}
+}
+
+void ASubPlayerController::ServerRouteSonarPing_Implementation()
+{
+	if (CurrentControlMode != ECrewControlMode::HelmDriving)
+	{
+		UE_LOG(LogSubController, Verbose, TEXT("[%s] SonarPing ignored (Mode=%d)"), *GetName(), static_cast<int32>(CurrentControlMode));
+		return;
+	}
+
+	if (ASubmarineBase* Submarine = ResolveCurrentSubmarine())
+	{
+		if (Submarine->Sonar)
+		{
+			const bool bAccepted = Submarine->Sonar->TryFirePing();
+			UE_LOG(LogSubController, Verbose, TEXT("[%s] SonarPing routed | Accepted=%d | Sub=%s"), *GetName(), bAccepted ? 1 : 0, *GetNameSafe(Submarine));
+		}
+	}
+}
+
+void ASubPlayerController::ServerSetSonarPingHeld_Implementation(bool bHeld)
+{
+	if (CurrentControlMode != ECrewControlMode::HelmDriving && bHeld)
+	{
+		UE_LOG(LogSubController, Verbose, TEXT("[%s] SonarPingHeld ignored (Mode=%d)"), *GetName(), static_cast<int32>(CurrentControlMode));
+		return;
+	}
+
+	if (ASubmarineBase* Submarine = ResolveCurrentSubmarine())
+	{
+		if (Submarine->Sonar)
+		{
+			if (bHeld)
+			{
+				Submarine->Sonar->StartContinuousPing();
+			}
+			else
+			{
+				Submarine->Sonar->StopContinuousPing();
+			}
+			UE_LOG(LogSubController, Verbose, TEXT("[%s] SonarPingHeld routed | Held=%d | Sub=%s"), *GetName(), bHeld ? 1 : 0, *GetNameSafe(Submarine));
+		}
+	}
+}
+
+void ASubPlayerController::TriggerSonarPing()
+{
+	ServerRouteSonarPing();
+}
+
+void ASubPlayerController::SetSonarPingHeld(bool bHeld)
+{
+	ServerSetSonarPingHeld(bHeld);
+}
+
+void ASubPlayerController::ServerSetSonarMode_Implementation(ESonarMode NewMode)
+{
+	if (CurrentControlMode != ECrewControlMode::HelmDriving)
+	{
+		return;
+	}
+
+	if (ASubmarineBase* Submarine = ResolveCurrentSubmarine())
+	{
+		if (Submarine->SonarSystem)
+		{
+			Submarine->SonarSystem->SetSonarMode(NewMode);
+		}
+	}
+}
+
+void ASubPlayerController::ServerSetSonarFocusBearing_Implementation(float NewBearingDeg)
+{
+	if (CurrentControlMode != ECrewControlMode::HelmDriving)
+	{
+		return;
+	}
+
+	if (ASubmarineBase* Submarine = ResolveCurrentSubmarine())
+	{
+		if (Submarine->SonarSystem)
+		{
+			Submarine->SonarSystem->SetFocusBearing(NewBearingDeg);
+		}
+	}
+}
+
+void ASubPlayerController::ServerSetSonarRangePreset_Implementation(int32 NewPresetIndex)
+{
+	if (CurrentControlMode != ECrewControlMode::HelmDriving)
+	{
+		return;
+	}
+
+	if (ASubmarineBase* Submarine = ResolveCurrentSubmarine())
+	{
+		if (Submarine->SonarSystem)
+		{
+			Submarine->SonarSystem->SetRangePresetIndex(NewPresetIndex);
+		}
+	}
+}
+
+void ASubPlayerController::ServerMarkSonarPriorityTrack_Implementation(int32 TrackId, bool bPriority)
+{
+	if (CurrentControlMode != ECrewControlMode::HelmDriving)
+	{
+		return;
+	}
+
+	if (ASubmarineBase* Submarine = ResolveCurrentSubmarine())
+	{
+		if (Submarine->SonarSystem)
+		{
+			Submarine->SonarSystem->MarkPriorityTrack(TrackId, bPriority);
+		}
+	}
+}
+
+void ASubPlayerController::SetSonarMode(ESonarMode NewMode)
+{
+	ServerSetSonarMode(NewMode);
+}
+
+void ASubPlayerController::SetSonarFocusBearing(float NewBearingDeg)
+{
+	ServerSetSonarFocusBearing(NewBearingDeg);
+}
+
+void ASubPlayerController::SetSonarRangePreset(int32 NewPresetIndex)
+{
+	ServerSetSonarRangePreset(NewPresetIndex);
+}
+
+void ASubPlayerController::MarkSonarPriorityTrack(int32 TrackId, bool bPriority)
+{
+	ServerMarkSonarPriorityTrack(TrackId, bPriority);
+}
+
+ASubmarineBase* ASubPlayerController::GetResolvedCurrentSubmarine() const
+{
+	return ResolveCurrentSubmarine();
 }
 
 ASubmarineBase* ASubPlayerController::ResolveCurrentSubmarine() const

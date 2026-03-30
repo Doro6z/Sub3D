@@ -128,8 +128,22 @@ void USubmarineSystemsComponent::SetBallastTargetByIndex(int32 Index, float Targ
 	}
 }
 
+void USubmarineSystemsComponent::SetBallastsActive(bool bActive)
+{
+	CommandState.bBallastsActive = bActive;
+	if (bActive)
+	{
+		ResyncAllBallasts();
+	}
+}
+
 void USubmarineSystemsComponent::ResyncAllBallasts()
 {
+	if (!CommandState.bBallastsActive)
+	{
+		return;
+	}
+
 	if (ASubmarineBase* Sub = ResolveOwnerSubmarine())
 	{
 		if (Sub->SubMovement)

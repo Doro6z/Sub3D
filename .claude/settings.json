@@ -1,0 +1,15 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(wc -c ./reports/plans/*.md)",
+      "Read(//dev/**)",
+      "Bash(find /c/Dev/Sub3D -name *exit*procedure* -o -name *20260325*addendum*)",
+      "Bash(grep -r \"ApplyPointDamage\\\\|TakeDamage\" /c/Dev/Sub3D/Source/Sub3D/Submarine/*.cpp)",
+      "Bash(grep -n \"class.*Projectile\\\\|class.*Weapon\\\\|class.*Torpedo\" /c/Dev/Sub3D/Source/Sub3D/Submarine/*.h)",
+      "Bash(grep -r \"Damage\\\\|Flood\\\\|Breach\" /c/Dev/Sub3D/Source/Sub3D/Submarine/*.h)",
+      "Bash(\"C:/Program Files/Epic Games/UE_5.7/Engine/Build/BatchFiles/Build.bat\" Sub3DEditor Win64 Development -Project=\"C:/Dev/Sub3D/Sub3D.uproject\" -WaitMutex -FromMsBuild)",
+      "Bash(wc -l /c/Dev/Sub3D/Source/Sub3D/**/*.cpp /c/Dev/Sub3D/Source/Sub3D/**/*.h /c/Dev/Sub3D/Source/Sub3D/SubCompiler/*.cpp /c/Dev/Sub3D/Source/Sub3D/SubCompiler/*.h)",
+      "Bash(wc -l /c/Dev/Sub3D/Source/Sub3D/SubCompiler/*.cpp /c/Dev/Sub3D/Source/Sub3D/SubCompiler/*.h)"
+    ]
+  }
+}

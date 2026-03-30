@@ -1,0 +1,51 @@
+<svg viewBox="0 0 1800 1280" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="title desc">
+  <title id="title">Regles de lisibilite et silhouettes</title>
+  <desc id="desc">Silhouettes de reference et regles de lisibilite pour les stations du sous-marin.</desc>
+
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#f4efe6"/>
+    </marker>
+    <style><![CDATA[
+      .bg { fill: #0f1419; }
+      .panel { fill: #172028; stroke: #43525d; stroke-width: 2; }
+      .panelAlt { fill: #131b22; stroke: #34414a; stroke-width: 2; }
+      .frame { fill: none; stroke: #9ca8af; stroke-width: 4; }
+      .grid { fill: none; stroke: #34414a; stroke-width: 1; stroke-dasharray: 6 8; opacity: 0.45; }
+      .bulkhead { stroke: #98a4ad; stroke-width: 8; }
+      .doorGap { stroke: #0f1419; stroke-width: 14; }
+      .repair { fill: none; stroke: #ead59b; stroke-width: 4; stroke-dasharray: 12 10; }
+      .pathBand { fill: #f0eadb; opacity: 0.12; stroke: #f4efe6; stroke-width: 2; }
+      .dim { fill: none; stroke: #f4efe6; stroke-width: 2.2; }
+      .danger { fill: #de5a49; }
+      .ok { fill: #82c97b; }
+      .warn { fill: #e3b65b; }
+      .title { fill: #f4efe6; font: 700 42px Arial, 'Segoe UI', sans-serif; }
+      .subtitle { fill: #d1c9b8; font: 19px Arial, 'Segoe UI', sans-serif; }
+      .h1 { fill: #f4efe6; font: 700 28px Arial, 'Segoe UI', sans-serif; }
+      .h2 { fill: #f4efe6; font: 700 22px Arial, 'Segoe UI', sans-serif; }
+      .text { fill: #f4efe6; font: 19px Arial, 'Segoe UI', sans-serif; }
+      .small { fill: #d1c9b8; font: 17px Arial, 'Segoe UI', sans-serif; }
+      .mono { fill: #f4efe6; font: 17px Consolas, 'Courier New', monospace; }
+      .navFill { fill: #4a3b17; stroke: #d4a93a; stroke-width: 2.5; }
+      .ballFill { fill: #274854; stroke: #66b7c8; stroke-width: 2.5; }
+      .propFill { fill: #233c61; stroke: #5a95dc; stroke-width: 2.5; }
+      .confFill { fill: #4f3022; stroke: #c66e3a; stroke-width: 2.5; }
+      .senseFill { fill: #4a341a; stroke: #bb8638; stroke-width: 2.5; }
+      .navSolid { fill: #d4a93a; }
+      .ballSolid { fill: #66b7c8; }
+      .propSolid { fill: #5a95dc; }
+      .confSolid { fill: #c66e3a; }
+      .senseSolid { fill: #bb8638; }
+      .whiteStroke { fill: none; stroke: #f4efe6; stroke-width: 3; }
+      .tank { fill: #66b7c8; stroke: #d8f3fb; stroke-width: 2; }
+      .tag { fill: #e7d8a2; }
+      .tag2 { fill: #6a7c86; }
+      .tagText { fill: #0f1419; font: 700 16px Arial, 'Segoe UI', sans-serif; }
+      .tableLine { stroke: #34414a; stroke-width: 2; }
+    ]]></style>
+  </defs>
+
+  <rect class="bg" x="0" y="0" width="1800" height="1280"/>
+<text class="title" x="60" y="62">Planche 3 - Regles de lisibilite et silhouettes</text><text class="subtitle" x="60" y="98">Une station doit se reconnaitre en une forme, un axe et une zone d&apos;approche. Pas en accumulation de petits details.</text><rect class="panel" x="60" y="150" width="350" height="330" rx="18" /><text class="h2" x="84" y="192" text-anchor="start"><tspan x="84" dy="0">Console de helm</tspan></text><text class="small" x="84" y="228" text-anchor="start"><tspan x="84" dy="0">face frontale forte</tspan><tspan x="84" dy="22">aire libre de 1,2 m min.</tspan></text><rect class="panelAlt" x="130" y="330" width="210" height="90" rx="16" /><path class="navSolid" d="M144 414 Q235 306 326 414 L326 436 L144 436 Z" /><rect class="grid" x="154" y="326" width="162" height="118" rx="14" /><text class="small" x="84" y="460" text-anchor="start"><tspan x="84" dy="0">Cle visuelle : arc large + base stable.</tspan></text><rect class="panel" x="470" y="150" width="350" height="330" rx="18" /><text class="h2" x="494" y="192" text-anchor="start"><tspan x="494" dy="0">Console ballast</tspan></text><text class="small" x="494" y="228" text-anchor="start"><tspan x="494" dy="0">flux et pression visibles</tspan><tspan x="494" dy="22">ballast avant / arriere lisibles.</tspan></text><rect class="ballSolid" x="560" y="346" width="180" height="72" rx="16" /><circle class="whiteStroke" cx="598" cy="382" r="18" /><circle class="whiteStroke" cx="668" cy="382" r="18" /><path class="whiteStroke" d="M740 382 C788 382 796 336 810 320" /><text class="small" x="494" y="460" text-anchor="start"><tspan x="494" dy="0">Cle visuelle : bloc carre + vannes.</tspan></text><rect class="panel" x="880" y="150" width="350" height="330" rx="18" /><text class="h2" x="904" y="192" text-anchor="start"><tspan x="904" dy="0">Bloc moteur</tspan></text><text class="small" x="904" y="228" text-anchor="start"><tspan x="904" dy="0">un flanc de maintenance</tspan><tspan x="904" dy="22">pas de mille petites pieces.</tspan></text><rect class="propSolid" x="952" y="340" width="214" height="86" rx="24" /><circle class="whiteStroke" cx="1008" cy="383" r="28" /><rect class="whiteStroke" x="1064" y="354" width="92" height="58" rx="10" /><text class="small" x="904" y="460" text-anchor="start"><tspan x="904" dy="0">Cle visuelle : masse unique lourde.</tspan></text><rect class="panel" x="1290" y="150" width="350" height="330" rx="18" /><text class="h2" x="1314" y="192" text-anchor="start"><tspan x="1314" dy="0">Porte etanche</tspan></text><text class="small" x="1314" y="228" text-anchor="start"><tspan x="1314" dy="0">decision de confinement</tspan><tspan x="1314" dy="22">doit sembler sauver le run.</tspan></text><rect class="confSolid" x="1386" y="332" width="160" height="118" rx="20" /><rect class="whiteStroke" x="1418" y="352" width="96" height="78" rx="26" /><circle class="whiteStroke" cx="1498" cy="391" r="12" /><text class="small" x="1314" y="460" text-anchor="start"><tspan x="1314" dy="0">Cle visuelle : cadre epais + verrou.</tspan></text><rect class="panel" x="60" y="560" width="350" height="330" rx="18" /><text class="h2" x="84" y="602" text-anchor="start"><tspan x="84" dy="0">Panneau de reparation</tspan></text><text class="small" x="84" y="638" text-anchor="start"><tspan x="84" dy="0">feedback lisible de loin</tspan><tspan x="84" dy="22">jamais enterre sous le decor.</tspan></text><rect class="confSolid" x="174" y="746" width="120" height="114" rx="10" /><line class="whiteStroke" x1="204" y1="776" x2="274" y2="776" /><line class="whiteStroke" x1="204" y1="808" x2="274" y2="808" /><line class="whiteStroke" x1="204" y1="840" x2="254" y2="840" /><text class="small" x="84" y="870" text-anchor="start"><tspan x="84" dy="0">Cle visuelle : mur reserve et clair.</tspan></text><rect class="panel" x="470" y="560" width="350" height="330" rx="18" /><text class="h2" x="494" y="602" text-anchor="start"><tspan x="494" dy="0">Tronc de sas</tspan></text><text class="small" x="494" y="638" text-anchor="start"><tspan x="494" dy="0">point haut exterieur</tspan><tspan x="494" dy="22">premier proto = ecoutille plafond.</tspan></text><rect class="senseSolid" x="618" y="726" width="44" height="108" rx="12" /><circle class="senseSolid" cx="640" cy="834" r="58" /><circle class="whiteStroke" cx="640" cy="834" r="76" /><line class="whiteStroke" x1="640" y1="744" x2="640" y2="876" /><line class="whiteStroke" x1="626" y1="774" x2="654" y2="774" /><line class="whiteStroke" x1="626" y1="798" x2="654" y2="798" /><text class="small" x="494" y="870" text-anchor="start"><tspan x="494" dy="0">Cle visuelle : verticalite + echelle.</tspan></text><rect class="panel" x="880" y="560" width="760" height="330" rx="18" /><text class="h1" x="904" y="602" text-anchor="start"><tspan x="904" dy="0">Regles de lecture obligatoires</tspan></text><text class="text" x="924" y="660" text-anchor="start"><tspan x="924" dy="0">1. Une station = une forme maitresse.</tspan><tspan x="924" dy="32">2. Un marqueur fonctionnel sur la face active.</tspan><tspan x="924" dy="32">3. Une zone libre claire devant l&apos;interaction.</tspan><tspan x="924" dy="32">4. Une silhouette differente pour helm, ballast, moteur, porte.</tspan></text><circle class="ok" cx="900" cy="656" r="12" /><circle class="ok" cx="900" cy="688" r="12" /><circle class="ok" cx="900" cy="720" r="12" /><circle class="ok" cx="900" cy="752" r="12" /><text class="text" x="1260" y="660" text-anchor="start"><tspan x="1260" dy="0">A eviter :</tspan><tspan x="1260" dy="32">1. Consoles interchangeables.</tspan><tspan x="1260" dy="32">2. Greeble fin dans la zone de clic.</tspan><tspan x="1260" dy="32">3. Reparation, commande et decor superposes.</tspan><tspan x="1260" dy="32">4. Accessoires plus visibles que la fonction.</tspan></text><circle class="danger" cx="1234" cy="688" r="12" /><circle class="danger" cx="1234" cy="720" r="12" /><circle class="danger" cx="1234" cy="752" r="12" /><circle class="danger" cx="1234" cy="784" r="12" /><text class="small" x="904" y="838" text-anchor="start"><tspan x="904" dy="0">Seuil de validation visuelle :</tspan><tspan x="904" dy="24">si le joueur ne nomme pas la station en 1 seconde, le mesh n&apos;est pas encore bon.</tspan></text>
+</svg>

@@ -1,0 +1,488 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Sub3D - Analyseur d'Échelles (V2.0)</title>
+    <style>
+        :root {
+            --bg-dark: #070a0f;
+            --panel-bg: #0f1621;
+            --text-main: #6ee6f5;
+            --grid-minor: #14212c;
+            --grid-major: #253f58;
+            --font-mono: 'Consolas', 'Courier New', monospace;
+
+            /* Submarine Colors */
+            --c-sub35: #00ffcc;
+            --c-sub75: #3399ff;
+            --c-sub125: #ffcc00;
+            --c-sub200: #ff6600;
+            --c-sub300: #ff3366;
+
+            /* Tunnel Colors */
+            --c-tun100: #ff3333; /* Rouge (Danger) */
+            --c-tun200: #cc33ff; /* Violet (Intermédiaire) */
+            --c-tun500: #3366ff; /* Bleu (Espace large) */
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        body {
+            background-color: var(--bg-dark);
+            color: var(--text-main);
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            display: flex;
+            flex-direction: column;
+            height: 100vh;
+            overflow: hidden;
+        }
+
+        header {
+            background-color: var(--panel-bg);
+            padding: 15px 30px;
+            display: flex;
+            flex-direction: column;
+            gap: 15px;
+            border-bottom: 1px solid var(--grid-major);
+            box-shadow: 0 4px 10px rgba(0,0,0,0.5);
+            z-index: 10;
+        }
+
+        .header-top {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        h1 {
+            font-size: 1.2rem;
+            letter-spacing: 2px;
+            text-transform: uppercase;
+        }
+
+        .controls {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 20px;
+            font-family: var(--font-mono);
+            font-size: 0.9rem;
+            background: rgba(0,0,0,0.2);
+            padding: 10px;
+            border-radius: 6px;
+        }
+
+        .control-group {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            border-right: 1px solid var(--grid-major);
+            padding-right: 20px;
+        }
+        .control-group:last-child { border-right: none; }
+
+        .checkbox-label {
+            display: flex;
+            align-items: center;
+            gap: 5px;
+            cursor: pointer;
+            padding: 2px 5px;
+            border-radius: 4px;
+        }
+        .checkbox-label input { accent-color: var(--text-main); }
+        
+        select, input[type="range"] {
+            background-color: var(--bg-dark);
+            color: var(--text-main);
+            border: 1px solid var(--text-main);
+            padding: 3px 8px;
+            font-family: var(--font-mono);
+            outline: none;
+            cursor: pointer;
+        }
+
+        .main-content {
+            display: flex;
+            flex: 1;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .viewport-container {
+            flex: 1;
+            position: relative;
+            border-right: 1px solid var(--grid-major);
+            display: flex;
+            flex-direction: column;
+        }
+        .viewport-container:last-child { border-right: none; }
+
+        .viewport-title {
+            position: absolute;
+            top: 15px;
+            left: 15px;
+            font-family: var(--font-mono);
+            background: rgba(15, 22, 33, 0.8);
+            padding: 5px 10px;
+            border: 1px solid var(--grid-major);
+            z-index: 10;
+        }
+
+        svg.scene-v {
+            width: 100%;
+            height: 100%;
+            background-color: var(--bg-dark);
+        }
+
+        /* SVG Styles */
+        .grid-minor { stroke: var(--grid-minor); stroke-width: 0.5px; }
+        .grid-major { stroke: var(--grid-major); stroke-width: 1px; }
+        .axis { stroke: var(--text-main); stroke-width: 1.5px; opacity: 0.5; }
+        .label { fill: var(--grid-major); font-family: var(--font-mono); font-size: 8px; }
+
+        /* Radar Concepts Panel */
+        .radar-concepts {
+            height: 250px;
+            background: #05080c;
+            border-top: 2px solid var(--grid-major);
+            display: flex;
+            flex-direction: column;
+            padding: 10px;
+        }
+        .radar-concepts h2 {
+            font-size: 0.9rem;
+            color: var(--text-main);
+            text-align: center;
+            letter-spacing: 1px;
+            margin-bottom: 10px;
+        }
+        .radar-gallery {
+            display: flex;
+            justify-content: space-around;
+            flex: 1;
+        }
+        .radar-mock {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            width: 30%;
+            background: #0f1621;
+            border: 1px solid var(--grid-minor);
+            border-radius: 8px;
+            padding: 10px;
+        }
+        .radar-mock h3 { font-size: 0.8rem; margin-bottom: 5px; color: #aaa; text-transform: uppercase;}
+        .radar-mock svg { width: 100%; height: 100%; max-height: 160px;}
+
+    </style>
+</head>
+<body>
+
+    <header>
+        <div class="header-top">
+            <h1>Sub3D :: Tactical Scale Reference v2.0</h1>
+            <div style="font-size: 0.85rem; color: #aaa;">Zoom with slider. Overlay colors map to Submarine lengths.</div>
+        </div>
+        
+        <div class="controls">
+            <div class="control-group">
+                <label style="color:var(--text-main)">SUBS:</label>
+                <label class="checkbox-label" style="border: 1px solid var(--c-sub35);"><input type="checkbox" class="sub-check" value="35"> 35m</label>
+                <label class="checkbox-label" style="border: 1px solid var(--c-sub75);"><input type="checkbox" class="sub-check" value="75"> 75m</label>
+                <label class="checkbox-label" style="border: 1px solid var(--c-sub125); background: rgba(255,204,0,0.1);"><input type="checkbox" class="sub-check" value="125" checked> 125m</label>
+                <label class="checkbox-label" style="border: 1px solid var(--c-sub200);"><input type="checkbox" class="sub-check" value="200"> 200m</label>
+                <label class="checkbox-label" style="border: 1px solid var(--c-sub300); background: rgba(255,51,102,0.1);"><input type="checkbox" class="sub-check" value="300" checked> 300m</label>
+            </div>
+            
+            <div class="control-group">
+                <label style="color:var(--text-main)">TUNNELS:</label>
+                <label class="checkbox-label" style="border: 1px solid var(--c-tun100);"><input type="checkbox" class="tun-check" value="100"> 100m</label>
+                <label class="checkbox-label" style="border: 1px solid var(--c-tun200); background: rgba(204,51,255,0.1);"><input type="checkbox" class="tun-check" value="200" checked> 200m</label>
+                <label class="checkbox-label" style="border: 1px solid var(--c-tun500);"><input type="checkbox" class="tun-check" value="500"> 500m</label>
+            </div>
+
+            <div class="control-group">
+                <label style="color:var(--text-main)">LAYOUT:</label>
+                <select id="layout-mode">
+                    <option value="overlay">Superposé (Centre)</option>
+                    <option value="side">Côte à côte (Comparaison)</option>
+                </select>
+            </div>
+
+            <div class="control-group">
+                <label style="color:var(--text-main)">ZOOM:</label>
+                <input type="range" id="zoom-slider" min="0.2" max="6.0" step="0.1" value="1.0">
+                <span id="zoom-val">1.0x</span>
+            </div>
+        </div>
+    </header>
+
+    <div class="main-content">
+        <!-- VUE DE FACE (TRANCHE) -->
+        <div class="viewport-container">
+            <div class="viewport-title">FRONT VIEW (Y-Z PLANE)</div>
+            <svg class="scene-v" id="svg-front">
+                <g id="camera-front">
+                    <g id="grid-front"></g>
+                    <g id="scene-front"></g>
+                </g>
+            </svg>
+        </div>
+
+        <!-- VUE DE PROFIL (CÔTÉ) -->
+        <div class="viewport-container">
+            <div class="viewport-title">SIDE VIEW (X-Z PLANE)</div>
+            <svg class="scene-v" id="svg-side">
+                <g id="camera-side">
+                    <g id="grid-side"></g>
+                    <g id="scene-side"></g>
+                </g>
+            </svg>
+        </div>
+    </div>
+
+    <!-- NOUVEAU: Radar Concept Mockups -->
+    <div class="radar-concepts">
+        <h2>— IMPLÉMENTATION UI SONAR (RENDU CIBLE UE5) —</h2>
+        <div class="radar-gallery">
+            
+            <div class="radar-mock">
+                <h3>FRONT CAM (Cross-Section)</h3>
+                <svg viewBox="-100 -100 200 200">
+                    <!-- Decor Sonar -->
+                    <circle cx="0" cy="0" r="95" fill="#030b0b" />
+                    <!-- Lignes Radar -->
+                    <circle cx="0" cy="0" r="30" fill="none" stroke="#00ffcc" stroke-dasharray="2,4" opacity="0.4"/>
+                    <circle cx="0" cy="0" r="60" fill="none" stroke="#00ffcc" stroke-dasharray="2,4" opacity="0.4"/>
+                    <line x1="-95" y1="0" x2="95" y2="0" stroke="#00ffcc" opacity="0.3" />
+                    <line x1="0" y1="-95" x2="0" y2="95" stroke="#00ffcc" opacity="0.3" />
+                    
+                    <path d="M-70-60 C-30-80, 40-70, 75-50 L80-40 C30-65,-30-65,-65-45 Z" fill="#ffcc00" opacity="0.7" />
+                    <!-- Submarine Fixed Point -->
+                    <circle cx="0" cy="0" r="6" fill="#00ffcc" />
+                    <rect x="-1" y="-8" width="2" height="4" fill="#00ffcc" />
+                    <rect x="-10" y="0" width="20" height="1" fill="#00ffcc" />
+                </svg>
+            </div>
+
+            <div class="radar-mock">
+                <h3>SIDE CAM (Anticipation)</h3>
+                <svg viewBox="-100 -50 200 100">
+                    <rect x="-100" y="-50" width="200" height="100" fill="#030b0b" />
+                    <!-- Grille verticale de progression -->
+                    <line x1="-50" y1="-50" x2="-50" y2="50" stroke="#00ffcc" stroke-dasharray="2,4" opacity="0.3"/>
+                    <line x1="0" y1="-50" x2="0" y2="50" stroke="#00ffcc" stroke-dasharray="2,4" opacity="0.6"/>
+                    <line x1="50" y1="-50" x2="50" y2="50" stroke="#00ffcc" stroke-dasharray="2,4" opacity="0.3"/>
+                    
+                    <line x1="-100" y1="0" x2="100" y2="0" stroke="#00ffcc" opacity="0.3" />
+                    
+                    <!-- Forme de sol (Sonar return) -->
+                    <path d="M-100 40 L-20 40 L 30 20 L 70 30 L 100 35 L 100 50 L -100 50 Z" fill="#ffcc00" opacity="0.5" />
+                    <path d="M-100 -40 L-10 -40 L 40 -10 L 80 -25 L 100 -25 L 100 -50 L -100 -50 Z" fill="#ffcc00" opacity="0.5" />
+                    
+                    <!-- Submarine Silhouette -->
+                    <g transform="translate(-60, 0) scale(0.3)">
+                       <rect x="-40" y="-10" width="80" height="20" rx="10" fill="#00ffcc" />
+                       <rect x="0" y="-20" width="15" height="10" fill="#00ffcc" />
+                       <rect x="30" y="-5" width="5" height="10" fill="#00ffcc" />
+                    </g>
+                </svg>
+            </div>
+
+            <div class="radar-mock">
+                <h3>GLOBAL PING (Map 2Km)</h3>
+                <svg viewBox="-100 -100 200 200">
+                    <circle cx="0" cy="0" r="95" fill="#030b0b" />
+                    <!-- Sweeping effect -->
+                    <path d="M0,0 L0,-95 A95,95 0 0,1 50,-80 Z" fill="#00ffcc" opacity="0.2"/>
+                    
+                    <!-- Points géographiques -->
+                    <circle cx="-30" cy="-40" r="2" fill="#ffcc00" />
+                    <circle cx="-25" cy="-45" r="2" fill="#ffcc00" />
+                    <circle cx="-35" cy="-35" r="2" fill="#ffcc00" />
+
+                    <circle cx="60" cy="10" r="3" fill="#ff3366" /> <!-- Objectif -->
+                    
+                    <circle cx="0" cy="0" r="2" fill="#00ffcc" /> <!-- Sub -->
+                    <!-- Heading -->
+                    <line x1="0" y1="0" x2="0" y2="-20" stroke="#00ffcc" stroke-width="1.5" />
+                </svg>
+            </div>
+
+        </div>
+    </div>
+
+    <script>
+        const subData = {
+            "35":  { length: 35, width: 4.5, sailLen: 6, sailHeight: 3, c: "var(--c-sub35)" },
+            "75":  { length: 75, width: 8.5, sailLen: 12, sailHeight: 5, c: "var(--c-sub75)" },
+            "125": { length: 125, width: 13, sailLen: 18, sailHeight: 8, c: "var(--c-sub125)" },
+            "200": { length: 200, width: 22, sailLen: 28, sailHeight: 12, c: "var(--c-sub200)" },
+            "300": { length: 300, width: 35, sailLen: 45, sailHeight: 18, c: "var(--c-sub300)" } 
+        };
+
+        const tunColors = {
+            "100": "var(--c-tun100)",
+            "200": "var(--c-tun200)",
+            "500": "var(--c-tun500)"
+        };
+
+        const gridExtent = 800; 
+
+        function initGrid(gridId) {
+            const gridGroup = document.getElementById(gridId);
+            let html = '';
+            for (let i = -gridExtent; i <= gridExtent; i += 10) {
+                const isMajor = i % 50 === 0;
+                const className = isMajor ? 'grid-major' : 'grid-minor';
+                html += `<line x1="${i}" y1="${-gridExtent}" x2="${i}" y2="${gridExtent}" class="${className}" />`;
+                html += `<line x1="${-gridExtent}" y1="${i}" x2="${gridExtent}" y2="${i}" class="${className}" />`;
+                if (isMajor && i !== 0) {
+                    html += `<text x="${i+2}" y="-2" class="label">${i}m</text>`;
+                    if(i>0) html += `<text x="2" y="${-i-2}" class="label">${-i}m</text>`; 
+                    else html += `<text x="2" y="${-i+8}" class="label">${-i}m</text>`;
+                }
+            }
+            html += `<line x1="${-gridExtent}" y1="0" x2="${gridExtent}" y2="0" class="axis" />`;
+            html += `<line x1="0" y1="${-gridExtent}" x2="0" y2="${gridExtent}" class="axis" />`;
+            gridGroup.innerHTML = html;
+        }
+
+        function updateScene() {
+            const subCheckboxes = document.querySelectorAll('.sub-check');
+            const checkedSubs = Array.from(subCheckboxes).filter(cb => cb.checked).map(cb => cb.value);
+            const tunCheckboxes = document.querySelectorAll('.tun-check');
+            const checkedTuns = Array.from(tunCheckboxes).filter(cb => cb.checked).map(cb => parseFloat(cb.value));
+            const layout = document.getElementById('layout-mode').value;
+            
+            // Background label hilight logic
+            subCheckboxes.forEach(cb => {
+                cb.parentNode.style.boxShadow = cb.checked ? `0 0 5px ${subData[cb.value].c}` : "none";
+                cb.parentNode.style.background = cb.checked ? 'rgba(255,255,255,0.05)' : 'transparent';
+            });
+            tunCheckboxes.forEach(cb => {
+                cb.parentNode.style.boxShadow = cb.checked ? `0 0 5px ${tunColors[cb.value]}` : "none";
+                cb.parentNode.style.background = cb.checked ? 'rgba(255,255,255,0.05)' : 'transparent';
+            });
+
+            let fHtml = '';
+            let sHtml = '';
+            
+            // Draw Tunnels
+            checkedTuns.forEach(td => {
+                const tC = tunColors[td];
+                fHtml += `<circle cx="0" cy="0" r="${td/2}" fill="${tC}" fill-opacity="0.08" stroke="${tC}" stroke-width="2.5" stroke-dasharray="8,6" />`;
+                
+                sHtml += `<rect x="${-gridExtent}" y="${-td/2}" width="${gridExtent*2}" height="${td}" fill="${tC}" fill-opacity="0.08" />`;
+                sHtml += `<line x1="${-gridExtent}" y1="${-td/2}" x2="${gridExtent}" y2="${-td/2}" stroke="${tC}" stroke-width="2.5" stroke-dasharray="8,6" />`;
+                sHtml += `<line x1="${-gridExtent}" y1="${td/2}" x2="${gridExtent}" y2="${td/2}" stroke="${tC}" stroke-width="2.5" stroke-dasharray="8,6" />`;
+            });
+
+            // Draw Subs
+            let layoutYOffset = 0;
+            let layoutXOffset = 0;
+            let maxDim = Math.max(...checkedTuns, 125);
+
+            checkedSubs.forEach((subKey, idx) => {
+                const sub = subData[subKey];
+                const clr = sub.c;
+                const w = sub.length;
+                const h = sub.width;
+
+                maxDim = Math.max(maxDim, w);
+
+                let fx = 0, fy = 0;
+                let sx = 0, sy = 0;
+
+                if (layout === 'side') {
+                    // Alignement côte à côte
+                    // Front view : espacés le long de l'axe X (horizontal)
+                    if (idx > 0) {
+                        const prevKey = checkedSubs[idx-1];
+                        const prevSub = subData[prevKey];
+                        layoutXOffset += (prevSub.width/2) + (h/2) + 15;
+                    }
+                    fx = layoutXOffset;
+
+                    // Side view : espacés le long de l'axe Y (vertical), et alignés sur le nez (X = 0 pour la pointe avant)
+                    if (idx > 0) {
+                        const prevKey = checkedSubs[idx-1];
+                        const prevSub = subData[prevKey];
+                        layoutYOffset += (prevSub.width/2 + prevSub.sailHeight) + (h/2) + 15;
+                    }
+                    sy = layoutYOffset;
+                    sx = -w/2; // nez à x=0 (le sous marin part de -w/2 pour son centre et va jusqu'à 0 ou +w/2 selon sa def)
+                    // Puisque le submarine est dessiné autour de 0, x=-w/2 aligne le bord droit à 0.
+                }
+
+                // Front Render
+                fHtml += `<g transform="translate(${fx}, ${fy})">`;
+                fHtml += `<circle cx="0" cy="0" r="${h/2}" fill="${clr}" fill-opacity="0.15" stroke="${clr}" stroke-width="1.5" />`;
+                fHtml += `<rect x="${-h*0.35/2}" y="${-(h/2 + sub.sailHeight)}" width="${h*0.35}" height="${sub.sailHeight}" fill="${clr}" fill-opacity="0.2" stroke="${clr}" stroke-width="1.5" />`;
+                fHtml += `<rect x="${-h*0.8}" y="-1" width="${h*1.6}" height="2" fill="${clr}" opacity="0.8" />`;
+                fHtml += `</g>`;
+
+                // Side Render
+                sHtml += `<g transform="translate(${sx}, ${sy})">`;
+                sHtml += `<rect x="${-w/2}" y="${-h/2}" width="${w}" height="${h}" rx="${h/2}" fill="${clr}" fill-opacity="0.15" stroke="${clr}" stroke-width="1.5" />`;
+                const sailX = -w/2 + (w * 0.3);
+                sHtml += `<path d="M ${sailX} ${-h/2} L ${sailX} ${-(h/2 + sub.sailHeight)} L ${sailX + sub.sailLen*0.8} ${-(h/2 + sub.sailHeight)} L ${sailX + sub.sailLen} ${-h/2} Z" fill="${clr}" fill-opacity="0.2" stroke="${clr}" stroke-width="1.5" />`;
+                const stabLen = w * 0.1;
+                sHtml += `<rect x="${w/2 - h/2 - stabLen}" y="-1" width="${stabLen}" height="2" fill="${clr}" opacity="0.8" />`;
+                sHtml += `<rect x="${w/2 - h/2 - stabLen*0.8}" y="${-h/2 - sub.sailHeight*0.4}" width="3" height="${h + sub.sailHeight*0.8}" fill="${clr}" opacity="0.8" />`;
+                
+                // Pitch Circle
+                const maxRadius = Math.sqrt(Math.pow(w/2, 2) + Math.pow(h/2 + sub.sailHeight, 2));
+                sHtml += `<circle cx="0" cy="0" r="${maxRadius}" fill="none" stroke="${clr}" stroke-width="0.5" stroke-dasharray="4,8" opacity="0.4" />`;
+                sHtml += `</g>`;
+            });
+
+            document.getElementById('scene-front').innerHTML = fHtml;
+            document.getElementById('scene-side').innerHTML = sHtml;
+
+            updateCamera(maxDim, layoutXOffset, layoutYOffset);
+        }
+
+        function updateCamera(maxDim, layoutXOffset, layoutYOffset) {
+            const zoomMultiplier = parseFloat(document.getElementById('zoom-slider').value);
+            document.getElementById('zoom-val').innerText = zoomMultiplier.toFixed(1) + "x";
+
+            // Calculation focus for "Side" layout to keep things framed
+            let cxFront = 0;
+            let cySide = 0;
+            let cxSide = 0;
+
+            if (document.getElementById('layout-mode').value === 'side') {
+                cxFront = layoutXOffset / 2;
+                cySide = layoutYOffset / 2;
+                cxSide = -maxDim / 2; // Approximatif pour centrer la pile alignée sur X=0
+            }
+
+            // Size base
+            const rawViewSize = maxDim * 1.5;
+            let finalSize = Math.max(rawViewSize, 150) / zoomMultiplier;
+
+            const boxFront = `${cxFront - finalSize/2} ${-finalSize/2} ${finalSize} ${finalSize}`;
+            const boxSide = `${cxSide - finalSize/2} ${cySide - finalSize/2} ${finalSize} ${finalSize}`;
+
+            document.getElementById('svg-front').setAttribute('viewBox', boxFront);
+            document.getElementById('svg-side').setAttribute('viewBox', boxSide);
+        }
+
+        document.querySelectorAll('.sub-check, .tun-check').forEach(el => el.addEventListener('change', updateScene));
+        document.getElementById('layout-mode').addEventListener('change', updateScene);
+        document.getElementById('zoom-slider').addEventListener('input', updateScene);
+
+        window.onload = () => {
+            initGrid('grid-front');
+            initGrid('grid-side');
+            updateScene();
+        };
+
+    </script>
+</body>
+</html>

@@ -1,0 +1,36 @@
+<svg width="1000" height="300" viewBox="0 0 1000 300" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <!-- SIDE VIEW (Offset by 100 on X) -->
+  <g transform="translate(100, 50)">
+    <!-- Submarine Hull -->
+    <path d="M50 100 C 50 70, 150 60, 400 60 L 700 60 C 750 60, 780 80, 780 100 C 780 120, 750 140, 700 140 L 400 140 C 150 140, 50 130, 50 100 Z" fill="white"/>
+    
+    <!-- Sail / Command Tower -->
+    <path d="M350 60 L 370 20 L 430 20 L 450 60 Z" fill="white"/>
+    
+    <!-- Rear Vertical Stabilizer -->
+    <path d="M700 60 L 730 30 L 760 60 Z" fill="white"/>
+    <path d="M700 140 L 730 170 L 760 140 Z" fill="white"/>
+    
+    <!-- Rear Horizontal Stabilizer (Projected) -->
+    <rect x="730" y="90" width="40" height="20" rx="2" fill="white"/>
+    
+    <!-- Front Diving Planes -->
+    <rect x="150" y="95" width="40" height="10" rx="2" fill="white"/>
+  </g>
+
+  <!-- FRONT VIEW (Offset to the right) -->
+  <g transform="translate(850, 50)">
+    <!-- Main Hull (Circular) -->
+    <circle cx="50" cy="100" r="40" fill="white"/>
+    
+    <!-- Sail (Front View) -->
+    <rect x="40" y="20" width="20" height="40" rx="2" fill="white"/>
+    
+    <!-- Diving Planes (Front View) -->
+    <rect x="0" y="95" width="100" height="10" rx="2" fill="white"/>
+    
+    <!-- Stabilizers (Front View - Vertical) -->
+    <rect x="45" y="60" width="10" height="80" rx="2" fill="white"/>
+    <rect x="45" y="100" width="10" height="70" rx="2" fill="white"/>
+  </g>
+</svg>

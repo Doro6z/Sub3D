@@ -37,6 +37,7 @@ public:
 	bool bDebugDrawCrewMovement = false;
 
 	void InitializeForSubmarine();
+	void RefreshEmbarkedFlooring();
 
 	bool IsEmbarked() const;
 

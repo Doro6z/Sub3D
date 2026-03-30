@@ -51,6 +51,9 @@ public:
 	void SetBallastTargetByIndex(int32 Index, float Target);
 
 	UFUNCTION(BlueprintCallable, Category = "Submarine|Systems")
+	void SetBallastsActive(bool bActive);
+
+	UFUNCTION(BlueprintCallable, Category = "Submarine|Systems")
 	void ResyncAllBallasts();
 
 	UFUNCTION(BlueprintCallable, Category = "Submarine|Systems")

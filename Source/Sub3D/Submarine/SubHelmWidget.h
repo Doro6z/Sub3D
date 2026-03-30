@@ -1,66 +1,79 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "Blueprint/UserWidget.h"
+#include "Templates/SubclassOf.h"
+#include "SubNavWidget.h"
+#include "SubSonarV2Types.h"
 #include "SubHelmWidget.generated.h"
 
-class ASubCrewCharacter;
-class ASubPlayerController;
-class USubMovementComponent;
+class USubSonarDisplayWidget;
+class USubSonarComponent;
+class USubSonarSystemComponent;
 
 /**
- * HUD widget for helm control.
- * Bind to BP_SubHelmWidget in Blueprint.
- * Shows ballast fill, depth, speed. Exposes controls to Blueprint.
+ * Specialized widget for the Helm Station.
+ * Extends SubNavStationWidget with sonar display binding.
+ * The SonarDisplay reference is set in Blueprint after widget construction.
  */
 UCLASS()
-class SUB3D_API USubHelmWidget : public UUserWidget
+class SUB3D_API USubHelmWidget : public USubNavStationWidget
 {
 	GENERATED_BODY()
 
 public:
-	// Call this after creating the widget to bind the owning crew character
-	UFUNCTION(BlueprintCallable, Category = "Helm")
-	void InitForCrew(ASubCrewCharacter* Crew);
+	virtual void NativeConstruct() override;
+	virtual void NativeTick(const FGeometry& MyGeometry, float InDeltaTime) override;
+	virtual void NativeDestruct() override;
 
-	// ── Ballast control ───────────────────────────────────────────────────
+	UFUNCTION(BlueprintCallable, Category = "Sonar")
+	void RouteSonarPing();
 
-	// Set global ballast target (0=surface, 1=dive). Calls Server RPC.
-	UFUNCTION(BlueprintCallable, Category = "Helm|Ballast")
-	void SetGlobalBallast(float Target);
+	UFUNCTION(BlueprintCallable, Category = "Sonar")
+	void RouteSonarPingHeldStart();
 
-	// Set individual ballast (0=front, 1=rear). Calls Server RPC.
-	UFUNCTION(BlueprintCallable, Category = "Helm|Ballast")
-	void SetBallastByIndex(int32 Index, float Target);
+	UFUNCTION(BlueprintCallable, Category = "Sonar")
+	void RouteSonarPingHeldStop();
 
-	// ── Read state (call from Blueprint tick or binding) ──────────────────
+	UFUNCTION(BlueprintPure, Category = "Sonar")
+	bool IsSonarDisplayBound() const;
 
-	// Returns fill level of ballast at index (0-1). Returns -1 if invalid.
-	UFUNCTION(BlueprintPure, Category = "Helm|Ballast")
-	float GetBallastFillLevel(int32 Index) const;
+	UFUNCTION(BlueprintCallable, Category = "Sonar")
+	void RouteSetSonarMode(ESonarMode NewMode);
 
-	// Returns current depth in meters
-	UFUNCTION(BlueprintPure, Category = "Helm")
-	float GetDepth() const;
+	UFUNCTION(BlueprintCallable, Category = "Sonar")
+	void RouteSetSonarFocusBearing(float BearingDeg);
 
-	// Returns current speed in km/h
-	UFUNCTION(BlueprintPure, Category = "Helm")
-	float GetSpeedKmh() const;
+	UFUNCTION(BlueprintCallable, Category = "Sonar")
+	void RouteSetSonarRangePreset(int32 PresetIndex);
 
-	// Returns current pitch in degrees
-	UFUNCTION(BlueprintPure, Category = "Helm")
-	float GetPitch() const;
+	UFUNCTION(BlueprintCallable, Category = "Sonar")
+	void RouteMarkPriorityTrack(int32 TrackId, bool bPriority);
 
-protected:
-	UPROPERTY(BlueprintReadOnly, Category = "Helm")
-	ASubCrewCharacter* OwnerCrew = nullptr;
+	// Reference to the sonar CRT display sub-widget.
+	// Set this in BP_HelmWidget after creating the sonar display widget.
+	UPROPERTY(BlueprintReadWrite, Category = "Sonar")
+	TObjectPtr<USubSonarDisplayWidget> SonarDisplay;
 
-	UPROPERTY(BlueprintReadOnly, Category = "Helm")
-	ASubPlayerController* OwnerController = nullptr;
+	// If SonarDisplay is not provided by BP, create one automatically.
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Sonar")
+	bool bAutoCreateSonarDisplayIfMissing = false;
 
-	// Cached reference to SubMovement for reads
-	UPROPERTY(BlueprintReadOnly, Category = "Helm")
-	USubMovementComponent* SubMovement = nullptr;
+	// Optional class for auto-created sonar display (defaults to USubSonarDisplayWidget).
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Sonar")
+	TSubclassOf<USubSonarDisplayWidget> SonarDisplayClass;
 
-	void ResolveRuntimeRefs();
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Sonar")
+	int32 AutoCreatedSonarDisplayZOrder = 60;
+
+private:
+	void TryBindSonarDisplay();
+
+	UPROPERTY(Transient)
+	TWeakObjectPtr<USubSonarComponent> BoundSonar;
+
+	UPROPERTY(Transient)
+	TWeakObjectPtr<USubSonarSystemComponent> BoundSonarSystem;
+
+	bool bOwnsAutoCreatedSonarDisplay = false;
+	bool bLoggedMissingSonarDisplay = false;
 };

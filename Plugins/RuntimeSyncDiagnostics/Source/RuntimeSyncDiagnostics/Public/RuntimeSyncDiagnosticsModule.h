@@ -1,7 +1,10 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "Delegates/Delegate.h"
 #include "Modules/ModuleManager.h"
+
+class URuntimeSyncConsoleCommands;
 
 class FRuntimeSyncDiagnosticsModule : public IModuleInterface
 {
@@ -12,6 +15,8 @@ public:
 	virtual void ShutdownModule() override;
 
 private:
-	UPROPERTY()
-	class URuntimeSyncConsoleCommands* ConsoleCommands;
+	void CleanupConsoleCommands();
+
+	URuntimeSyncConsoleCommands* ConsoleCommands = nullptr;
+	FDelegateHandle EnginePreExitHandle;
 };

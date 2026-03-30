@@ -1,0 +1,51 @@
+<svg viewBox="0 0 1800 1320" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="title desc">
+  <title id="title">Grille de test gameplay et ergonomie</title>
+  <desc id="desc">Table de test pour valider la lisibilite et l&apos;ergonomie du premier sous-marin.</desc>
+
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#f4efe6"/>
+    </marker>
+    <style><![CDATA[
+      .bg { fill: #0f1419; }
+      .panel { fill: #172028; stroke: #43525d; stroke-width: 2; }
+      .panelAlt { fill: #131b22; stroke: #34414a; stroke-width: 2; }
+      .frame { fill: none; stroke: #9ca8af; stroke-width: 4; }
+      .grid { fill: none; stroke: #34414a; stroke-width: 1; stroke-dasharray: 6 8; opacity: 0.45; }
+      .bulkhead { stroke: #98a4ad; stroke-width: 8; }
+      .doorGap { stroke: #0f1419; stroke-width: 14; }
+      .repair { fill: none; stroke: #ead59b; stroke-width: 4; stroke-dasharray: 12 10; }
+      .pathBand { fill: #f0eadb; opacity: 0.12; stroke: #f4efe6; stroke-width: 2; }
+      .dim { fill: none; stroke: #f4efe6; stroke-width: 2.2; }
+      .danger { fill: #de5a49; }
+      .ok { fill: #82c97b; }
+      .warn { fill: #e3b65b; }
+      .title { fill: #f4efe6; font: 700 42px Arial, 'Segoe UI', sans-serif; }
+      .subtitle { fill: #d1c9b8; font: 19px Arial, 'Segoe UI', sans-serif; }
+      .h1 { fill: #f4efe6; font: 700 28px Arial, 'Segoe UI', sans-serif; }
+      .h2 { fill: #f4efe6; font: 700 22px Arial, 'Segoe UI', sans-serif; }
+      .text { fill: #f4efe6; font: 19px Arial, 'Segoe UI', sans-serif; }
+      .small { fill: #d1c9b8; font: 17px Arial, 'Segoe UI', sans-serif; }
+      .mono { fill: #f4efe6; font: 17px Consolas, 'Courier New', monospace; }
+      .navFill { fill: #4a3b17; stroke: #d4a93a; stroke-width: 2.5; }
+      .ballFill { fill: #274854; stroke: #66b7c8; stroke-width: 2.5; }
+      .propFill { fill: #233c61; stroke: #5a95dc; stroke-width: 2.5; }
+      .confFill { fill: #4f3022; stroke: #c66e3a; stroke-width: 2.5; }
+      .senseFill { fill: #4a341a; stroke: #bb8638; stroke-width: 2.5; }
+      .navSolid { fill: #d4a93a; }
+      .ballSolid { fill: #66b7c8; }
+      .propSolid { fill: #5a95dc; }
+      .confSolid { fill: #c66e3a; }
+      .senseSolid { fill: #bb8638; }
+      .whiteStroke { fill: none; stroke: #f4efe6; stroke-width: 3; }
+      .tank { fill: #66b7c8; stroke: #d8f3fb; stroke-width: 2; }
+      .tag { fill: #e7d8a2; }
+      .tag2 { fill: #6a7c86; }
+      .tagText { fill: #0f1419; font: 700 16px Arial, 'Segoe UI', sans-serif; }
+      .tableLine { stroke: #34414a; stroke-width: 2; }
+    ]]></style>
+  </defs>
+
+  <rect class="bg" x="0" y="0" width="1800" height="1320"/>
+<text class="title" x="60" y="62">Planche 5 - Grille de test gameplay et ergonomie</text><text class="subtitle" x="60" y="98">Questions de validation du premier sous-marin. A lancer sur graybox brut, avant details et avant deco.</text><rect class="panel" x="60" y="150" width="1680" height="1080" rx="20" /><text class="h1" x="90" y="194" text-anchor="start"><tspan x="90" dy="0">Les 6 tests a faire en jeu</tspan></text><text class="h2" x="90" y="248" text-anchor="start"><tspan x="90" dy="0">Question</tspan></text><text class="h2" x="390" y="248" text-anchor="start"><tspan x="390" dy="0">Action a faire</tspan></text><text class="h2" x="810" y="248" text-anchor="start"><tspan x="810" dy="0">Signal attendu</tspan></text><text class="h2" x="1205" y="248" text-anchor="start"><tspan x="1205" dy="0">Echec a surveiller</tspan></text><line class="tableLine" x1="84" y1="266" x2="1716" y2="266" /><line class="tableLine" x1="360" y1="266" x2="360" y2="1112" /><line class="tableLine" x1="780" y1="266" x2="780" y2="1112" /><line class="tableLine" x1="1176" y1="266" x2="1176" y2="1112" /><text class="text" x="90" y="324" text-anchor="start"><tspan x="90" dy="0">Ou vais-je pour plonger ?</tspan></text><text class="small" x="390" y="324" text-anchor="start"><tspan x="390" dy="0">Entrer depuis le spawn, sans HUD, et</tspan><tspan x="390" dy="24">chercher la commande de profondeur.</tspan></text><text class="small" x="810" y="324" text-anchor="start"><tspan x="810" dy="0">Le joueur va au helm puis comprend le</tspan><tspan x="810" dy="24">ballast sans hesiter.</tspan></text><text class="small" x="1205" y="324" text-anchor="start"><tspan x="1205" dy="0">Il se perd entre helm, radar et ballast.</tspan></text><line class="tableLine" x1="84" y1="414" x2="1716" y2="414" /><text class="text" x="90" y="434" text-anchor="start"><tspan x="90" dy="0">Ou puis-je couper la</tspan><tspan x="90" dy="24">propagation ?</tspan></text><text class="small" x="390" y="434" text-anchor="start"><tspan x="390" dy="0">Provoquer une voie d&apos;eau puis chercher la</tspan><tspan x="390" dy="24">porte utile.</tspan></text><text class="small" x="810" y="434" text-anchor="start"><tspan x="810" dy="0">La bulkhead door se lit comme decision de</tspan><tspan x="810" dy="24">confinement.</tspan></text><text class="small" x="1205" y="434" text-anchor="start"><tspan x="1205" dy="0">La porte ressemble a un mur decoratif ou</tspan><tspan x="1205" dy="24">a un simple passage.</tspan></text><line class="tableLine" x1="84" y1="524" x2="1716" y2="524" /><text class="text" x="90" y="544" text-anchor="start"><tspan x="90" dy="0">Ou puis-je reparer ?</tspan></text><text class="small" x="390" y="544" text-anchor="start"><tspan x="390" dy="0">Chercher la surface de reparation en</tspan><tspan x="390" dy="24">condition d&apos;alarme.</tspan></text><text class="small" x="810" y="544" text-anchor="start"><tspan x="810" dy="0">Le mur reserve se repere vite, sans props</tspan><tspan x="810" dy="24">parasites.</tspan></text><text class="small" x="1205" y="544" text-anchor="start"><tspan x="1205" dy="0">Le point reparable est enfoui sous</tspan><tspan x="1205" dy="24">tuyaux, armoires ou clutter.</tspan></text><line class="tableLine" x1="84" y1="634" x2="1716" y2="634" /><text class="text" x="90" y="654" text-anchor="start"><tspan x="90" dy="0">Qu&apos;est-ce qui devient</tspan><tspan x="90" dy="24">dangereux si la coque casse</tspan><tspan x="90" dy="24">?</tspan></text><text class="small" x="390" y="654" text-anchor="start"><tspan x="390" dy="0">Casser une zone avant, puis une zone</tspan><tspan x="390" dy="24">plafond, puis la zone haute arriere.</tspan></text><text class="small" x="810" y="654" text-anchor="start"><tspan x="810" dy="0">Le danger change de place et de nature :</tspan><tspan x="810" dy="24">fuite, succion, point haut expose.</tspan></text><text class="small" x="1205" y="654" text-anchor="start"><tspan x="1205" dy="0">Toutes les pannes se ressemblent et</tspan><tspan x="1205" dy="24">aucun endroit ne raconte le risque.</tspan></text><line class="tableLine" x1="84" y1="750" x2="1716" y2="750" /><text class="text" x="90" y="770" text-anchor="start"><tspan x="90" dy="0">Deux joueurs se genent-ils</tspan><tspan x="90" dy="24">ou se coordonnent-ils ?</tspan></text><text class="small" x="390" y="770" text-anchor="start"><tspan x="390" dy="0">Mettre un joueur au helm, un autre a la</tspan><tspan x="390" dy="24">pompe, puis forcer un deplacement vers la</tspan><tspan x="390" dy="24">porte.</tspan></text><text class="small" x="810" y="770" text-anchor="start"><tspan x="810" dy="0">Les trajectoires se croisent peu et la</tspan><tspan x="810" dy="24">coordination reste lisible.</tspan></text><text class="small" x="1205" y="770" text-anchor="start"><tspan x="1205" dy="0">Les deux joueurs bloquent la meme bande</tspan><tspan x="1205" dy="24">et les stations se mangent entre elles.</tspan></text><line class="tableLine" x1="84" y1="866" x2="1716" y2="866" /><text class="text" x="90" y="886" text-anchor="start"><tspan x="90" dy="0">L&apos;axe avant / arriere</tspan><tspan x="90" dy="24">reste-t-il clair ?</tspan></text><text class="small" x="390" y="886" text-anchor="start"><tspan x="390" dy="0">Faire le test dans le noir ou avec l&apos;eau qui</tspan><tspan x="390" dy="24">monte.</tspan></text><text class="small" x="810" y="886" text-anchor="start"><tspan x="810" dy="0">Le sens de la proue et du local arriere</tspan><tspan x="810" dy="24">reste evident.</tspan></text><text class="small" x="1205" y="886" text-anchor="start"><tspan x="1205" dy="0">Une fois en panique, tout l&apos;interieur</tspan><tspan x="1205" dy="24">devient symetrique.</tspan></text><line class="tableLine" x1="84" y1="976" x2="1716" y2="976" /><rect class="panelAlt" x="90" y="1128" width="500" height="88" rx="16" /><circle class="ok" cx="122" cy="1172" r="12" /><text class="small" x="150" y="1170" text-anchor="start"><tspan x="150" dy="0">Succes : le joueur nomme le bon endroit et s&apos;y</tspan><tspan x="150" dy="22">rend sans tutoriel.</tspan></text><rect class="panelAlt" x="620" y="1128" width="500" height="88" rx="16" /><circle class="warn" cx="652" cy="1172" r="12" /><text class="small" x="680" y="1170" text-anchor="start"><tspan x="680" dy="0">A revoir : le joueur comprend, mais trop</tspan><tspan x="680" dy="22">lentement ou avec HUD uniquement.</tspan></text><rect class="panelAlt" x="1150" y="1128" width="566" height="88" rx="16" /><circle class="danger" cx="1182" cy="1172" r="12" /><text class="small" x="1210" y="1170" text-anchor="start"><tspan x="1210" dy="0">Echec : il ne sait pas ou aller, ou l&apos;espace bloque la</tspan><tspan x="1210" dy="22">cooperation.</tspan></text>
+</svg>

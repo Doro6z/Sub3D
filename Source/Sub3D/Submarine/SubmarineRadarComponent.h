@@ -22,6 +22,9 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Submarine|Radar")
 	const TArray<FRadarContact>& GetContacts() const { return Contacts; }
 
+	UFUNCTION(BlueprintPure, Category = "Submarine|Radar")
+	float GetPingProgress01() const { return FMath::Clamp(TimeSinceLastPing / FMath::Max(0.1f, PingIntervalSeconds), 0.f, 1.f); }
+
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Submarine|Radar")
 	float PingRadiusCm = 20000.f;
 

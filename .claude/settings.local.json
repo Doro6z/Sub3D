@@ -1,0 +1,10 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(find C:ACCProjectsSub3D -maxdepth 1 -type f \\\\\\(-name *.md -o -name *.pdf -o -name *.docx -o -name *.txt \\\\\\))",
+      "Bash(find . -name *.md -type f)",
+      "Bash(wc -l /c/Dev/Sub3D/Source/Sub3D/WorldGen/*.cpp /c/Dev/Sub3D/Source/Sub3D/WorldGen/*.h)",
+      "Bash(wc -l /c/Dev/Sub3D/Source/Sub3D/ProcGen/*.cpp /c/Dev/Sub3D/Source/Sub3D/ProcGen/*.h)"
+    ]
+  }
+}

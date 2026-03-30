@@ -25,6 +25,17 @@ struct FSubCompartmentDef
 
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Compartment")
 	float CapacityLiters = 12000.f;
+
+	// Interior hydraulic volume used by flooding, immersion and future water visuals.
+	// This is intentionally distinct from structural sheets and envelope hull bounds.
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Compartment|Hydro")
+	FVector HydroBoundsMin = FVector::ZeroVector;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Compartment|Hydro")
+	FVector HydroBoundsMax = FVector::ZeroVector;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Compartment|Hydro")
+	float WalkableFloorZCm = 0.f;
 };
 
 USTRUCT(BlueprintType)
@@ -174,12 +185,38 @@ struct FCompartmentRuntimeState
 	float WaterLevelNormalized = 0.f;
 
 	UPROPERTY()
+	float WaterHeightCm = 0.f;
+
+	UPROPERTY()
+	float MaxWaterHeightCm = 200.f;
+
+	UPROPERTY()
+	float FreeAirLiters = 12000.f;
+
+	UPROPERTY()
+	float InternalPressureKPa = 101.325f;
+
+	UPROPERTY()
+	float ExternalReferencePressureKPa = 101.325f;
+
+	UPROPERTY()
+	float PressureDeltaKPa = 0.f;
+
+	UPROPERTY()
 	float FloodRateIn = 0.f;
+
+	UPROPERTY()
+	float FloodRateOut = 0.f;
 
 	UPROPERTY()
 	float PumpRateOut = 0.f;
 
 	UPROPERTY()
 	bool bPumpActive = false;
-};
 
+	UPROPERTY()
+	bool bFullyFlooded = false;
+
+	UPROPERTY()
+	bool bPressureCritical = false;
+};

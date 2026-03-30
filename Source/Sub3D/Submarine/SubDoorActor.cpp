@@ -1,11 +1,13 @@
 #include "SubDoorActor.h"
 
+#include "Components/PrimitiveComponent.h"
 #include "Components/StaticMeshComponent.h"
 #include "InteractableComponent.h"
 #include "Net/UnrealNetwork.h"
 #include "SubCrewCharacter.h"
 #include "SubmarineBase.h"
 #include "SubmarineCompartmentComponent.h"
+#include "SubmarineLayoutAsset.h"
 
 ASubDoorActor::ASubDoorActor()
 {
@@ -18,6 +20,8 @@ ASubDoorActor::ASubDoorActor()
 	DoorMesh = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("DoorMesh"));
 	DoorMesh->SetupAttachment(Root);
 	DoorMesh->SetCollisionProfileName(TEXT("BlockAll"));
+	DoorMesh->SetCollisionResponseToChannel(ECC_GameTraceChannel1, ECR_Ignore);
+	DoorMesh->SetCanEverAffectNavigation(false);
 
 	Interactable = CreateDefaultSubobject<UInteractableComponent>(TEXT("Interactable"));
 }
@@ -25,6 +29,8 @@ ASubDoorActor::ASubDoorActor()
 void ASubDoorActor::BeginPlay()
 {
 	Super::BeginPlay();
+
+	ApplySubmarineCollisionIgnoreToAllPrimitiveComponents();
 
 	bClosed = bStartsClosed;
 	TryResolveOwningSubmarine();
@@ -59,6 +65,14 @@ void ASubDoorActor::SetDoorClosed(bool bNewClosed)
 void ASubDoorActor::ToggleDoor()
 {
 	SetDoorClosed(!bClosed);
+}
+
+void ASubDoorActor::InitializeFromDoorDef(const FDoorDef& DoorDef, FName InCompartmentA, FName InCompartmentB, ASubmarineBase* InOwningSubmarine)
+{
+	DoorId = DoorDef.DoorId;
+	CompartmentA = InCompartmentA;
+	CompartmentB = InCompartmentB;
+	OwningSubmarine = InOwningSubmarine;
 }
 
 void ASubDoorActor::HandleInteract(ASubCrewCharacter* Interactor)
@@ -104,13 +118,32 @@ void ASubDoorActor::TryResolveOwningSubmarine()
 
 void ASubDoorActor::ApplyDoorState()
 {
+	ApplySubmarineCollisionIgnoreToAllPrimitiveComponents();
+
 	if (DoorMesh)
 	{
-		DoorMesh->SetCollisionEnabled(bClosed ? ECollisionEnabled::QueryAndPhysics : ECollisionEnabled::NoCollision);
+		DoorMesh->SetCollisionEnabled(bClosed ? ECollisionEnabled::QueryOnly : ECollisionEnabled::NoCollision);
+		DoorMesh->SetCollisionResponseToChannel(ECC_GameTraceChannel1, ECR_Ignore);
 		DoorMesh->SetVisibility(true);
 	}
 
 	BP_OnDoorStateChanged(bClosed);
+}
+
+void ASubDoorActor::ApplySubmarineCollisionIgnoreToAllPrimitiveComponents()
+{
+	TInlineComponentArray<UPrimitiveComponent*> PrimitiveComponents;
+	GetComponents(PrimitiveComponents);
+
+	for (UPrimitiveComponent* PrimitiveComponent : PrimitiveComponents)
+	{
+		if (!PrimitiveComponent)
+		{
+			continue;
+		}
+
+		PrimitiveComponent->SetCollisionResponseToChannel(ECC_GameTraceChannel1, ECR_Ignore);
+	}
 }
 
 void ASubDoorActor::RegisterWithCompartments()

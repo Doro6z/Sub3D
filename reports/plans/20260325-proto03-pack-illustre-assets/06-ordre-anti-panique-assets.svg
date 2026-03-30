@@ -1,0 +1,51 @@
+<svg viewBox="0 0 1800 1420" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="title desc">
+  <title id="title">Ordre anti-panique pour produire les assets</title>
+  <desc id="desc">Ordre de travail pragmatique pour produire les assets du premier sous-marin.</desc>
+
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#f4efe6"/>
+    </marker>
+    <style><![CDATA[
+      .bg { fill: #0f1419; }
+      .panel { fill: #172028; stroke: #43525d; stroke-width: 2; }
+      .panelAlt { fill: #131b22; stroke: #34414a; stroke-width: 2; }
+      .frame { fill: none; stroke: #9ca8af; stroke-width: 4; }
+      .grid { fill: none; stroke: #34414a; stroke-width: 1; stroke-dasharray: 6 8; opacity: 0.45; }
+      .bulkhead { stroke: #98a4ad; stroke-width: 8; }
+      .doorGap { stroke: #0f1419; stroke-width: 14; }
+      .repair { fill: none; stroke: #ead59b; stroke-width: 4; stroke-dasharray: 12 10; }
+      .pathBand { fill: #f0eadb; opacity: 0.12; stroke: #f4efe6; stroke-width: 2; }
+      .dim { fill: none; stroke: #f4efe6; stroke-width: 2.2; }
+      .danger { fill: #de5a49; }
+      .ok { fill: #82c97b; }
+      .warn { fill: #e3b65b; }
+      .title { fill: #f4efe6; font: 700 42px Arial, 'Segoe UI', sans-serif; }
+      .subtitle { fill: #d1c9b8; font: 19px Arial, 'Segoe UI', sans-serif; }
+      .h1 { fill: #f4efe6; font: 700 28px Arial, 'Segoe UI', sans-serif; }
+      .h2 { fill: #f4efe6; font: 700 22px Arial, 'Segoe UI', sans-serif; }
+      .text { fill: #f4efe6; font: 19px Arial, 'Segoe UI', sans-serif; }
+      .small { fill: #d1c9b8; font: 17px Arial, 'Segoe UI', sans-serif; }
+      .mono { fill: #f4efe6; font: 17px Consolas, 'Courier New', monospace; }
+      .navFill { fill: #4a3b17; stroke: #d4a93a; stroke-width: 2.5; }
+      .ballFill { fill: #274854; stroke: #66b7c8; stroke-width: 2.5; }
+      .propFill { fill: #233c61; stroke: #5a95dc; stroke-width: 2.5; }
+      .confFill { fill: #4f3022; stroke: #c66e3a; stroke-width: 2.5; }
+      .senseFill { fill: #4a341a; stroke: #bb8638; stroke-width: 2.5; }
+      .navSolid { fill: #d4a93a; }
+      .ballSolid { fill: #66b7c8; }
+      .propSolid { fill: #5a95dc; }
+      .confSolid { fill: #c66e3a; }
+      .senseSolid { fill: #bb8638; }
+      .whiteStroke { fill: none; stroke: #f4efe6; stroke-width: 3; }
+      .tank { fill: #66b7c8; stroke: #d8f3fb; stroke-width: 2; }
+      .tag { fill: #e7d8a2; }
+      .tag2 { fill: #6a7c86; }
+      .tagText { fill: #0f1419; font: 700 16px Arial, 'Segoe UI', sans-serif; }
+      .tableLine { stroke: #34414a; stroke-width: 2; }
+    ]]></style>
+  </defs>
+
+  <rect class="bg" x="0" y="0" width="1800" height="1420"/>
+<text class="title" x="60" y="62">Planche 6 - Ordre anti-panique pour produire les assets</text><text class="subtitle" x="60" y="98">Decoupage du travail pour reduire la charge mentale. On fabrique d&apos;abord ce qui rend le jeu lisible et testable.</text><rect class="panel" x="60" y="170" width="1680" height="182" rx="20" /><rect x="60" y="170" width="18" height="182" fill="#d1c9b8" rx="8"/><text class="h1" x="98" y="212" text-anchor="start"><tspan x="98" dy="0">Niveau 0</tspan><tspan x="98" dy="28">Structure</tspan></text><text class="mono" x="316" y="210" text-anchor="start"><tspan x="316" dy="0">2 meshes</tspan></text><text class="text" x="470" y="210" text-anchor="start"><tspan x="470" dy="0">SM_HullShell_Ext_A, SM_HullShell_Int_A</tspan></text><text class="small" x="470" y="286" text-anchor="start"><tspan x="470" dy="0">Sans coque interieure et exterieure, aucun repere n&apos;existe.</tspan></text><rect class="panel" x="60" y="376" width="1680" height="182" rx="20" /><rect x="60" y="376" width="18" height="182" fill="#c66e3a" rx="8"/><text class="h1" x="98" y="418" text-anchor="start"><tspan x="98" dy="0">Niveau 1</tspan><tspan x="98" dy="28">Confinement</tspan></text><text class="mono" x="316" y="416" text-anchor="start"><tspan x="316" dy="0">3 meshes</tspan></text><text class="text" x="470" y="416" text-anchor="start"><tspan x="470" dy="0">SM_BulkheadFrame_A, SM_BulkheadDoor_A, SM_HatchTrunk_A</tspan></text><text class="small" x="470" y="492" text-anchor="start"><tspan x="470" dy="0">Ces meshes donnent le rythme spatial et rendent les compartiments reels.</tspan></text><rect class="panel" x="60" y="582" width="1680" height="182" rx="20" /><rect x="60" y="582" width="18" height="182" fill="#d4a93a" rx="8"/><text class="h1" x="98" y="624" text-anchor="start"><tspan x="98" dy="0">Niveau 2</tspan><tspan x="98" dy="28">Reperes de jeu</tspan></text><text class="mono" x="316" y="622" text-anchor="start"><tspan x="316" dy="0">5 meshes</tspan></text><text class="text" x="470" y="622" text-anchor="start"><tspan x="470" dy="0">SM_HelmConsole_A, SM_BallastConsole_A, SM_EngineBlock_A,</tspan><tspan x="470" dy="24">SM_PumpModule_A, SM_RepairWallPanel_A</tspan></text><text class="small" x="470" y="698" text-anchor="start"><tspan x="470" dy="0">Si ceux-la sont bons, le sous-marin devient deja jouable.</tspan></text><rect class="panel" x="60" y="788" width="1680" height="182" rx="20" /><rect x="60" y="788" width="18" height="182" fill="#5a95dc" rx="8"/><text class="h1" x="98" y="830" text-anchor="start"><tspan x="98" dy="0">Niveau 3</tspan><tspan x="98" dy="28">Kit de soutien</tspan></text><text class="mono" x="316" y="828" text-anchor="start"><tspan x="316" dy="0">8 a 10 meshes</tspan></text><text class="text" x="470" y="828" text-anchor="start"><tspan x="470" dy="0">SM_ValveManifold_A, SM_PowerCabinet_A, SM_CableTray_A,</tspan><tspan x="470" dy="24">SM_PipeStraight_A, SM_PipeElbow_A</tspan></text><text class="small" x="470" y="904" text-anchor="start"><tspan x="470" dy="0">Ils enrichissent sans remettre en cause le layout valide.</tspan></text><rect class="panel" x="60" y="994" width="1680" height="182" rx="20" /><rect x="60" y="994" width="18" height="182" fill="#bb8638" rx="8"/><text class="h1" x="98" y="1036" text-anchor="start"><tspan x="98" dy="0">Niveau 4</tspan><tspan x="98" dy="28">Extensions</tspan></text><text class="mono" x="316" y="1034" text-anchor="start"><tspan x="316" dy="0">facultatif proto</tspan></text><text class="text" x="470" y="1034" text-anchor="start"><tspan x="470" dy="0">SM_RadarMast_A, SM_TurretBase_A, SM_RadarConsole_A</tspan></text><text class="small" x="470" y="1110" text-anchor="start"><tspan x="470" dy="0">Seulement quand le proto principal est stable.</tspan></text><rect class="panelAlt" x="60" y="1218" width="820" height="160" rx="18" /><text class="h2" x="88" y="1260" text-anchor="start"><tspan x="88" dy="0">Regle psychologique</tspan></text><text class="text" x="88" y="1304" text-anchor="start"><tspan x="88" dy="0">Tu ne fabriques pas &apos;un sous-marin entier&apos;.</tspan><tspan x="88" dy="28">Tu fabriques d&apos;abord 10 meshes qui rendent le sous-marin jouable.</tspan></text><rect class="panelAlt" x="920" y="1218" width="820" height="160" rx="18" /><text class="h2" x="948" y="1260" text-anchor="start"><tspan x="948" dy="0">Interdit avant validation</tspan></text><text class="text" x="948" y="1304" text-anchor="start"><tspan x="948" dy="0">Ne pas passer du temps sur : boulons hero, clutter, tuyaux tres fins, micro variantes,</tspan><tspan x="948" dy="28">matiere finale complexe, decalcomanies de lore, greeble de tourelle.</tspan></text>
+</svg>

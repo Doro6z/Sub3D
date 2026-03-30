@@ -1,0 +1,17 @@
+<svg width="800" height="200" viewBox="0 0 800 200" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <!-- Submarine Hull -->
+  <path d="M50 100 C 50 70, 150 60, 400 60 L 700 60 C 750 60, 780 80, 780 100 C 780 120, 750 140, 700 140 L 400 140 C 150 140, 50 130, 50 100 Z" fill="white"/>
+  
+  <!-- Sail / Command Tower -->
+  <path d="M350 60 L 370 20 L 430 20 L 450 60 Z" fill="white"/>
+  
+  <!-- Rear Vertical Stabilizer -->
+  <path d="M700 60 L 730 30 L 760 60 Z" fill="white"/>
+  <path d="M700 140 L 730 170 L 760 140 Z" fill="white"/>
+  
+  <!-- Rear Horizontal Stabilizer (Projected) -->
+  <rect x="730" y="90" width="40" height="20" rx="2" fill="white"/>
+  
+  <!-- Front Diving Planes -->
+  <rect x="150" y="95" width="40" height="10" rx="2" fill="white"/>
+</svg>

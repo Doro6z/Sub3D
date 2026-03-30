@@ -1,0 +1,51 @@
+<svg viewBox="0 0 1800 1280" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="title desc">
+  <title id="title">Sas : option retenue et evolution future</title>
+  <desc id="desc">Comparatif entre le sas dorsal simple et le micro-etage a deux portes.</desc>
+
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#f4efe6"/>
+    </marker>
+    <style><![CDATA[
+      .bg { fill: #0f1419; }
+      .panel { fill: #172028; stroke: #43525d; stroke-width: 2; }
+      .panelAlt { fill: #131b22; stroke: #34414a; stroke-width: 2; }
+      .frame { fill: none; stroke: #9ca8af; stroke-width: 4; }
+      .grid { fill: none; stroke: #34414a; stroke-width: 1; stroke-dasharray: 6 8; opacity: 0.45; }
+      .bulkhead { stroke: #98a4ad; stroke-width: 8; }
+      .doorGap { stroke: #0f1419; stroke-width: 14; }
+      .repair { fill: none; stroke: #ead59b; stroke-width: 4; stroke-dasharray: 12 10; }
+      .pathBand { fill: #f0eadb; opacity: 0.12; stroke: #f4efe6; stroke-width: 2; }
+      .dim { fill: none; stroke: #f4efe6; stroke-width: 2.2; }
+      .danger { fill: #de5a49; }
+      .ok { fill: #82c97b; }
+      .warn { fill: #e3b65b; }
+      .title { fill: #f4efe6; font: 700 42px Arial, 'Segoe UI', sans-serif; }
+      .subtitle { fill: #d1c9b8; font: 19px Arial, 'Segoe UI', sans-serif; }
+      .h1 { fill: #f4efe6; font: 700 28px Arial, 'Segoe UI', sans-serif; }
+      .h2 { fill: #f4efe6; font: 700 22px Arial, 'Segoe UI', sans-serif; }
+      .text { fill: #f4efe6; font: 19px Arial, 'Segoe UI', sans-serif; }
+      .small { fill: #d1c9b8; font: 17px Arial, 'Segoe UI', sans-serif; }
+      .mono { fill: #f4efe6; font: 17px Consolas, 'Courier New', monospace; }
+      .navFill { fill: #4a3b17; stroke: #d4a93a; stroke-width: 2.5; }
+      .ballFill { fill: #274854; stroke: #66b7c8; stroke-width: 2.5; }
+      .propFill { fill: #233c61; stroke: #5a95dc; stroke-width: 2.5; }
+      .confFill { fill: #4f3022; stroke: #c66e3a; stroke-width: 2.5; }
+      .senseFill { fill: #4a341a; stroke: #bb8638; stroke-width: 2.5; }
+      .navSolid { fill: #d4a93a; }
+      .ballSolid { fill: #66b7c8; }
+      .propSolid { fill: #5a95dc; }
+      .confSolid { fill: #c66e3a; }
+      .senseSolid { fill: #bb8638; }
+      .whiteStroke { fill: none; stroke: #f4efe6; stroke-width: 3; }
+      .tank { fill: #66b7c8; stroke: #d8f3fb; stroke-width: 2; }
+      .tag { fill: #e7d8a2; }
+      .tag2 { fill: #6a7c86; }
+      .tagText { fill: #0f1419; font: 700 16px Arial, 'Segoe UI', sans-serif; }
+      .tableLine { stroke: #34414a; stroke-width: 2; }
+    ]]></style>
+  </defs>
+
+  <rect class="bg" x="0" y="0" width="1800" height="1280"/>
+<text class="title" x="60" y="62">Planche 9 - Sas : option retenue et evolution future</text><text class="subtitle" x="60" y="98">Comparaison franche entre le sas dorsal simple du premier proto et le micro-etage a deux portes envisage plus tard.</text><rect class="panel" x="60" y="150" width="810" height="1000" rx="20" /><text class="h1" x="88" y="188" text-anchor="start"><tspan x="88" dy="0">Option A - Recommandee maintenant</tspan></text><text class="small" x="88" y="230" text-anchor="start"><tspan x="88" dy="0">Local arriere + tronc dorsal + ecoutille plafond</tspan></text><rect class="frame" x="122" y="448" width="620" height="188" rx="94" /><rect class="ballFill" x="222" y="488" width="110" height="82" rx="12" /><rect class="navFill" x="414" y="482" width="110" height="88" rx="12" /><rect class="propFill" x="612" y="476" width="150" height="96" rx="12" /><rect class="confFill" x="690" y="352" width="58" height="110" rx="12" /><rect class="confSolid" x="704" y="316" width="32" height="28" rx="8" /><text class="small" x="760" y="334" text-anchor="start"><tspan x="760" dy="0">Ecoutille</tspan></text><text class="small" x="654" y="386" text-anchor="start"><tspan x="654" dy="0">Tronc</tspan></text><line class="whiteStroke" x1="719" y1="372" x2="719" y2="454" /><line class="whiteStroke" x1="707" y1="392" x2="731" y2="392" /><line class="whiteStroke" x1="707" y1="416" x2="731" y2="416" /><line class="whiteStroke" x1="707" y1="440" x2="731" y2="440" /><text class="text" x="88" y="720" text-anchor="start"><tspan x="88" dy="0">Avantages :</tspan><tspan x="88" dy="34">1. Compatible avec le code actuel et avec la lecture en 4 volumes.</tspan><tspan x="88" dy="34">2. Faible cout de mesh, faible risque de layout.</tspan><tspan x="88" dy="34">3. Laisse intacte la bande de circulation principale.</tspan><tspan x="88" dy="34">4. Suffisant pour un premier prototype testable.</tspan></text><text class="small" x="88" y="950" text-anchor="start"><tspan x="88" dy="0">Contrainte :</tspan><tspan x="88" dy="24">le volume arriere doit quand meme etre dimensionne</tspan><tspan x="88" dy="24">pour qu&apos;une future version a deux portes reste possible.</tspan></text><rect class="panel" x="930" y="150" width="810" height="1000" rx="20" /><text class="h1" x="958" y="188" text-anchor="start"><tspan x="958" dy="0">Option B - Evolution future</tspan></text><text class="small" x="958" y="230" text-anchor="start"><tspan x="958" dy="0">Micro-etage superieur avec vrai sas a deux portes</tspan></text><rect class="frame" x="1002" y="448" width="620" height="188" rx="94" /><rect class="confFill" x="1204" y="490" width="118" height="82" rx="12" /><rect class="confFill" x="1240" y="360" width="76" height="116" rx="12" /><rect class="confSolid" x="1252" y="316" width="52" height="32" rx="8" /><line class="whiteStroke" x1="1278" y1="378" x2="1278" y2="464" /><line class="whiteStroke" x1="1266" y1="402" x2="1290" y2="402" /><line class="whiteStroke" x1="1266" y1="426" x2="1290" y2="426" /><text class="small" x="1334" y="338" text-anchor="start"><tspan x="1334" dy="0">Porte ext.</tspan></text><text class="small" x="1334" y="404" text-anchor="start"><tspan x="1334" dy="0">Sas haut</tspan></text><text class="small" x="1334" y="526" text-anchor="start"><tspan x="1334" dy="0">Porte int.</tspan></text><text class="text" x="958" y="720" text-anchor="start"><tspan x="958" dy="0">Interet :</tspan><tspan x="958" dy="34">1. Plus riche pour sortie, pression et procedures.</tspan><tspan x="958" dy="34">2. Plus fort en fantasy sous-marin classique.</tspan><tspan x="958" dy="34">3. Ouvre du gameplay specifique de verrouillage.</tspan></text><text class="small" x="958" y="900" text-anchor="start"><tspan x="958" dy="0">Couts :</tspan><tspan x="958" dy="24">1. Volume vertical supplementaire a assumer.</tspan><tspan x="958" dy="24">2. Plus d&apos;assets et plus de contraintes de circulation.</tspan><tspan x="958" dy="24">3. Plus de travail pour rester lisible et ergonomique.</tspan></text><rect class="panelAlt" x="60" y="1180" width="1680" height="70" rx="18" /><text class="text" x="90" y="1222" text-anchor="start"><tspan x="90" dy="0">Verdict : construire l&apos;Option A maintenant, mais reserver la masse et les ancrages pour migrer plus tard vers l&apos;Option B sans refaire toute la coque.</tspan></text>
+</svg>

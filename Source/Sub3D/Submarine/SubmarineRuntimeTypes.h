@@ -45,6 +45,9 @@ struct FSubmarineCommandState
 	bool bTurretFireHeld = false;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Command")
+	bool bBallastsActive = true;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Command")
 	int32 LastProcessedFrame = 0;
 };
 
@@ -103,6 +106,18 @@ struct FCompartmentState
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Compartment")
 	float WaterMassLiters = 0.f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Compartment")
+	float WaterHeightCm = 0.f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Compartment")
+	float InternalPressureKPa = 101.325f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Compartment")
+	float ExternalPressureKPa = 101.325f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Compartment")
+	float PressureDeltaKPa = 0.f;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Compartment")
 	bool bCritical = false;

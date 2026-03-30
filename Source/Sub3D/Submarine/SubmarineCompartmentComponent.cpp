@@ -95,6 +95,20 @@ bool USubmarineCompartmentComponent::IsDoorClosed(FName DoorId) const
 	return false;
 }
 
+bool USubmarineCompartmentComponent::TryGetDoorState(FName DoorId, FDoorState& OutDoorState) const
+{
+	if (const FDoorState* Door = Doors.FindByPredicate([DoorId](const FDoorState& Existing)
+	{
+		return Existing.DoorId == DoorId;
+	}))
+	{
+		OutDoorState = *Door;
+		return true;
+	}
+
+	return false;
+}
+
 float USubmarineCompartmentComponent::GetCompartmentFlood01(FName CompartmentId) const
 {
 	if (const FCompartmentState* Comp = Compartments.FindByPredicate([CompartmentId](const FCompartmentState& Existing)

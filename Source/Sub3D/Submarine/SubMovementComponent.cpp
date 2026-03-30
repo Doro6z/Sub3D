@@ -1,5 +1,6 @@
 #include "SubMovementComponent.h"
 
+#include "Components/PrimitiveComponent.h"
 #include "GameFramework/Actor.h"
 #include "Net/UnrealNetwork.h"
 #include "SubmarineBase.h"
@@ -52,7 +53,36 @@ void USubMovementComponent::TickComponent(float DeltaTime, ELevelTick TickType, 
 {
 	Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
 
-	if (!GetOwner() || !GetOwner()->HasAuthority())
+	AActor* Owner = GetOwner();
+	if (!Owner)
+	{
+		return;
+	}
+
+	if (const ASubmarineBase* Submarine = Cast<ASubmarineBase>(Owner))
+	{
+		if (Submarine->bFreezeMovementForTesting)
+		{
+			Velocity = FVector::ZeroVector;
+			CurrentDepth = FMath::Max(0.f, -Owner->GetActorLocation().Z / 100.f);
+
+			if (Owner->HasAuthority())
+			{
+				if (ASubmarineBase* MutableSubmarine = Cast<ASubmarineBase>(Owner))
+				{
+					MutableSubmarine->RefreshRepState();
+				}
+			}
+			else
+			{
+				InterpAlpha = 1.f;
+			}
+
+			return;
+		}
+	}
+
+	if (!Owner->HasAuthority())
 	{
 		InterpolateClient(DeltaTime);
 		return;
@@ -139,7 +169,17 @@ void USubMovementComponent::ApplyPhysics(float DeltaTime)
 	const FVector LocalVelM = LocalVelCm / 100.f;
 
 	FVector LocalDragN;
-	LocalDragN.X = -0.5f * WaterDensity * DragCoefficients.X * CrossSections.X * LocalVelM.X * FMath::Abs(LocalVelM.X);
+	
+	// Custom physics: very low drag while moving forwards/backwards to let it glide. 
+	// Ramp up drag significantly at lower speeds to stabilize and brake.
+	float DynamicDragX = DragCoefficients.X * 0.05f; 
+	if (FMath::Abs(ThrustInput) < 0.01f && FMath::Abs(LocalVelCm.X) < IdleDampingSpeedThreshold)
+	{
+		float BrakeAlpha = 1.0f - (FMath::Abs(LocalVelCm.X) / FMath::Max(1.f, IdleDampingSpeedThreshold));
+		DynamicDragX = FMath::Lerp(DynamicDragX, 2.5f, BrakeAlpha);
+	}
+
+	LocalDragN.X = -0.5f * WaterDensity * DynamicDragX * CrossSections.X * LocalVelM.X * FMath::Abs(LocalVelM.X);
 	LocalDragN.Y = -0.5f * WaterDensity * DragCoefficients.Y * CrossSections.Y * LocalVelM.Y * FMath::Abs(LocalVelM.Y);
 	LocalDragN.Z = -0.5f * WaterDensity * DragCoefficients.Z * CrossSections.Z * LocalVelM.Z * FMath::Abs(LocalVelM.Z);
 
@@ -188,29 +228,112 @@ void USubMovementComponent::ApplyPhysics(float DeltaTime)
 
 	FVector ClampedLocalVelocity = OwnerTransform.InverseTransformVector(Velocity);
 	ClampedLocalVelocity.X = FMath::Clamp(ClampedLocalVelocity.X, -MaxReverseSpeed, MaxForwardSpeed);
-	if (FMath::Abs(ThrustInput) < 0.01f)
+	
+	// Only force absolute zeroing interpolation at very low speed so it doesn't drift infinitely
+	if (FMath::Abs(ThrustInput) < 0.01f && FMath::Abs(ClampedLocalVelocity.X) < 15.f)
 	{
 		ClampedLocalVelocity.X = FMath::FInterpTo(ClampedLocalVelocity.X, 0.f, DeltaTime, IdleForwardSpeedDamping);
 	}
+
+	// Redirection: transfer a small part of killed lateral speed to forward speed (keel effect) 
+	// so the submarine doesn't stop dead when turning.
+	float OldY = ClampedLocalVelocity.Y;
 	ClampedLocalVelocity.Y = FMath::FInterpTo(ClampedLocalVelocity.Y, 0.f, DeltaTime, LateralSpeedDamping);
+	float KilledY = FMath::Abs(OldY - ClampedLocalVelocity.Y);
+	if (FMath::Abs(ThrustInput) > 0.01f && FMath::Abs(ClampedLocalVelocity.X) > 10.f)
+	{
+		ClampedLocalVelocity.X += FMath::Sign(ClampedLocalVelocity.X) * KilledY * 0.15f;
+		ClampedLocalVelocity.X = FMath::Clamp(ClampedLocalVelocity.X, -MaxReverseSpeed, MaxForwardSpeed);
+	}
+
 	ClampedLocalVelocity.Z = FMath::Clamp(ClampedLocalVelocity.Z, -MaxVerticalSpeed, MaxVerticalSpeed);
 	Velocity = OwnerTransform.TransformVector(ClampedLocalVelocity);
 
 	const FVector DeltaLocation = Velocity * DeltaTime;
 	bool bHadBlockingHit = false;
-	const auto MoveWithSlide = [Owner](const FVector& MoveDelta, FVector& InOutVelocity)
+	const ASubmarineBase* SubmarineOwner = Cast<ASubmarineBase>(Owner);
+	const auto MoveWithSlide = [this, Owner, SubmarineOwner](const FVector& MoveDelta, FVector& InOutVelocity)
 	{
 		if (MoveDelta.IsNearlyZero())
 		{
 			return false;
 		}
 
+		UPrimitiveComponent* SweepComponent = SubmarineOwner ? SubmarineOwner->GetMovementCollisionComponent() : nullptr;
+		const bool bUseProxySweep = SweepComponent && SweepComponent != Owner->GetRootComponent();
+
+		const auto LogSweepHit = [this, Owner, SweepComponent, &InOutVelocity](const TCHAR* Phase, const FVector& AttemptedDelta, const FHitResult& Hit)
+		{
+			if (!bDebugLogCollisionSweeps || !Hit.bBlockingHit)
+			{
+				return;
+			}
+
+			const AActor* HitActor = Hit.GetActor();
+			const UPrimitiveComponent* HitComponent = Hit.GetComponent();
+			const AActor* HitActorOwner = HitActor ? HitActor->GetOwner() : nullptr;
+			const AActor* HitAttachParent = HitActor ? HitActor->GetAttachParentActor() : nullptr;
+			const AActor* HitComponentOwner = HitComponent ? HitComponent->GetOwner() : nullptr;
+			const bool bHitOwnActor = HitActor == Owner;
+			const bool bHitOwnerChildActor =
+				(HitActorOwner == Owner)
+				|| (HitAttachParent == Owner)
+				|| (HitActor && HitActor->IsAttachedTo(Owner))
+				|| (HitComponentOwner == Owner);
+			const bool bInternalConflict = bHitOwnActor || bHitOwnerChildActor;
+
+			UE_LOG(
+				LogSubMovement,
+				Log,
+				TEXT("CollisionSweep | Phase=%s | SweepComp=%s | HitActor=%s | HitActorOwner=%s | HitAttachParent=%s | HitComp=%s | HitCompOwner=%s | HitProfile=%s | Internal=%d | Time=%.3f | StartPen=%d | PenDepth=%.2f | Impact=%s | Normal=%s | Delta=%s | Velocity=%s"),
+				Phase,
+				*GetNameSafe(SweepComponent),
+				*GetNameSafe(HitActor),
+				*GetNameSafe(HitActorOwner),
+				*GetNameSafe(HitAttachParent),
+				*GetNameSafe(HitComponent),
+				*GetNameSafe(HitComponentOwner),
+				HitComponent ? *HitComponent->GetCollisionProfileName().ToString() : TEXT("None"),
+				bInternalConflict ? 1 : 0,
+				Hit.Time,
+				Hit.bStartPenetrating ? 1 : 0,
+				Hit.PenetrationDepth,
+				*Hit.ImpactPoint.ToCompactString(),
+				*Hit.Normal.ToCompactString(),
+				*AttemptedDelta.ToCompactString(),
+				*InOutVelocity.ToCompactString());
+		};
+
+		const auto SweepAgainstProxy = [SweepComponent](const FVector& AttemptedDelta, FHitResult& OutHit)
+		{
+			const FVector StartWorldLocation = SweepComponent->GetComponentLocation();
+			const FQuat StartWorldRotation = SweepComponent->GetComponentQuat();
+			SweepComponent->MoveComponent(AttemptedDelta, StartWorldRotation, true, &OutHit, MOVECOMP_NoFlags, ETeleportType::None);
+			const FVector AppliedDelta = SweepComponent->GetComponentLocation() - StartWorldLocation;
+			SweepComponent->SetWorldLocationAndRotation(StartWorldLocation, StartWorldRotation, false, nullptr, ETeleportType::TeleportPhysics);
+			return AppliedDelta;
+		};
+
 		FHitResult Hit;
-		Owner->AddActorWorldOffset(MoveDelta, true, &Hit, ETeleportType::None);
+		if (bUseProxySweep)
+		{
+			const FVector AppliedDelta = SweepAgainstProxy(MoveDelta, Hit);
+			if (!AppliedDelta.IsNearlyZero())
+			{
+				Owner->AddActorWorldOffset(AppliedDelta, false, nullptr, ETeleportType::None);
+			}
+		}
+		else
+		{
+			Owner->AddActorWorldOffset(MoveDelta, true, &Hit, ETeleportType::None);
+		}
+
 		if (!Hit.bBlockingHit)
 		{
 			return false;
 		}
+
+		LogSweepHit(TEXT("Primary"), MoveDelta, Hit);
 
 		if (Hit.bStartPenetrating)
 		{
@@ -223,7 +346,20 @@ void USubMovementComponent::ApplyPhysics(float DeltaTime)
 		if (!SlideDelta.IsNearlyZero())
 		{
 			FHitResult SlideHit;
-			Owner->AddActorWorldOffset(SlideDelta, true, &SlideHit, ETeleportType::None);
+			if (bUseProxySweep)
+			{
+				const FVector AppliedSlideDelta = SweepAgainstProxy(SlideDelta, SlideHit);
+				if (!AppliedSlideDelta.IsNearlyZero())
+				{
+					Owner->AddActorWorldOffset(AppliedSlideDelta, false, nullptr, ETeleportType::None);
+				}
+			}
+			else
+			{
+				Owner->AddActorWorldOffset(SlideDelta, true, &SlideHit, ETeleportType::None);
+			}
+
+			LogSweepHit(TEXT("Slide"), SlideDelta, SlideHit);
 		}
 
 		InOutVelocity = FVector::VectorPlaneProject(InOutVelocity, Hit.Normal);
@@ -309,14 +445,14 @@ float USubMovementComponent::ComputeFloodedMassKg() const
 {
 	if (const ASubmarineBase* Sub = Cast<ASubmarineBase>(GetOwner()))
 	{
-		if (Sub->Compartments)
-		{
-			return Sub->Compartments->GetTotalWaterMassKg();
-		}
-
 		if (Sub->SubHull)
 		{
 			return Sub->SubHull->GetTotalWaterLiters();
+		}
+
+		if (Sub->Compartments)
+		{
+			return Sub->Compartments->GetTotalWaterMassKg();
 		}
 	}
 

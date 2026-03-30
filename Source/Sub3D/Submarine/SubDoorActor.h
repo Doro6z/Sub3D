@@ -9,6 +9,7 @@ class ASubCrewCharacter;
 class ASubmarineBase;
 class UInteractableComponent;
 class UStaticMeshComponent;
+struct FDoorDef;
 
 UCLASS(Blueprintable)
 class SUB3D_API ASubDoorActor : public AActor
@@ -57,6 +58,9 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Door")
 	void ToggleDoor();
 
+	UFUNCTION(BlueprintCallable, Category = "Door")
+	void InitializeFromDoorDef(const FDoorDef& DoorDef, FName InCompartmentA, FName InCompartmentB, ASubmarineBase* InOwningSubmarine);
+
 	UFUNCTION(BlueprintPure, Category = "Door")
 	bool IsDoorClosed() const { return bClosed; }
 
@@ -73,5 +77,6 @@ protected:
 private:
 	void TryResolveOwningSubmarine();
 	void ApplyDoorState();
+	void ApplySubmarineCollisionIgnoreToAllPrimitiveComponents();
 	void RegisterWithCompartments();
 };

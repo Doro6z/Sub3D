@@ -15,6 +15,7 @@ class UStaticMesh;
 class UStaticMeshComponent;
 class UMaterialInterface;
 class UMaterialInstanceDynamic;
+class UArrowComponent;
 
 // C11 — Runtime container for a generated route.
 // Server: builds, validates, holds collision + semantic data.
@@ -26,6 +27,7 @@ class SUB3D_API ATraversalRouteActor : public AActor
 
 public:
 	ATraversalRouteActor();
+	virtual void OnConstruction(const FTransform& Transform) override;
 
 	// ── Replication ──────────────────────────────────────────────────────────
 	// Only the "recipe" (spec + seeds + hash) is replicated — never the meshes.
@@ -65,6 +67,12 @@ public:
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Bake")
 	bool bAutoResolveBakedAssetFromHash = true;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Bake")
+	bool bUseBakedStaticMeshAtRuntime = false;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Bake|Persistence")
+	bool bPersistGeneratedRouteMeshInLevel = false;
 
 	UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Category="Bake")
 	TObjectPtr<UStaticMesh> BakedStaticMeshAsset;
@@ -132,6 +140,15 @@ public:
 	UFUNCTION(CallInEditor, Category="Bake")
 	void BakeCurrentRouteToStaticMeshAsset();
 
+	UFUNCTION(CallInEditor, Category="Bake|Persistence")
+	void PurgeGeneratedRouteMeshComponents();
+
+	UFUNCTION(CallInEditor, Category="Debug|Route")
+	void LogRouteEndpointDebugSummary();
+
+	UFUNCTION(CallInEditor, Category="Debug|Route")
+	void CopyComputedEndpointsToPlacedOverrides();
+
 	UFUNCTION(BlueprintCallable, Category="Route")
 	FTransform GetRouteStartTransformWorld() const;
 
@@ -143,6 +160,12 @@ public:
 
 	UFUNCTION(BlueprintCallable, Category="Route")
 	FTransform GetRouteEndDockTransformWorld() const;
+
+	UFUNCTION(BlueprintPure, Category="Route|Sonar")
+	USonarFieldComponent* GetSonarFieldComponent() const
+	{
+		return SonarField;
+	}
 
 	UFUNCTION(BlueprintCallable, Category="Debug|Visual")
 	void ConfigureCampaignDebugView(bool bEnableSegmentTint,
@@ -174,6 +197,11 @@ protected:
 	void OnRep_RouteNetSpec();
 
 private:
+	void RefreshEndpointDebugMarkers();
+	void UpdateEndpointDebugMarker(UArrowComponent* Marker, const FTransform& EndpointTransform, bool bHasTransform, float RadiusCm);
+	void RefreshPlacedEndpointOverrideMarkers();
+	void LogRouteEndpointDebugSummaryInternal() const;
+
 	UPROPERTY()
 	TObjectPtr<USonarFieldComponent> SonarField;
 
@@ -184,6 +212,36 @@ private:
 	UPROPERTY(Transient)
 	TObjectPtr<UStaticMeshComponent> BakedStaticMeshComponent;
 
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Debug|Route", meta=(AllowPrivateAccess="true"))
+	bool bShowEndpointDebugMarkers = true;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Route|Overrides", meta=(AllowPrivateAccess="true"))
+	bool bUsePlacedEndpointOverrides = false;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Debug|Route", meta=(AllowPrivateAccess="true"))
+	TObjectPtr<UArrowComponent> RouteStartMarker;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Debug|Route", meta=(AllowPrivateAccess="true"))
+	TObjectPtr<UArrowComponent> RouteStartDockMarker;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Debug|Route", meta=(AllowPrivateAccess="true"))
+	TObjectPtr<UArrowComponent> RouteEndMarker;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Debug|Route", meta=(AllowPrivateAccess="true"))
+	TObjectPtr<UArrowComponent> RouteEndDockMarker;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Route|Overrides", meta=(AllowPrivateAccess="true"))
+	TObjectPtr<UArrowComponent> PlacedRouteStartOverride;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Route|Overrides", meta=(AllowPrivateAccess="true"))
+	TObjectPtr<UArrowComponent> PlacedRouteStartDockOverride;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Route|Overrides", meta=(AllowPrivateAccess="true"))
+	TObjectPtr<UArrowComponent> PlacedRouteEndOverride;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Route|Overrides", meta=(AllowPrivateAccess="true"))
+	TObjectPtr<UArrowComponent> PlacedRouteEndDockOverride;
+
 	// Internal pipeline
 	bool RunPipeline(const FRouteGenSpec& Spec, const FRouteSeedCascade& Seeds);
 	void RefreshVisualDebugMaterials();
@@ -193,6 +251,7 @@ private:
 	void ClearMeshComponents();
 	void EnsureBakedStaticMeshComponent();
 	void ApplyBakedStaticMeshAsset(UStaticMesh* InMeshAsset);
+	void SetBakedStaticMeshRuntimeActive(bool bActive);
 	void RebuildManagedMeshComponentList();
 	void UpdateRouteEndpointTransforms(const TArray<FTraversalTopologyNode>& Nodes,
 		const TArray<FTraversalSkeletonSegment>& Skeleton);
