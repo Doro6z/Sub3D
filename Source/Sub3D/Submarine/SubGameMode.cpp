@@ -1,5 +1,6 @@
 #include "SubGameMode.h"
 
+#include "Components/PrimitiveComponent.h"
 #include "EngineUtils.h"
 #include "GameFramework/CharacterMovementComponent.h"
 #include "SubCrewCharacter.h"
@@ -95,6 +96,17 @@ void LogDepartureCollisionSnapshot(const ASubmarineBase* Submarine)
 			LogPrimitiveCollisionSnapshot(TEXT("AttachedActor"), Submarine, PrimitiveComponent);
 		}
 	}
+}
+
+bool IsAcceptedCrewBaseForSubmarine(const ASubmarineBase* Submarine, const UPrimitiveComponent* CandidateBase)
+{
+	if (!Submarine || !CandidateBase)
+	{
+		return false;
+	}
+
+	const TArray<UPrimitiveComponent*> WalkableComponents = Submarine->GetInteriorWalkableComponents();
+	return WalkableComponents.Num() == 0 || WalkableComponents.Contains(const_cast<UPrimitiveComponent*>(CandidateBase));
 }
 }
 
@@ -521,7 +533,7 @@ FTransform ASubGameMode::ResolveCrewSpawnTransform() const
 
 	if (IsValid(ActiveSubmarine))
 	{
-		SpawnXform = ActiveSubmarine->GetPrimaryCrewSpawnTransform();
+		SpawnXform = ActiveSubmarine->GetCrewEmbarkTransform();
 	}
 
 	SpawnXform.AddToTranslation(CrewSpawnOffset);
@@ -822,13 +834,16 @@ bool ASubGameMode::SpawnAndEmbarkPendingControllers()
 
 		if (!ValidateCrewBootstrap(ExistingCrew))
 		{
+			const UCharacterMovementComponent* MovementComponent = ExistingCrew->GetCharacterMovement();
+			const bool bAcceptedBase = IsAcceptedCrewBaseForSubmarine(ActiveSubmarine, ExistingCrew->GetMovementBase());
 			UE_LOG(
 				LogSubRun,
 				Warning,
-				TEXT("CrewValidation | Crew=%s | Base=%s | Walkable=%d | Sub=%s"),
+				TEXT("CrewValidation | Crew=%s | Base=%s | Walkable=%d | AcceptedBase=%d | Sub=%s"),
 				*GetNameSafe(ExistingCrew),
 				*GetNameSafe(ExistingCrew->GetMovementBase()),
-				ExistingCrew->GetCharacterMovement() && ExistingCrew->GetCharacterMovement()->CurrentFloor.IsWalkableFloor() ? 1 : 0,
+				MovementComponent && MovementComponent->CurrentFloor.IsWalkableFloor() ? 1 : 0,
+				bAcceptedBase ? 1 : 0,
 				*GetNameSafe(ExistingCrew->CurrentSubmarine));
 			bAllSucceeded = false;
 			continue;
@@ -860,7 +875,10 @@ bool ASubGameMode::ValidateCrewBootstrap(ASubCrewCharacter* Crew) const
 		return false;
 	}
 
+	const UPrimitiveComponent* MovementBase = Crew->GetMovementBase();
 	return Crew->CurrentSubmarine == ActiveSubmarine
-		&& Crew->GetMovementBase() != nullptr
+		&& MovementBase != nullptr
+		&& Move->CurrentFloor.IsWalkableFloor()
+		&& IsAcceptedCrewBaseForSubmarine(ActiveSubmarine, MovementBase)
 		&& Move->MovementMode == MOVE_Walking;
 }

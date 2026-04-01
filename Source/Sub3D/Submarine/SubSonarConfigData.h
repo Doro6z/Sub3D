@@ -12,7 +12,22 @@ class SUB3D_API USonarSystemConfigData : public UDataAsset
 
 public:
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Sonar|Ranges")
-	TArray<float> RangePresetsCm = { 9000.f, 15000.f, 22000.f };
+	TArray<float> DisplayRangePresetsCm = { 9000.f, 15000.f, 22000.f };
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Sonar|Ranges")
+	float PassiveStandardScanRangeCm = 15000.f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Sonar|Ranges")
+	float PassiveFocusScanRangeCm = 15000.f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Sonar|Ranges")
+	float PassiveStandardTerrainRangeCm = 4500.f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Sonar|Ranges")
+	float TerrainScanRangeCm = 12000.f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Sonar|Ranges")
+	float RouteSeedRangeCm = 18000.f;
 
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Sonar|Passive")
 	float PassiveSweepIntervalS = 0.3f;

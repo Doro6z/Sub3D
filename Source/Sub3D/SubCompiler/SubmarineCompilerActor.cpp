@@ -89,6 +89,22 @@ UPrimitiveComponent* ASubmarineCompilerActor::GetMovementCollisionComponent() co
 	return Super::GetMovementCollisionComponent();
 }
 
+TArray<UPrimitiveComponent*> ASubmarineCompilerActor::GetInteriorWalkableComponents() const
+{
+	TArray<UPrimitiveComponent*> Result;
+	for (const TObjectPtr<UProceduralMeshComponent>& Mesh : GeneratedInteriorMeshes)
+	{
+		if (IsValid(Mesh) && Mesh->GetCollisionEnabled() != ECollisionEnabled::NoCollision)
+		{
+			if (Mesh->GetCollisionProfileName() == TEXT("SubInteriorWalkable"))
+			{
+				Result.Add(Mesh);
+			}
+		}
+	}
+	return Result;
+}
+
 bool ASubmarineCompilerActor::ValidateSpawnCollision() const
 {
 	if (!ExteriorCollisionProxy)
@@ -242,7 +258,8 @@ bool ASubmarineCompilerActor::BuildGeneratedGeometry()
 	RefreshExteriorCollisionProxy();
 	RefreshMovementCollisionBinding();
 
-	return GeneratedInteriorMeshes.Num() == (LastSolution.Compartments.Num() + LastSolution.Bulkheads.Num())
+	const int32 ExpectedInteriorMeshCount = (LastSolution.Compartments.Num() * 2) + LastSolution.Bulkheads.Num();
+	return GeneratedInteriorMeshes.Num() == ExpectedInteriorMeshCount
 		&& GeneratedExteriorMesh != nullptr;
 }
 

@@ -2,6 +2,7 @@
 
 #include "CoreMinimal.h"
 #include "GameFramework/Actor.h"
+#include "TunnelNavDataAsset.h"
 #include "WorldGenTypes.h"
 #include "Net/UnrealNetwork.h"
 #include "TraversalRouteActor.generated.h"
@@ -16,6 +17,7 @@ class UStaticMeshComponent;
 class UMaterialInterface;
 class UMaterialInstanceDynamic;
 class UArrowComponent;
+class UTunnelNavDataBuilder;
 
 // C11 — Runtime container for a generated route.
 // Server: builds, validates, holds collision + semantic data.
@@ -122,6 +124,15 @@ public:
 	UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Category="Route")
 	float RouteEndDockRadiusCm = 0.f;
 
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Route|TunnelNav")
+	bool bBuildTunnelNavData = true;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Route|TunnelNav")
+	FTunnelNavBuildSettings TunnelNavBuildSettings;
+
+	UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Category="Route|TunnelNav")
+	TObjectPtr<UTunnelNavDataAsset> GeneratedTunnelNavData;
+
 	UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Category="Campaign")
 	FName CampaignSegmentID = NAME_None;
 
@@ -165,6 +176,12 @@ public:
 	USonarFieldComponent* GetSonarFieldComponent() const
 	{
 		return SonarField;
+	}
+
+	UFUNCTION(BlueprintPure, Category="Route|TunnelNav")
+	UTunnelNavDataAsset* GetTunnelNavData() const
+	{
+		return GeneratedTunnelNavData;
 	}
 
 	UFUNCTION(BlueprintCallable, Category="Debug|Visual")
@@ -243,7 +260,9 @@ private:
 	TObjectPtr<UArrowComponent> PlacedRouteEndDockOverride;
 
 	// Internal pipeline
-	bool RunPipeline(const FRouteGenSpec& Spec, const FRouteSeedCascade& Seeds);
+	bool RunPipeline(const FRouteGenSpec& Spec, const FRouteSeedCascade& Seeds, bool bSpawnVisualMesh = true);
+	bool HasGeneratedTunnelNavRuntimeData() const;
+	void EnsureRuntimeNavigationDataForCurrentSpec(bool bReusingExistingVisuals);
 	void RefreshVisualDebugMaterials();
 	void WriteRouteGenerationLogSnapshot(const FRouteGenSpec& Spec, const FRouteSeedCascade& Seeds) const;
 	void SpawnMeshComponents(const TArray<FRouteMeshChunkData>& Chunks);

@@ -7,6 +7,33 @@
 #include "SubmarineLayoutAsset.generated.h"
 
 USTRUCT(BlueprintType)
+struct FWalkableSurfaceDef
+{
+	GENERATED_BODY()
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Walkable", meta = (Categories = "Submarine.Compartment"))
+	FName CompartmentId = NAME_None;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Walkable")
+	FTransform LocalTransform = FTransform::Identity;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Walkable", meta = (ClampMin = "0.0"))
+	float WidthCm = 200.f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Walkable", meta = (ClampMin = "0.0"))
+	float LengthCm = 200.f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Walkable")
+	FName SurfaceType = NAME_None;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Walkable")
+	FName CollisionProfileName = FName("SubInteriorWalkable");
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Walkable")
+	bool bSupportsCrew = true;
+};
+
+USTRUCT(BlueprintType)
 struct FDoorDef
 {
 	GENERATED_BODY()
@@ -67,6 +94,9 @@ public:
 
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Layout|Stations")
 	TArray<FStationSlotDef> StationSlots;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Layout|Walkable")
+	TArray<FWalkableSurfaceDef> WalkableSurfaces;
 
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Layout|Metrics")
 	FSubmarineBuildMetrics Metrics;

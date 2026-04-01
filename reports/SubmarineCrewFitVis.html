@@ -1,0 +1,408 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <title>Sub3D - UE5 Skeleton Fit & Layout Vis</title>
+    <style>
+        :root {
+            --bg: #07090f;
+            --panel: #111827;
+            --panel-border: #1f2937;
+            --accent: #38bdf8;
+            --danger: #ef4444;
+            --success: #10b981;
+            --warn: #f59e0b;
+            --text: #e2e8f0;
+            --hull: #1e293b;
+            --floor: #334155;
+            --font-ui: 'Segoe UI', system-ui, sans-serif;
+            --font-mono: 'Consolas', monospace;
+        }
+
+        body {
+            margin: 0; padding: 0; background: var(--bg); color: var(--text); font-family: var(--font-ui);
+            display: flex; height: 100vh; overflow: hidden;
+        }
+
+        .sidebar {
+            width: 350px; background: var(--panel); border-right: 1px solid var(--panel-border); 
+            display: flex; flex-direction: column; overflow-y: auto; box-shadow: 2px 0 10px rgba(0,0,0,0.5);
+            z-index: 10;
+        }
+
+        .panel-header {
+            padding: 20px 20px 10px 20px; border-bottom: 1px solid var(--panel-border);
+        }
+        .panel-header h1 { font-size: 1.1rem; margin: 0 0 5px 0; letter-spacing: 1px; color: #fff; }
+        .panel-header p { font-size: 0.75rem; color: #64748b; margin: 0; }
+
+        .control-group { padding: 15px 20px; border-bottom: 1px solid var(--panel-border); }
+        .control-group h3 { font-size: 0.8rem; margin: 0 0 10px 0; color: var(--accent); text-transform: uppercase; }
+
+        .slider-row { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; }
+        .slider-row label { font-family: var(--font-mono); font-size: 0.75rem; color: #94a3b8; }
+        .slider-row span { font-family: var(--font-mono); font-size: 0.75rem; color: var(--accent); width: 45px; text-align: right; }
+        input[type="range"] { flex: 1; margin: 0 10px; accent-color: var(--accent); cursor: pointer; }
+
+        .btn { background: #1e293b; color: #fff; border: 1px solid #334155; padding: 6px 12px; border-radius: 4px; font-size: 0.75rem; cursor: pointer; margin-right: 5px; transition: 0.2s;}
+        .btn:hover { background: var(--accent); color: #000; border-color: var(--accent); }
+
+        .main-view { flex: 1; position: relative; display: flex; flex-direction: column; }
+
+        svg { width: 100%; height: 100%; background: radial-gradient(circle at center, #0f172a 0%, #020617 100%); cursor: crosshair; }
+        
+        /* Grid */
+        pattern circle { fill: rgba(255,255,255,0.05); }
+
+        /* Hull & Environment */
+        .hull-shape { fill: none; stroke: var(--hull); stroke-width: 8; stroke-linecap: round; }
+        .hull-inner { fill: rgba(0,0,0,0.5); }
+        .floor-plane { fill: var(--floor); stroke: #475569; stroke-width: 2; }
+        .bulkhead-ref { fill: none; stroke: rgba(255,255,255,0.1); stroke-width: 1; stroke-dasharray: 4,4; }
+
+        /* Draggable Characters */
+        .draggable { cursor: grab; padding: 10px; }
+        .draggable:active { cursor: grabbing; }
+        .char-capsule { fill: rgba(56, 189, 248, 0.2); stroke: var(--accent); stroke-width: 2; transition: fill 0.2s, stroke 0.2s; }
+        .char-head { fill: var(--accent); transition: fill 0.2s; }
+        .char-label { font-family: var(--font-mono); font-size: 8px; fill: #94a3b8; user-select: none; pointer-events: none;}
+
+        .danger .char-capsule { fill: rgba(239, 68, 68, 0.2); stroke: var(--danger); stroke-dasharray: 4,4; }
+        .danger .char-head { fill: var(--danger); }
+        .danger-line { stroke: var(--danger); stroke-width: 2; stroke-dasharray: 5,5; pointer-events: none; }
+
+        /* UI Overlays */
+        .measurement { fill: #64748b; font-family: var(--font-mono); font-size: 10px; pointer-events: none; }
+        .meas-line { stroke: #64748b; stroke-width: 1; stroke-dasharray: 2,2; pointer-events: none; }
+    </style>
+</head>
+<body>
+
+<div class="sidebar">
+    <div class="panel-header">
+        <h1>UE5 SKEL-FIT VISUALIZER</h1>
+        <p>Gabarit Physique vs Architecture Coque</p>
+    </div>
+
+    <div class="control-group">
+        <h3>HULL DIMENSIONS (Verité V3)</h3>
+        <div class="slider-row">
+            <label>Diameter (m)</label>
+            <input type="range" id="param-rad" min="3.0" max="15.0" step="0.5" value="5.0">
+            <span id="val-rad">5.0</span>
+        </div>
+        <div class="slider-row" style="opacity:0.6">
+            <label>Shape Exponent</label>
+            <input type="range" id="param-exp" min="1.0" max="4.0" step="0.1" value="2.0">
+            <span id="val-exp">2.0</span>
+        </div>
+    </div>
+
+    <div class="control-group">
+        <h3>DECK / FLOORS (Verité V2 Walkable)</h3>
+        <p style="font-size:0.7rem; color:#94a3b8; margin-top:0;">Position of the walkable floor relative to center. Lowering increases headroom.</p>
+        
+        <div class="slider-row">
+            <label>Floor 1 Z (m)</label>
+            <input type="range" id="param-f1" min="-5.0" max="5.0" step="0.1" value="-1.0">
+            <span id="val-f1">-1.0</span>
+        </div>
+        
+        <div style="margin: 10px 0; display:flex; align-items:center; gap:10px;">
+            <input type="checkbox" id="param-f2-on" onchange="updateView()">
+            <label style="font-size:0.75rem; color:#fff;">Enable Floor 2 (Multi-deck)</label>
+        </div>
+        
+        <div class="slider-row" id="row-f2" style="opacity:0.5;">
+            <label>Floor 2 Z (m)</label>
+            <input type="range" id="param-f2" min="-5.0" max="5.0" step="0.1" value="1.5" disabled>
+            <span id="val-f2">1.5</span>
+        </div>
+    </div>
+
+    <div class="control-group" style="border-bottom:none;">
+        <h3>SPAWN CHARACTERS</h3>
+        <p style="font-size:0.7rem; color:#94a3b8; margin-top:0;">Drag mannequins into the hull to test collision bounds. (UE5 Default: 183cm Height)</p>
+        <button class="btn" onclick="spawnChar('stand')">+ Standing (1.8m)</button>
+        <button class="btn" onclick="spawnChar('crouch')">+ Crouching (1.2m)</button>
+        <button class="btn" onclick="spawnChar('sit')">+ Sitting (1.4m)</button>
+    </div>
+</div>
+
+<div class="main-view">
+    <div style="position:absolute; top:15px; right:15px; color:#64748b; font-family:var(--font-mono); font-size:12px; pointer-events:none;">
+        1 PPU = 1 cm
+    </div>
+    
+    <svg id="viewport" viewBox="-300 -300 600 600">
+        <!-- Background Grid (1m / 100cm) -->
+        <pattern id="grid1" width="10" height="10" patternUnits="userSpaceOnUse"><circle cx="1" cy="1" r="0.5"/></pattern>
+        <pattern id="grid100" width="100" height="100" patternUnits="userSpaceOnUse">
+            <rect width="100" height="100" fill="url(#grid1)"/>
+            <path d="M 100 0 L 0 0 0 100" fill="none" stroke="rgba(255,255,255,0.1)" stroke-width="1"/>
+        </pattern>
+        <rect x="-1000" y="-1000" width="2000" height="2000" fill="url(#grid100)" />
+        
+        <!-- Axis Crosshair -->
+        <line x1="-500" y1="0" x2="500" y2="0" stroke="rgba(255,255,255,0.2)" />
+        <line x1="0" y1="-500" x2="0" y2="500" stroke="rgba(255,255,255,0.2)" />
+        
+        <!-- Center reference for Sub -->
+        <circle cx="0" cy="0" r="3" fill="#ffffff" />
+        <text x="5" y="-5" class="measurement">CENTER (Y:0)</text>
+
+        <!-- Dynamic Container Group -->
+        <g id="scene">
+            <!-- Drawn via JS -->
+        </g>
+    </svg>
+</div>
+
+<script>
+    // Config values
+    let cfg = { rad: 250, exp: 2.0, f1: -100, f2On: false, f2: 150 };
+    
+    // Character definition (UE5 default scale in cm)
+    const CHARS = {
+        'stand':  { h: 183, w: 70, headY: -183, neckY: -150, color: '#38bdf8', label: 'STAND' },
+        'crouch': { h: 120, w: 70, headY: -120, neckY: -100, color: '#10b981', label: 'CROUCH' },
+        'sit':    { h: 140, w: 70, headY: -140, neckY: -120, color: '#f59e0b', label: 'HELM/SIT' }
+    };
+
+    let spawnedChars = [];
+
+    // Init UI Listeners
+    ['rad', 'exp', 'f1', 'f2'].forEach(key => {
+        document.getElementById('param-' + key).addEventListener('input', e => {
+            document.getElementById('val-' + key).innerText = e.target.value;
+            cfg[key] = parseFloat(e.target.value) * (key === 'exp' ? 1 : 100);
+            updateView();
+        });
+    });
+
+    document.getElementById('param-f2-on').addEventListener('change', e => {
+        cfg.f2On = e.target.checked;
+        document.getElementById('param-f2').disabled = !cfg.f2On;
+        document.getElementById('row-f2').style.opacity = cfg.f2On ? 1.0 : 0.5;
+        updateView();
+    });
+
+    function getHullRadiusAtX(x) {
+        // Superellipse: |x/a|^n + |y/b|^n = 1 -> y = b * (1 - |x/a|^n)^(1/n)
+        const a = cfg.rad;
+        const b = cfg.rad;
+        const n = cfg.exp;
+        
+        if (Math.abs(x) >= a) return 0; // Out of bounds
+        
+        let term = 1.0 - Math.pow(Math.abs(x) / a, n);
+        return b * Math.pow(term, 1.0 / n);
+    }
+
+    function checkCollision(char) {
+        // Char position is bottom-center
+        const cx = char.x;
+        const cy = char.y;
+        const topY = cy - char.typeDef.h;
+        
+        // Find hull ceiling at character's X boundaries
+        const radCenter = getHullRadiusAtX(cx);
+        const radLeft = getHullRadiusAtX(cx - char.typeDef.w/2);
+        const radRight = getHullRadiusAtX(cx + char.typeDef.w/2);
+        
+        // Ceiling is Y = -rad (because Y is down in SVG)
+        const ceilingCenter = -radCenter;
+        const ceilingLeft = -radLeft;
+        const ceilingRight = -radRight;
+        
+        // We hit the roof if our top is extending above the lowest ceiling point over our width
+        const lowestCeiling = Math.max(ceilingCenter, ceilingLeft, ceilingRight); // "Max" because smaller negative means lower visually
+
+        return (topY < lowestCeiling);
+    }
+
+    function spawnChar(type) {
+        // Spawn randomly near center, on Floor 1
+        const rx = (Math.random() - 0.5) * 100;
+        spawnedChars.push({
+            id: 'c_' + Date.now(),
+            type: type,
+            typeDef: CHARS[type],
+            x: rx,
+            y: cfg.f1
+        });
+        updateView();
+    }
+
+    function drawHull() {
+        let html = '';
+        
+        // 1. Generate Superellipse path
+        let ptsTop = [];
+        let ptsBot = [];
+        const res = 100;
+        
+        for(let i=0; i<=res; i++) {
+            const x = -cfg.rad + (i/res) * (cfg.rad * 2);
+            const y = getHullRadiusAtX(x);
+            ptsTop.push(`${x},${-y}`);
+            ptsBot.unshift(`${x},${y}`);
+        }
+        const hullPath = ptsTop.join(' ') + ' ' + ptsBot.join(' ') + ' Z';
+        
+        // Inner shadow hull
+        html += `<path d="M ${hullPath}" class="hull-inner" />`;
+        // Outer thick line
+        html += `<path d="M ${hullPath}" class="hull-shape" />`;
+
+        // 2. Draw Walkable Floors
+        // Floor 1
+        if (cfg.f1 > -cfg.rad && cfg.f1 < cfg.rad) {
+            const f1Width = getHullRadiusAtX(0); // Approximate full width available
+            // Intersect with hull
+            let intersectX = 0;
+            for(let x=0; x<cfg.rad; x++) { if(getHullRadiusAtX(x) < Math.abs(cfg.f1)) { intersectX = x; break; }  }
+            intersectX = intersectX || cfg.rad; // Failsafe
+            
+            html += `<rect x="${-intersectX}" y="${cfg.f1}" width="${intersectX*2}" height="10" class="floor-plane" />`;
+            html += `<text x="${-intersectX + 10}" y="${cfg.f1 + 8}" font-size="8" fill="#cbd5e1">FLOOR 1 (Walkable)</text>`;
+
+            // Measurement
+            html += `<line x1="0" y1="0" x2="0" y2="${cfg.f1}" class="meas-line" />`;
+            html += `<text x="5" y="${cfg.f1/2}" class="measurement">${Math.abs(cfg.f1).toFixed(0)}cm offset</text>`;
+        }
+
+        // Floor 2
+        if (cfg.f2On && cfg.f2 > -cfg.rad && cfg.f2 < cfg.rad) {
+            let intersectX = 0;
+            for(let x=0; x<cfg.rad; x++) { if(getHullRadiusAtX(x) < Math.abs(cfg.f2)) { intersectX = x; break; }  }
+            intersectX = intersectX || cfg.rad; 
+            html += `<rect x="${-intersectX}" y="${cfg.f2}" width="${intersectX*2}" height="10" class="floor-plane" />`;
+            html += `<text x="${-intersectX + 10}" y="${cfg.f2 + 8}" font-size="8" fill="#cbd5e1">FLOOR 2 (Walkable)</text>`;
+            
+            // Height diff between floors
+            let dist = cfg.f2 - cfg.f1;
+            html += `<line x1="${intersectX-20}" y1="${cfg.f1+10}" x2="${intersectX-20}" y2="${cfg.f2}" stroke="#fff" stroke-dasharray="2,2" />`;
+            html += `<text x="${intersectX-60}" y="${cfg.f1 + dist/2}" font-size="10" fill="#cbd5e1">${dist.toFixed(0)}cm High</text>`;
+        }
+
+        return html;
+    }
+
+    function drawCharacters() {
+        let html = '';
+        
+        spawnedChars.forEach(ch => {
+            const def = ch.typeDef;
+            const w = def.w;
+            const h = def.h;
+            const r = w/2;
+            
+            const isColliding = checkCollision(ch);
+            const classes = isColliding ? 'draggable danger' : 'draggable';
+
+            html += `<g id="${ch.id}" class="${classes}" transform="translate(${ch.x}, ${ch.y})" onmousedown="startDrag(evt, '${ch.id}')">`;
+            
+            // Capsule Outline (UE5 style)
+            // Starts bottom-center at (0,0) -> top-center is (0, -h)
+            html += `<path d="
+                M ${-r},${-r} 
+                L ${-r},${-h+r}
+                A ${r},${r} 0 0 1 ${r},${-h+r}
+                L ${r},${-r}
+                A ${r},${r} 0 0 1 ${-r},${-r}
+                Z" class="char-capsule" />`;
+            
+            // Abstract Skeleton / Head
+            html += `<circle cx="0" cy="${def.headY + r}" r="${r*0.6}" class="char-head" />`;
+            html += `<line x1="0" y1="${def.neckY}" x2="0" y2="0" stroke="#fff" stroke-width="2" />`; // Spine
+            html += `<line x1="-15" y1="${def.neckY}" x2="15" y2="${def.neckY}" stroke="#fff" stroke-width="2" />`; // Shoulders
+
+            html += `<text x="0" y="${-h - 10}" text-anchor="middle" class="char-label">${def.label}</text>`;
+            
+            // Hit line if danger
+            if (isColliding) {
+                const ceil = -getHullRadiusAtX(ch.x);
+                html += `<line x1="-20" y1="${ceil - ch.y}" x2="20" y2="${ceil - ch.y}" class="danger-line" />`;
+                html += `<text x="25" y="${ceil - ch.y + 4}" fill="var(--danger)" font-size="10" font-weight="bold">IMPACT</text>`;
+            }
+
+            html += `</g>`;
+        });
+        
+        return html;
+    }
+
+    function updateView() {
+        const scene = document.getElementById('scene');
+        let html = '';
+        html += drawHull();
+        html += drawCharacters();
+        scene.innerHTML = html;
+    }
+
+    // --- DRAG LOGIC ---
+    let dragObj = null;
+    let offsetX = 0;
+    let offsetY = 0;
+    const svg = document.getElementById('viewport');
+
+    function getMousePos(e) {
+        const CTM = svg.getScreenCTM();
+        return {
+            x: (e.clientX - CTM.e) / CTM.a,
+            y: (e.clientY - CTM.f) / CTM.d
+        };
+    }
+
+    function startDrag(e, id) {
+        dragObj = spawnedChars.find(c => c.id === id);
+        const pt = getMousePos(e);
+        offsetX = pt.x - dragObj.x;
+        offsetY = pt.y - dragObj.y;
+        
+        // Ensure snapping to available floors on click-down too
+        snapToFloor(dragObj);
+    }
+
+    function doDrag(e) {
+        if (!dragObj) return;
+        const pt = getMousePos(e);
+        
+        // Move horizontally
+        dragObj.x = pt.x - offsetX;
+        
+        // Smart Floor Snap logic vertically
+        const rawY = pt.y - offsetY;
+        dragObj.y = snapToFloorY(rawY);
+
+        updateView();
+    }
+
+    function endDrag(e) { dragObj = null; updateView(); } // final re-check on drop
+
+    function snapToFloorY(y) {
+        // Snap to nearest floor
+        const distF1 = Math.abs(y - cfg.f1);
+        let distF2 = 99999;
+        if (cfg.f2On) distF2 = Math.abs(y - cfg.f2);
+        
+        const snapThreshold = 300; // Snap anywhere
+        if (distF1 < distF2) return cfg.f1;
+        else if (cfg.f2On) return cfg.f2;
+        return cfg.f1;
+    }
+
+    function snapToFloor(char) {
+        char.y = snapToFloorY(char.y);
+    }
+
+    svg.addEventListener('mousemove', doDrag);
+    svg.addEventListener('mouseup', endDrag);
+    svg.addEventListener('mouseleave', endDrag);
+
+    // Initial render
+    updateView();
+</script>
+</body>
+</html>

@@ -1,0 +1,258 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <title>Sub3D - Architecture & 4 Truths Visualizer</title>
+    <style>
+        :root {
+            --bg: #05080c;
+            --panel: #0d131f;
+            --t1-ext: #ff3366;    /* V1: Exterior Proxy */
+            --t2-walk: #00ffcc;   /* V2: Walkable Floor */
+            --t3-struct: #ffcc00; /* V3: Structure/Layout */
+            --t4-crew: #3399ff;   /* V4: Crew Physics */
+            --vis-ext: #334455;   /* Visual Exterior */
+            --vis-int: #445566;   /* Visual Interior */
+            --text: #c0caf5;
+        }
+
+        body { font-family: 'Consolas', monospace; background: var(--bg); color: var(--text); margin: 0; display: flex; height: 100vh; overflow: hidden; }
+        
+        .sidebar { width: 350px; background: var(--panel); border-right: 1px solid #1f2937; padding: 20px; display: flex; flex-direction: column; gap: 20px; z-index: 10; }
+        .main { flex: 1; display: flex; flex-direction: column; position: relative; }
+        
+        h1 { font-size: 1.2rem; color: #fff; margin: 0; border-bottom: 2px solid #1f2937; padding-bottom: 10px; }
+        h2 { font-size: 0.9rem; color: #8ba4b8; margin: 0 0 10px 0; text-transform: uppercase; }
+
+        .truth-card { background: rgba(0,0,0,0.3); border: 1px solid #1f2937; padding: 10px; border-radius: 6px; cursor: pointer; transition: 0.2s; }
+        .truth-card:hover { background: rgba(255,255,255,0.05); }
+        .truth-card.active { border-left-width: 4px; }
+        
+        .c-t1 { border-left-color: var(--t1-ext); }
+        .c-t2 { border-left-color: var(--t2-walk); }
+        .c-t3 { border-left-color: var(--t3-struct); }
+        .c-t4 { border-left-color: var(--t4-crew); }
+        .c-vis { border-left-color: #667788; }
+
+        .card-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 5px;}
+        .card-title { font-weight: bold; font-size: 0.9rem;}
+        .card-desc { font-size: 0.75rem; color: #64748b; line-height: 1.4;}
+
+        /* Controls */
+        .toggle { display: flex; align-items: center; gap: 10px; font-size: 0.8rem; margin-top: 5px; }
+        input[type="checkbox"] { accent-color: #00ffcc; cursor: pointer; }
+
+        /* Viewport */
+        .viewport { flex: 1; background: radial-gradient(circle at center, #0f1623 0%, #05080c 100%); position: relative; overflow: hidden;}
+        svg { width: 100%; height: 100%; }
+
+        text { font-family: 'Consolas', monospace; font-size: 10px; user-select: none; }
+    </style>
+</head>
+<body>
+
+<div class="sidebar">
+    <h1>SUB3D ARCHITECTURE</h1>
+    <p style="font-size: 0.8rem; color: #94a3b8; margin-top: -10px;">The 4 Truths Decoupling Tool</p>
+
+    <div>
+        <h2>Visual Layers (Geometry)</h2>
+        <div class="truth-card c-vis active" onclick="toggleLayer('vis-ext')">
+            <div class="card-header"><span class="card-title">PMC_ExteriorHull</span> <input type="checkbox" id="cb-vis-ext" checked></div>
+            <div class="card-desc">Visual Only (NoCollision or SubInteriorVisual). Must hide double hull.</div>
+        </div>
+        <div class="truth-card c-vis active" onclick="toggleLayer('vis-int')" style="margin-top: 5px;">
+            <div class="card-header"><span class="card-title">PMC_Interior_* (Walls)</span> <input type="checkbox" id="cb-vis-int" checked></div>
+            <div class="card-desc">Interior visual walls. Decoupled from floor.</div>
+        </div>
+    </div>
+
+    <div>
+        <h2>Validation Layers (Physics)</h2>
+        <div class="truth-card c-t1 active" onclick="toggleLayer('t1')">
+            <div class="card-header"><span class="card-title" style="color:var(--t1-ext)">V1: Exterior Proxy</span> <input type="checkbox" id="cb-t1" checked></div>
+            <div class="card-desc">SubmarineHull / QueryAndPhysics. Used by SubMovement sweep.</div>
+        </div>
+        <div class="truth-card c-t2 active" onclick="toggleLayer('t2')" style="margin-top: 5px;">
+            <div class="card-header"><span class="card-title" style="color:var(--t2-walk)">V2: Walkable Floor</span> <input type="checkbox" id="cb-t2" checked></div>
+            <div class="card-desc">SubInteriorWalkable / QueryOnly. Pure logical plane for Crew CMC.</div>
+        </div>
+        <div class="truth-card c-t3 active" onclick="toggleLayer('t3')" style="margin-top: 5px;">
+            <div class="card-header"><span class="card-title" style="color:var(--t3-struct)">V3: Structure Truth</span> <input type="checkbox" id="cb-t3" checked></div>
+            <div class="card-desc">LayoutSolution / Logic. Defines compartments & doors.</div>
+        </div>
+        <div class="truth-card c-t4 active" onclick="toggleLayer('t4')" style="margin-top: 5px;">
+            <div class="card-header"><span class="card-title" style="color:var(--t4-crew)">V4: Crew Physics</span> <input type="checkbox" id="cb-t4" checked></div>
+            <div class="card-desc">Pawn capsule. Collides with V2, ignores V1.</div>
+        </div>
+    </div>
+</div>
+
+<div class="main">
+    <!-- Overlay stats -->
+    <div style="position:absolute; top: 15px; right: 15px; background: rgba(0,0,0,0.5); padding: 10px; border: 1px solid #1f2937; z-index: 100; font-size: 0.8rem;">
+        <div style="color: #fff; margin-bottom: 5px;">DIAGNOSTIC (P1 & P2 Rules)</div>
+        <div id="diag-zfight" style="color: #00ffcc;">✅ No Exterior/Interior Z-Fight</div>
+        <div id="diag-floor" style="color: #00ffcc;">✅ Floor is decoupled from walls</div>
+        <div class="toggle" style="margin-top:10px; border-top: 1px solid #333; padding-top: 5px;">
+            <input type="checkbox" id="slider-pitch" onchange="togglePitch()"> Simulate Sub Pitch (30°)
+        </div>
+    </div>
+
+    <div class="viewport">
+        <!-- Cross-section of submarine -->
+        <svg viewBox="-150 -150 300 300" id="scene">
+            <g id="grid">
+                <!-- Minor grid -->
+                <pattern id="grid-pattern" width="10" height="10" patternUnits="userSpaceOnUse">
+                    <circle cx="1" cy="1" r="0.5" fill="#ffffff" opacity="0.1"/>
+                </pattern>
+                <rect x="-200" y="-200" width="400" height="400" fill="url(#grid-pattern)" />
+                <line x1="-200" y1="0" x2="200" y2="0" stroke="#ffffff" stroke-width="0.5" opacity="0.2"/>
+                <line x1="0" y1="-200" x2="0" y2="200" stroke="#ffffff" stroke-width="0.5" opacity="0.2"/>
+            </g>
+
+            <g id="world-root">
+                <g id="sub-root" style="transition: transform 0.3s ease;">
+                    
+                    <!-- V3: Structure Truth (Red outline logic base) -->
+                    <g id="layer-t3">
+                        <circle cx="0" cy="0" r="100" fill="none" stroke="var(--t3-struct)" stroke-width="1" stroke-dasharray="4,4" opacity="0.4" />
+                        <line x1="-100" y1="0" x2="100" y2="0" stroke="var(--t3-struct)" stroke-width="0.5" stroke-dasharray="2,2" opacity="0.3" />
+                        <line x1="0" y1="-100" x2="0" y2="100" stroke="var(--t3-struct)" stroke-width="0.5" stroke-dasharray="2,2" opacity="0.3" />
+                        <text x="75" y="-85" fill="var(--t3-struct)" opacity="0.6">V3: LAYOUT</text>
+                    </g>
+
+                    <!-- VISUAL INTERIOR (Thick walls) -->
+                    <g id="layer-vis-int">
+                        <circle cx="0" cy="0" r="95" fill="#111827" stroke="var(--vis-int)" stroke-width="4" />
+                        <text x="-30" y="-105" fill="var(--vis-int)">VISUAL MESH (INT)</text>
+                        <!-- Visual Floor details -->
+                        <path d="M-80,50 Q0,55 80,50 L80,60 L-80,60 Z" fill="#1f2937" />
+                        <rect x="-60" y="50" width="120" height="2" fill="#374151" />
+                    </g>
+
+                    <!-- VISUAL EXTERIOR (Outer shell) -->
+                    <g id="layer-vis-ext">
+                        <!-- Demonstrates offset distance to avoid z-fighting -->
+                        <circle cx="0" cy="0" r="105" fill="none" stroke="var(--vis-ext)" stroke-width="3" />
+                        <text x="-40" y="-115" fill="var(--vis-ext)">VISUAL MESH (EXT)</text>
+                    </g>
+
+                    <!-- V1: Target Collision Proxy (Sweep box) -->
+                    <g id="layer-t1">
+                        <!-- Bounding Box that wraps the outer hull -->
+                        <rect x="-105" y="-105" width="210" height="210" fill="none" stroke="var(--t1-ext)" stroke-width="1.5" />
+                        <text x="-100" y="115" fill="var(--t1-ext)">V1: PROXY (SWEEP)</text>
+                    </g>
+
+                    <!-- V2: Walkable Floor (Decoupled from walls) -->
+                    <g id="layer-t2">
+                        <!-- Logical floor plane exactly at Y=50 -->
+                        <line x1="-90" y1="48" x2="90" y2="48" stroke="var(--t2-walk)" stroke-width="2" />
+                        <rect x="-90" y="47" width="180" height="4" fill="var(--t2-walk)" opacity="0.2" />
+                        <!-- Raycast trace indicator -->
+                        <line x1="0" y1="0" x2="0" y2="48" stroke="var(--t2-walk)" stroke-width="0.5" stroke-dasharray="2,2" />
+                        <text x="-80" y="42" fill="var(--t2-walk)">V2: PMC_FLOOR (QUERY_ONLY)</text>
+                    </g>
+                    
+                    <!-- V4: Crew Physics -->
+                    <g id="layer-t4">
+                        <!-- Character Standing at Y=48, half-height 20 -->
+                        <g transform="translate(0, 28)">
+                            <rect x="-10" y="-20" width="20" height="40" rx="10" fill="none" stroke="var(--t4-crew)" stroke-width="2" />
+                            <circle cx="0" cy="-6" r="4" fill="var(--t4-crew)" opacity="0.5" />
+                            <text x="15" y="0" fill="var(--t4-crew)">V4: CREW</text>
+                            
+                            <!-- Downward floor trace -->
+                            <line x1="0" y1="20" x2="0" y2="30" stroke="#fff" stroke-width="1" />
+                            <circle cx="0" cy="20" r="2" fill="#fff" />
+                        </g>
+                    </g>
+
+                </g>
+            </g>
+        </svg>
+    </div>
+</div>
+
+<script>
+    function toggleLayer(layerId) {
+        const cb = document.getElementById('cb-' + layerId);
+        // If triggered by the div click, flip the checkbox
+        if (event.target !== cb) {
+            cb.checked = !cb.checked;
+        }
+        
+        const g = document.getElementById('layer-' + layerId);
+        if (g) {
+            g.style.opacity = cb.checked ? "1" : "0";
+        }
+
+        // Toggle visual card state
+        const card = cb.closest('.truth-card');
+        if (cb.checked) {
+            card.classList.add('active');
+        } else {
+            card.classList.remove('active');
+        }
+        
+        checkDiagnostics();
+    }
+
+    function togglePitch() {
+        const isPitched = document.getElementById('slider-pitch').checked;
+        const subRoot = document.getElementById('sub-root');
+        
+        if (isPitched) {
+            subRoot.style.transform = "rotate(-20deg)";
+        } else {
+            subRoot.style.transform = "rotate(0deg)";
+        }
+    }
+
+    function checkDiagnostics() {
+        const visExt = document.getElementById('cb-vis-ext').checked;
+        const visInt = document.getElementById('cb-vis-int').checked;
+        const floorActive = document.getElementById('cb-t2').checked;
+
+        const dZFight = document.getElementById('diag-zfight');
+        const dFloor = document.getElementById('diag-floor');
+
+        // Hypothetically, if both visual meshes render closely without backface culling, it's a z-fight risk.
+        // In our viz, they are separated nicely, but we simulate the diagnostic.
+        if (visExt && visInt) {
+            dZFight.innerText = "✅ Offset 15cm prevents Z-Fight";
+            dZFight.style.color = "#00ffcc";
+        } else {
+            dZFight.innerText = "ℹ️ Need both meshes to test offset";
+            dZFight.style.color = "#8ba4b8";
+        }
+
+        if (visInt && !floorActive) {
+            dFloor.innerText = "❌ CREW WILL FALL (Missing V2 Floor)";
+            dFloor.style.color = "#ff3366";
+        } else if (!visInt && floorActive) {
+            dFloor.innerText = "✅ Invisible Logic floor works (Walk in empty space)";
+            dFloor.style.color = "#00ffcc";
+        } else if (visInt && floorActive) {
+            dFloor.innerText = "✅ Logic floor layered cleanly over visual geometry";
+            dFloor.style.color = "#00ffcc";
+        }
+    }
+
+    // Attach click listeners to checkboxes to stop propagation double-toggling
+    document.querySelectorAll('input[type="checkbox"]').forEach(cb => {
+        if(cb.id !== 'slider-pitch') {
+            cb.addEventListener('click', e => e.stopPropagation());
+            cb.addEventListener('change', e => {
+                const layerId = e.target.id.replace('cb-', '');
+                toggleLayer(layerId);
+            });
+        }
+    });
+
+    checkDiagnostics();
+</script>
+</body>
+</html>

@@ -45,6 +45,12 @@ public:
 	UPROPERTY(ReplicatedUsing = OnRep_RuntimeState, BlueprintReadOnly, Category = "Sonar|Runtime")
 	FSonarSelfNoiseState SelfNoiseState;
 
+	UPROPERTY(ReplicatedUsing = OnRep_RuntimeState, BlueprintReadOnly, Category = "Sonar|Runtime")
+	float AcousticClutterLevel = 0.f;
+
+	UPROPERTY(ReplicatedUsing = OnRep_RuntimeState, BlueprintReadOnly, Category = "Sonar|Runtime")
+	bool bSignalUnstable = false;
+
 	UPROPERTY(Replicated, BlueprintReadOnly, Category = "Sonar|Runtime")
 	float LastProcessedPingTimestamp = -1000.f;
 
@@ -63,11 +69,38 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Sonar|Runtime")
 	void SetRangePresetIndex(int32 NewIndex);
 
+	UFUNCTION(BlueprintPure, Category = "Sonar|Runtime")
+	int32 GetRangePresetIndex() const
+	{
+		return RangePresetIndex;
+	}
+
+	UFUNCTION(BlueprintPure, Category = "Sonar|Runtime")
+	int32 GetRangePresetCount() const;
+
+	UFUNCTION(BlueprintPure, Category = "Sonar|Runtime")
+	float GetRangePresetValueCm(int32 PresetIndex) const;
+
+	UFUNCTION(BlueprintPure, Category = "Sonar|Runtime")
+	int32 ResolveRangePresetIndexFromNormalized(float Normalized01) const;
+
 	UFUNCTION(BlueprintCallable, Category = "Sonar|Tracks")
 	void MarkPriorityTrack(int32 TrackId, bool bPriority);
 
 	UFUNCTION(BlueprintPure, Category = "Sonar|Runtime")
 	float GetCurrentRangeCm() const;
+
+	UFUNCTION(BlueprintPure, Category = "Sonar|Runtime")
+	float GetDisplayRangeCm() const;
+
+	UFUNCTION(BlueprintPure, Category = "Sonar|Runtime")
+	float GetRuntimeScanRangeCm() const;
+
+	UFUNCTION(BlueprintPure, Category = "Sonar|Runtime")
+	float GetAcousticClutterLevel() const { return AcousticClutterLevel; }
+
+	UFUNCTION(BlueprintPure, Category = "Sonar|Runtime")
+	bool IsSignalUnstable() const { return bSignalUnstable; }
 
 	UFUNCTION(BlueprintPure, Category = "Sonar|Runtime")
 	bool IsPingReady() const;
@@ -99,6 +132,14 @@ protected:
 	void OnRep_TopoWindow();
 
 private:
+	struct FPendingActiveTopoObservation
+	{
+		FVector WorldLocation = FVector::ZeroVector;
+		float Occupancy01 = 0.f;
+		float Confidence01 = 0.f;
+		float RevealTime = 0.f;
+	};
+
 	struct FRuntimeTopoCell
 	{
 		float HeightCm = 0.f;
@@ -113,11 +154,12 @@ private:
 	void RunPassiveSweep();
 	void RunTerrainSweep();
 	void ProcessNewActivePing();
+	void CommitPendingActivePingObservations();
 	void AddTopologyObservation(const FVector& WorldLocation, float Occupancy01, float Confidence01, bool bFromSeed);
 	void AgeAndPruneTopology(float DeltaTime);
 	void RefreshReplicatedTracks();
 	void RefreshReplicatedTopoWindow();
-	void ApplyAcousticVolumeModifiers(float& OutAmbientNoiseBias, float& OutClutterBias, float& OutPassiveModifier) const;
+	void ApplyAcousticVolumeModifiers(float& OutAmbientNoiseBias, float& OutClutterBias, float& OutPassiveModifier, float& OutActivePingDistortion) const;
 	void SeedTopologyFromRoute();
 	void NotifyRuntimeUpdated();
 	static int64 MakeTopoKey(int32 GridX, int32 GridY);
@@ -129,8 +171,10 @@ private:
 	TObjectPtr<USonarContactTrackerComponent> ContactTracker = nullptr;
 
 	TMap<int64, FRuntimeTopoCell> RuntimeTopoCells;
+	TArray<FPendingActiveTopoObservation> PendingActiveTopoObservations;
 	float PassiveSweepAccumulator = 0.f;
 	float TrackerUpdateAccumulator = 0.f;
 	float NoiseUpdateAccumulator = 0.f;
 	bool bRouteSeedApplied = false;
+	bool bLoggedReplicatedTopoCap = false;
 };

@@ -314,10 +314,35 @@ void USubMovementComponent::ApplyPhysics(float DeltaTime)
 			return AppliedDelta;
 		};
 
+		const auto IsInternalHit = [Owner](const FHitResult& InHit) -> bool
+		{
+			const AActor* HitActor = InHit.GetActor();
+			if (!HitActor)
+			{
+				return false;
+			}
+			if (HitActor == Owner)
+			{
+				return true;
+			}
+			if (HitActor->GetOwner() == Owner || HitActor->GetAttachParentActor() == Owner || HitActor->IsAttachedTo(Owner))
+			{
+				return true;
+			}
+			const UPrimitiveComponent* HitComp = InHit.GetComponent();
+			return HitComp && HitComp->GetOwner() == Owner;
+		};
+
 		FHitResult Hit;
 		if (bUseProxySweep)
 		{
 			const FVector AppliedDelta = SweepAgainstProxy(MoveDelta, Hit);
+			if (Hit.bBlockingHit && IsInternalHit(Hit))
+			{
+				LogSweepHit(TEXT("InternalIgnored"), MoveDelta, Hit);
+				Owner->AddActorWorldOffset(MoveDelta, false, nullptr, ETeleportType::None);
+				return false;
+			}
 			if (!AppliedDelta.IsNearlyZero())
 			{
 				Owner->AddActorWorldOffset(AppliedDelta, false, nullptr, ETeleportType::None);
@@ -349,7 +374,12 @@ void USubMovementComponent::ApplyPhysics(float DeltaTime)
 			if (bUseProxySweep)
 			{
 				const FVector AppliedSlideDelta = SweepAgainstProxy(SlideDelta, SlideHit);
-				if (!AppliedSlideDelta.IsNearlyZero())
+				if (SlideHit.bBlockingHit && IsInternalHit(SlideHit))
+				{
+					LogSweepHit(TEXT("SlideInternalIgnored"), SlideDelta, SlideHit);
+					Owner->AddActorWorldOffset(SlideDelta, false, nullptr, ETeleportType::None);
+				}
+				else if (!AppliedSlideDelta.IsNearlyZero())
 				{
 					Owner->AddActorWorldOffset(AppliedSlideDelta, false, nullptr, ETeleportType::None);
 				}

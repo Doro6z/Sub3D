@@ -66,6 +66,25 @@ void USubInteriorFrameComponent::TickComponent(float DeltaTime, ELevelTick TickT
 	FrameLocationDelta = CurrentLocation - PreviousLocation;
 	FrameRotationDelta = (CurrentRotation - PreviousRotation).GetNormalized();
 
+	if (DeltaTime > KINDA_SMALL_NUMBER)
+	{
+		LocalLinearVelocity = Owner->GetActorTransform().InverseTransformVectorNoScale(FrameLocationDelta / DeltaTime);
+		LocalLinearAcceleration = (LocalLinearVelocity - PreviousLocalLinearVelocity) / DeltaTime;
+
+		LocalAngularVelocityDegrees = FVector(
+			FrameRotationDelta.Roll / DeltaTime,
+			FrameRotationDelta.Pitch / DeltaTime,
+			FrameRotationDelta.Yaw / DeltaTime);
+		LocalAngularAccelerationDegrees = (LocalAngularVelocityDegrees - PreviousLocalAngularVelocityDegrees) / DeltaTime;
+	}
+	else
+	{
+		LocalLinearVelocity = FVector::ZeroVector;
+		LocalLinearAcceleration = FVector::ZeroVector;
+		LocalAngularVelocityDegrees = FVector::ZeroVector;
+		LocalAngularAccelerationDegrees = FVector::ZeroVector;
+	}
+
 	const float MaxAbsRotationDelta = FMath::Max3(
 		FMath::Abs(FrameRotationDelta.Pitch),
 		FMath::Abs(FrameRotationDelta.Yaw),
@@ -100,11 +119,15 @@ void USubInteriorFrameComponent::TickComponent(float DeltaTime, ELevelTick TickT
 			UE_LOG(
 				LogSubInteriorFrame,
 				Log,
-				TEXT("InteriorFrame | Loc=%s | Rot=%s | DeltaLoc=%s | DeltaRot=%s"),
+				TEXT("InteriorFrame | Loc=%s | Rot=%s | DeltaLoc=%s | DeltaRot=%s | LocalVel=%s | LocalAccel=%s | LocalAngVel=%s | LocalAngAccel=%s"),
 				*CurrentLocation.ToCompactString(),
 				*CurrentRotation.ToCompactString(),
 				*FrameLocationDelta.ToCompactString(),
-				*FrameRotationDelta.ToCompactString());
+				*FrameRotationDelta.ToCompactString(),
+				*LocalLinearVelocity.ToCompactString(),
+				*LocalLinearAcceleration.ToCompactString(),
+				*LocalAngularVelocityDegrees.ToCompactString(),
+				*LocalAngularAccelerationDegrees.ToCompactString());
 		}
 	}
 	else
@@ -112,6 +135,8 @@ void USubInteriorFrameComponent::TickComponent(float DeltaTime, ELevelTick TickT
 		DebugLogTimer = 0.f;
 	}
 
+	PreviousLocalLinearVelocity = LocalLinearVelocity;
+	PreviousLocalAngularVelocityDegrees = LocalAngularVelocityDegrees;
 	PreviousLocation = CurrentLocation;
 	PreviousRotation = CurrentRotation;
 }

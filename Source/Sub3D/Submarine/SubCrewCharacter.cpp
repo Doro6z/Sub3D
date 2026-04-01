@@ -10,6 +10,7 @@
 #include "Camera/CameraComponent.h"
 #include "Components/CapsuleComponent.h"
 #include "Components/PrimitiveComponent.h"
+#include "Engine/World.h"
 #include "GameFramework/CharacterMovementComponent.h"
 #include "Net/UnrealNetwork.h"
 
@@ -21,6 +22,63 @@ static FString DescribeMovementBase(const ACharacter* Character)
 {
 	const UPrimitiveComponent* Base = Character ? Character->GetMovementBase() : nullptr;
 	return FString::Printf(TEXT("%s on %s"), *GetNameSafe(Base), *GetNameSafe(Base ? Base->GetOwner() : nullptr));
+}
+
+bool FindInteriorWalkableHit(
+	const ASubmarineBase* Submarine,
+	UWorld* World,
+	const AActor* IgnoredActor,
+	const FVector& TraceStart,
+	const FVector& TraceEnd,
+	FHitResult& OutHit)
+{
+	OutHit = FHitResult();
+
+	if (!Submarine || !World)
+	{
+		return false;
+	}
+
+	const TArray<UPrimitiveComponent*> WalkableComponents = Submarine->GetInteriorWalkableComponents();
+	if (WalkableComponents.Num() == 0)
+	{
+		return false;
+	}
+
+	FCollisionObjectQueryParams ObjectQueryParams;
+	ObjectQueryParams.AddObjectTypesToQuery(ECC_GameTraceChannel2);
+
+	FCollisionQueryParams QueryParams(SCENE_QUERY_STAT(CrewFloorSnap), false, IgnoredActor);
+	TArray<FHitResult> Hits;
+	if (!World->LineTraceMultiByObjectType(Hits, TraceStart, TraceEnd, ObjectQueryParams, QueryParams))
+	{
+		return false;
+	}
+
+	float BestHitTime = TNumericLimits<float>::Max();
+	bool bFoundHit = false;
+	for (const FHitResult& Hit : Hits)
+	{
+		if (!Hit.bBlockingHit)
+		{
+			continue;
+		}
+
+		UPrimitiveComponent* HitComponent = Hit.GetComponent();
+		if (!HitComponent || !WalkableComponents.Contains(HitComponent))
+		{
+			continue;
+		}
+
+		if (!bFoundHit || Hit.Time < BestHitTime)
+		{
+			OutHit = Hit;
+			BestHitTime = Hit.Time;
+			bFoundHit = true;
+		}
+	}
+
+	return bFoundHit;
 }
 }
 
@@ -143,8 +201,8 @@ void ASubCrewCharacter::EnterOnFootInSubmarine(ASubmarineBase* Sub, const FTrans
 			const FVector TraceEnd = TraceStart - FVector(0.f, 0.f, CapsuleHalfHeight * 4.f);
 
 			FHitResult Hit;
-			FCollisionQueryParams Params(SCENE_QUERY_STAT(CrewFloorSnap), false, this);
-			if (GetWorld()->LineTraceSingleByChannel(Hit, TraceStart, TraceEnd, ECC_GameTraceChannel2, Params))
+			const FVector PreviousLocation = GetActorLocation();
+			if (FindInteriorWalkableHit(Sub, GetWorld(), this, TraceStart, TraceEnd, Hit))
 			{
 				const FVector CorrectedLocation = Hit.ImpactPoint + FVector(0.f, 0.f, CapsuleHalfHeight);
 				SetActorLocation(CorrectedLocation, false, nullptr, ETeleportType::TeleportPhysics);
@@ -155,7 +213,7 @@ void ASubCrewCharacter::EnterOnFootInSubmarine(ASubmarineBase* Sub, const FTrans
 					LogSubCrew,
 					Log,
 					TEXT("Floor snap applied | From=%s | To=%s | HitComp=%s"),
-					*GetActorLocation().ToCompactString(),
+					*PreviousLocation.ToCompactString(),
 					*CorrectedLocation.ToCompactString(),
 					*GetNameSafe(Hit.GetComponent()));
 			}

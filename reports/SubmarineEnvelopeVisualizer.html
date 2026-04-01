@@ -1,0 +1,388 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <title>Sub3D - Envelope & Architecture Visualizer</title>
+    <style>
+        :root {
+            --bg: #05070a;
+            --panel: rgba(15, 23, 42, 0.9);
+            --accent: #00f2ff;
+            --text: #e2e8f0;
+            --grid: rgba(226, 232, 240, 0.05);
+            --danger: #ff4757;
+            --warning: #ffa502;
+            --font-mono: 'Consolas', 'Courier New', monospace;
+        }
+
+        body {
+            background-color: var(--bg);
+            color: var(--text);
+            font-family: 'Segoe UI', system-ui, sans-serif;
+            margin: 0;
+            display: flex;
+            height: 100vh;
+            overflow: hidden;
+        }
+
+        /* UI Panels */
+        .sidebar {
+            width: 320px;
+            background: var(--panel);
+            border-right: 1px solid rgba(255,255,255,0.1);
+            padding: 20px;
+            display: flex;
+            flex-direction: column;
+            gap: 15px;
+            z-index: 10;
+            box-shadow: 2px 0 15px rgba(0,0,0,0.5);
+            overflow-y: auto;
+        }
+
+        .main-view {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            position: relative;
+        }
+
+        /* Headers */
+        h1 { font-size: 1.2rem; letter-spacing: 2px; margin: 0 0 5px 0; color: #fff; text-transform: uppercase; }
+        h2 { font-size: 0.85rem; color: #94a3b8; margin: 0 0 10px 0; text-transform: uppercase; border-bottom: 1px solid rgba(255,255,255,0.1); padding-bottom: 5px;}
+        h3 { font-size: 0.8rem; margin: 0 0 5px 0; color: var(--accent); }
+
+        /* Controls */
+        .control-group { background: rgba(0,0,0,0.3); padding: 10px; border-radius: 6px; border: 1px solid rgba(255,255,255,0.05); }
+        .slider-row { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; }
+        .slider-row label { font-family: var(--font-mono); font-size: 0.75rem; color: #cbd5e1; }
+        .slider-row span { font-family: var(--font-mono); font-size: 0.75rem; color: var(--accent); width: 45px; text-align: right; }
+        input[type="range"] { flex: 1; margin: 0 10px; accent-color: var(--accent); cursor: pointer; }
+        select, button {
+            background: rgba(0,0,0,0.5); color: #fff; border: 1px solid rgba(255,255,255,0.2); 
+            padding: 5px; font-family: var(--font-mono); font-size: 0.8rem; border-radius: 4px; width: 100%; cursor: pointer;
+        }
+        button:hover { background: rgba(0,242,255,0.2); border-color: var(--accent); }
+        select { margin-bottom: 8px; }
+
+        .preset-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 5px; margin-bottom: 15px; }
+
+        /* Viewports */
+        .viewport-container {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            border-bottom: 1px solid rgba(255,255,255,0.1);
+            position: relative;
+        }
+        .viewport-title {
+            position: absolute; top: 10px; left: 10px; font-family: var(--font-mono); font-size: 0.8rem;
+            background: rgba(0,0,0,0.6); padding: 4px 8px; border: 1px solid rgba(255,255,255,0.2); z-index: 5;
+        }
+        
+        svg {
+            width: 100%; height: 100%;
+            background-image: 
+                linear-gradient(var(--grid) 1px, transparent 1px),
+                linear-gradient(90deg, var(--grid) 1px, transparent 1px);
+            background-size: 50px 50px;
+            background-position: center center;
+        }
+
+        .hull-line { fill: rgba(0, 242, 255, 0.1); stroke: var(--accent); stroke-width: 2; }
+        .taper-zone { fill: rgba(255, 71, 87, 0.1); stroke: var(--danger); stroke-width: 1; stroke-dasharray: 4,4; }
+        .grid-axis { stroke: rgba(255,255,255,0.2); stroke-width: 1; }
+    </style>
+</head>
+<body>
+
+<div class="sidebar">
+    <div>
+        <h1>Envelope Visualizer</h1>
+        <div style="font-size:0.75rem; color:#64748b;">SubmarineEnvelopeDef.h Prototyping</div>
+    </div>
+
+    <div>
+        <h2>PRESETS (Formes Historiques)</h2>
+        <div class="preset-grid">
+            <button onclick="loadPreset('albacore')">Albacore (Goutte)</button>
+            <button onclick="loadPreset('cigar')">Cigare (WW2/Rubis)</button>
+            <button onclick="loadPreset('cylinder')">Typ. 212 (Cylindre)</button>
+            <button onclick="loadPreset('typhoon')">Typhoon (Plat)</button>
+        </div>
+    </div>
+
+    <div class="control-group">
+        <h3>DIMENSIONS PRINCIPALES</h3>
+        <div class="slider-row">
+            <label>Length (m)</label>
+            <input type="range" id="p-length" min="15" max="200" step="1" oninput="updateAll()">
+            <span id="v-length"></span>
+        </div>
+        <div class="slider-row">
+            <label>Def. Radius(m)</label>
+            <input type="range" id="p-radius" min="1" max="15" step="0.1" oninput="updateAll()">
+            <span id="v-radius"></span>
+        </div>
+    </div>
+
+    <div class="control-group">
+        <h3>PROFILS BOW / STERN</h3>
+        <select id="p-bow-type" onchange="updateAll()">
+            <option value="rounded">Bow: Rounded (Spherical)</option>
+            <option value="pointed">Bow: Pointed (Cone)</option>
+            <option value="parabolic">Bow: Parabolic (Hydro)</option>
+        </select>
+        <div class="slider-row">
+            <label>Bow Taper %</label>
+            <input type="range" id="p-bow-perc" min="0" max="0.5" step="0.01" oninput="updateAll()">
+            <span id="v-bow-perc"></span>
+        </div>
+
+        <select id="p-stern-type" onchange="updateAll()">
+            <option value="tapered">Stern: Tapered (Cone)</option>
+            <option value="bezier">Stern: Albacore (Bezier)</option>
+            <option value="rounded">Stern: Rounded</option>
+        </select>
+        <div class="slider-row">
+            <label>Stern Taper %</label>
+            <input type="range" id="p-stern-perc" min="0" max="0.5" step="0.01" oninput="updateAll()">
+            <span id="v-stern-perc"></span>
+        </div>
+    </div>
+
+    <div class="control-group">
+        <h3>SECTION TRANSVERSALE (Superellipse)</h3>
+        <div class="slider-row">
+            <label>Exponent</label>
+            <input type="range" id="p-exp" min="0.5" max="5.0" step="0.1" oninput="updateAll()">
+            <span id="v-exp"></span>
+        </div>
+        <div class="slider-row" style="margin-top:-5px; margin-bottom:10px;">
+            <label style="font-size:0.65rem; color:#64748b;">(2=Cercle, >2=Carré, <2=Losange)</label>
+        </div>
+
+        <div class="slider-row">
+            <label>W/H Ratio</label>
+            <input type="range" id="p-wh" min="0.5" max="2.0" step="0.05" oninput="updateAll()">
+            <span id="v-wh"></span>
+        </div>
+        <div class="slider-row" style="margin-top:-5px;">
+            <label style="font-size:0.65rem; color:#64748b;">(1=Symétrique, >1=Largo)</label>
+        </div>
+    </div>
+</div>
+
+<div class="main-view">
+    <!-- Vue Longitudinale (Profil de Côté / Supérieur si W/H=1) -->
+    <div class="viewport-container" style="flex: 2;">
+        <div class="viewport-title">LONGITUDINAL PROFILE (X-Z)</div>
+        <svg id="svg-profile">
+            <g id="grp-profile" transform="translate(0,0)"></g>
+        </svg>
+    </div>
+
+    <!-- Vue Transversale (Coupe Face) -->
+    <div class="viewport-container" style="flex: 1; border-bottom:none;">
+        <div class="viewport-title" style="top:auto; bottom:10px;">CROSS-SECTION (Y-Z Superellipse)</div>
+        <svg id="svg-section">
+            <g id="grp-section" transform="translate(0,0)"></g>
+        </svg>
+    </div>
+</div>
+
+<script>
+    // System definitions mapped from SubmarineEnvelopeDef.h
+    let activePreset = null;
+
+    const presets = {
+        'albacore': { len: 75, rad: 4.5, bowT: 'parabolic', bowP: 0.15, sternT: 'bezier', sternP: 0.40, exp: 2.0, wh: 1.0 },
+        'cigar': { len: 75, rad: 3.8, bowT: 'rounded', bowP: 0.10, sternT: 'tapered', sternP: 0.20, exp: 2.0, wh: 0.9 },
+        'cylinder': { len: 56, rad: 3.5, bowT: 'rounded', bowP: 0.08, sternT: 'pointed', sternP: 0.15, exp: 2.5, wh: 1.0 },
+        'typhoon': { len: 175, rad: 11.5, bowT: 'rounded', bowP: 0.12, sternT: 'tapered', sternP: 0.25, exp: 3.5, wh: 1.4 }
+    };
+
+    function loadPreset(name) {
+        const p = presets[name];
+        document.getElementById('p-length').value = p.len;
+        document.getElementById('p-radius').value = p.rad;
+        document.getElementById('p-bow-type').value = p.bowT;
+        document.getElementById('p-bow-perc').value = p.bowP;
+        document.getElementById('p-stern-type').value = p.sternT;
+        document.getElementById('p-stern-perc').value = p.sternP;
+        document.getElementById('p-exp').value = p.exp;
+        document.getElementById('p-wh').value = p.wh;
+        updateAll();
+    }
+
+    function evalTaper(normalizedX, type, isBow) {
+        // Returns multiplier 0 to 1
+        // isBow: x goes 0 to 1 (0 is absolute tip, 1 is start of full cylinder)
+        // isStern: x goes 0 to 1 (0 is absolute tip, 1 is end of full cylinder)
+        if (type === 'rounded') {
+            // Circle/Ellipse formula: y = sqrt(1 - (x-1)^2)
+            return Math.sqrt(1 - Math.pow(normalizedX - 1, 2));
+        } else if (type === 'pointed' || type === 'tapered') {
+            // Linear
+            return normalizedX;
+        } else if (type === 'parabolic') {
+            return Math.pow(normalizedX, 0.5);
+        } else if (type === 'bezier') {
+            // Smooth step approximation
+            return normalizedX * normalizedX * (3 - 2 * normalizedX);
+        }
+        return 1.0;
+    }
+
+    function updateAll() {
+        const len = parseFloat(document.getElementById('p-length').value);
+        const rad = parseFloat(document.getElementById('p-radius').value);
+        const bowT = document.getElementById('p-bow-type').value;
+        const bowP = parseFloat(document.getElementById('p-bow-perc').value);
+        const sternT = document.getElementById('p-stern-type').value;
+        const sternP = parseFloat(document.getElementById('p-stern-perc').value);
+        const exp = parseFloat(document.getElementById('p-exp').value);
+        const wh = parseFloat(document.getElementById('p-wh').value);
+
+        // Update Labels
+        document.getElementById('v-length').innerText = len.toFixed(1);
+        document.getElementById('v-radius').innerText = rad.toFixed(1);
+        document.getElementById('v-bow-perc').innerText = (bowP*100).toFixed(0)+'%';
+        document.getElementById('v-stern-perc').innerText = (sternP*100).toFixed(0)+'%';
+        document.getElementById('v-exp').innerText = exp.toFixed(1);
+        document.getElementById('v-wh').innerText = wh.toFixed(2);
+
+        drawProfile(len, rad, bowT, bowP, sternT, sternP);
+        drawSection(rad, exp, wh);
+    }
+
+    function drawProfile(len, rad, bowT, bowP, sternT, sternP) {
+        const svg = document.getElementById('svg-profile');
+        const grp = document.getElementById('grp-profile');
+        const rect = svg.getBoundingClientRect();
+        const cw = rect.width, ch = rect.height;
+
+        // Auto scaling to frame the sub
+        const ppu = Math.min((cw - 100) / len, (ch - 100) / (rad * 2)); 
+        const originX = cw / 2;
+        const originY = ch / 2;
+
+        grp.setAttribute('transform', `translate(${originX}, ${originY})`);
+
+        let html = '';
+        
+        // Axis
+        html += `<line x1="${-cw/2}" y1="0" x2="${cw/2}" y2="0" class="grid-axis" />`;
+        html += `<line x1="0" y1="${-ch/2}" x2="0" y2="${ch/2}" class="grid-axis" />`;
+
+        const bowLenM = len * bowP;
+        const sternLenM = len * sternP;
+        const midLenM = len - bowLenM - sternLenM;
+
+        const startX = -len / 2;
+
+        // Generate points for top and bottom hull
+        let topPts = [];
+        let botPts = [];
+        const resolution = 100;
+
+        for (let i = 0; i <= resolution; i++) {
+            const fraction = i / resolution;
+            const x = startX + (fraction * len);
+            
+            let rMult = 1.0;
+            if (fraction < bowP) {
+                // Inside bow taper (0 to 1 normalized)
+                let nX = fraction / bowP;
+                rMult = evalTaper(nX, bowT, true);
+            } else if (fraction > (1 - sternP)) {
+                // Inside stern taper (1 down to 0 normalized)
+                let nX = (1 - fraction) / sternP;
+                rMult = evalTaper(nX, sternT, false);
+            }
+
+            const currentRad = rad * rMult;
+            
+            topPts.push(`${x * ppu},${-currentRad * ppu}`);
+            // Unshift to reverse array for polygon completion
+            botPts.unshift(`${x * ppu},${currentRad * ppu}`);
+        }
+
+        const polyData = topPts.join(' ') + ' ' + botPts.join(' ');
+        html += `<polygon points="${polyData}" class="hull-line" />`;
+
+        // Taper zone indicators
+        const bX = (startX + bowLenM) * ppu;
+        const sX = (startX + bowLenM + midLenM) * ppu;
+        
+        html += `<rect x="${startX*ppu}" y="${-rad*ppu}" width="${bowLenM*ppu}" height="${rad*2*ppu}" class="taper-zone" />`;
+        html += `<text x="${startX*ppu + 5}" y="${rad*ppu + 15}" fill="var(--danger)" font-size="10">BOW ZONE</text>`;
+        
+        html += `<rect x="${sX}" y="${-rad*ppu}" width="${sternLenM*ppu}" height="${rad*2*ppu}" class="taper-zone" />`;
+        html += `<text x="${sX + 5}" y="${rad*ppu + 15}" fill="var(--danger)" font-size="10">STERN ZONE</text>`;
+
+        // Center markers
+        html += `<circle cx="${startX*ppu}" cy="0" r="4" fill="#00ffcc" />`;
+        html += `<circle cx="${(startX+len)*ppu}" cy="0" r="4" fill="#00ffcc" />`;
+
+        grp.innerHTML = html;
+    }
+
+    function drawSection(rad, exp, wh) {
+        const svg = document.getElementById('svg-section');
+        const grp = document.getElementById('grp-section');
+        const rect = svg.getBoundingClientRect();
+        const cw = rect.width, ch = rect.height;
+
+        const maxDim = rad * Math.max(1, wh);
+        const ppu = Math.min((cw - 100) / (maxDim * 2), (ch - 40) / (rad * 2));
+        const originX = cw / 2;
+        const originY = ch / 2;
+
+        grp.setAttribute('transform', `translate(${originX}, ${originY})`);
+
+        let html = '';
+        html += `<line x1="${-cw/2}" y1="0" x2="${cw/2}" y2="0" class="grid-axis" />`;
+        html += `<line x1="0" y1="${-ch/2}" x2="0" y2="${ch/2}" class="grid-axis" />`;
+
+        // Draw Superellipse
+        let pts = [];
+        const res = 120;
+        const a = rad * wh * ppu;
+        const b = rad * ppu;
+        const n = exp;
+
+        // Formula: |x/a|^n + |y/b|^n = 1
+        // Parametric: x(t) = a * |cost|^(2/n) * sgn(cost), y(t) = b * |sint|^(2/n) * sgn(sint)
+        for(let i=0; i<=res; i++) {
+            const t = (i / res) * Math.PI * 2;
+            const cosT = Math.cos(t);
+            const sinT = Math.sin(t);
+            
+            const x = a * Math.pow(Math.abs(cosT), 2/n) * Math.sign(cosT);
+            const y = b * Math.pow(Math.abs(sinT), 2/n) * Math.sign(sinT);
+            
+            pts.push(`${x},${y}`);
+        }
+
+        html += `<polygon points="${pts.join(' ')}" class="hull-line" fill-opacity="0.2" />`;
+        html += `<text x="5" y="-10" fill="#cbd5e1" font-size="10">Superellipse n=${exp.toFixed(1)}</text>`;
+        
+        // Crew Reference (1.8m)
+        const crewH = 1.8 * ppu;
+        const crewW = 0.6 * ppu;
+        html += `<rect x="${-crewW/2}" y="${-crewH/2}" width="${crewW}" height="${crewH}" rx="${crewW/2}" fill="var(--danger)" opacity="0.8" />`;
+        html += `<text x="${crewW}" y="0" fill="var(--danger)" font-size="10">CREW</text>`;
+
+        grp.innerHTML = html;
+    }
+
+    // Init
+    window.onload = () => {
+        loadPreset('albacore');
+        // Rerender on resize to maintain scale
+        window.addEventListener('resize', updateAll);
+    };
+
+</script>
+</body>
+</html>

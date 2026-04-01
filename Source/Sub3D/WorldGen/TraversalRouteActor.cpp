@@ -15,6 +15,7 @@
 #include "RouteValidator.h"
 #include "SkeletonResolver.h"
 #include "SonarFieldComponent.h"
+#include "TunnelNavDataBuilder.h"
 #include "TraversalTopologyGenerator.h"
 #include "Components/ArrowComponent.h"
 #include "Components/StaticMeshComponent.h"
@@ -527,12 +528,20 @@ void ATraversalRouteActor::BeginPlay()
 	}
 
 	RebuildManagedMeshComponentList();
+	const bool bHasBakedVisualMesh = IsValid(BakedStaticMeshComponent) && IsValid(BakedStaticMeshComponent->GetStaticMesh());
 
 	if (MeshComponents.Num() > 0)
 	{
 		UE_LOG(LogRouteGen, Log,
 			TEXT("ATraversalRouteActor: reusing %d baked PMC components in BeginPlay; skipping automatic rebuild."),
 			MeshComponents.Num());
+		EnsureRuntimeNavigationDataForCurrentSpec(true);
+	}
+	else if (bHasBakedVisualMesh)
+	{
+		UE_LOG(LogRouteGen, Log,
+			TEXT("ATraversalRouteActor: reusing baked static mesh in BeginPlay; ensuring runtime nav data is available."));
+		EnsureRuntimeNavigationDataForCurrentSpec(true);
 	}
 	else if (HasAuthority() && RouteNetSpec.GenSpec.RouteLengthMeters > 0.f)
 	{
@@ -1393,8 +1402,17 @@ bool ATraversalRouteActor::BuildRouteFromSpec(const FRouteGenSpec& Spec, const F
 	return bOk;
 }
 
-bool ATraversalRouteActor::RunPipeline(const FRouteGenSpec& Spec, const FRouteSeedCascade& Seeds)
+bool ATraversalRouteActor::RunPipeline(const FRouteGenSpec& Spec, const FRouteSeedCascade& Seeds, bool bSpawnVisualMesh)
 {
+	GeneratedTunnelNavData = nullptr;
+	const int32 RouteBuildHash = static_cast<int32>(ComputeBuildHash(Spec, Seeds));
+	UTunnelNavDataBuilder* TunnelNavBuilder = nullptr;
+	if (bBuildTunnelNavData)
+	{
+		GeneratedTunnelNavData = NewObject<UTunnelNavDataAsset>(this, TEXT("GeneratedTunnelNavData"), RF_Transient);
+		TunnelNavBuilder = NewObject<UTunnelNavDataBuilder>(this);
+	}
+
 	if (TunnelDebugOptions.bEnableTunnelDebug)
 	{
 		UE_LOG(LogRouteGen, Log,
@@ -1453,6 +1471,32 @@ bool ATraversalRouteActor::RunPipeline(const FRouteGenSpec& Spec, const FRouteSe
 		});
 	}
 
+	if (TunnelNavBuilder && IsValid(GeneratedTunnelNavData))
+	{
+		FTunnelNavEndpointSnapshot EndpointSnapshot;
+		EndpointSnapshot.RouteStartTransform = RouteStartTransform;
+		EndpointSnapshot.bHasRouteStartTransform = bHasRouteStartTransform;
+		EndpointSnapshot.RouteStartRadiusCm = RouteStartRadiusCm;
+		EndpointSnapshot.RouteStartDockTransform = RouteStartDockTransform;
+		EndpointSnapshot.bHasRouteStartDockTransform = bHasRouteStartDockTransform;
+		EndpointSnapshot.RouteStartDockRadiusCm = RouteStartDockRadiusCm;
+		EndpointSnapshot.RouteEndTransform = RouteEndTransform;
+		EndpointSnapshot.bHasRouteEndTransform = bHasRouteEndTransform;
+		EndpointSnapshot.RouteEndRadiusCm = RouteEndRadiusCm;
+		EndpointSnapshot.RouteEndDockTransform = RouteEndDockTransform;
+		EndpointSnapshot.bHasRouteEndDockTransform = bHasRouteEndDockTransform;
+		EndpointSnapshot.RouteEndDockRadiusCm = RouteEndDockRadiusCm;
+		TunnelNavBuilder->InitializeFromC5(
+			GeneratedTunnelNavData,
+			Spec,
+			Seeds,
+			RouteBuildHash,
+			Nodes,
+			Skeleton,
+			TunnelNavBuildSettings,
+			EndpointSnapshot);
+	}
+
 	UE_LOG(LogRouteGen, Log, TEXT("[Pipeline] C6 Volume..."));
 	FRouteFieldModel FieldModel;
 	UNavigableVolumeGenerator* VolGen = NewObject<UNavigableVolumeGenerator>(this);
@@ -1471,6 +1515,11 @@ bool ATraversalRouteActor::RunPipeline(const FRouteGenSpec& Spec, const FRouteSe
 		}
 		UE_LOG(LogRouteGen, Log, TEXT("[Pipeline] C6 done. RenderChunks=%d (guaranteed=%d) SonarChunks=%d"),
 			FieldModel.RenderField.Num(), GuaranteedRender, FieldModel.SonarField.Num());
+	}
+
+	if (TunnelNavBuilder && IsValid(GeneratedTunnelNavData))
+	{
+		TunnelNavBuilder->PopulateFromC6(GeneratedTunnelNavData, FieldModel);
 	}
 
 	UE_LOG(LogRouteGen, Log, TEXT("[Pipeline] C7 Organic..."));
@@ -1509,6 +1558,10 @@ bool ATraversalRouteActor::RunPipeline(const FRouteGenSpec& Spec, const FRouteSe
 		LastValidationReport.MinClearanceBranchB,
 		LastValidationReport.MinClearanceBranchC,
 		LastValidationReport.MergeFailures);
+	if (TunnelNavBuilder && IsValid(GeneratedTunnelNavData))
+	{
+		TunnelNavBuilder->StampFromC9(GeneratedTunnelNavData, Spec, LastValidationReport);
+	}
 	if (!LastValidationReport.bPass)
 	{
 		return false;
@@ -1541,11 +1594,62 @@ bool ATraversalRouteActor::RunPipeline(const FRouteGenSpec& Spec, const FRouteSe
 	UE_LOG(LogRouteGen, Log, TEXT("[Pipeline] SonarField init..."));
 	SonarField->InitializeFromField(FieldModel);
 
-	UE_LOG(LogRouteGen, Log, TEXT("[Pipeline] SpawnMesh..."));
-	SpawnMeshComponents(Chunks);
+	if (bSpawnVisualMesh)
+	{
+		UE_LOG(LogRouteGen, Log, TEXT("[Pipeline] SpawnMesh..."));
+		SpawnMeshComponents(Chunks);
+	}
+	else
+	{
+		UE_LOG(LogRouteGen, Log, TEXT("[Pipeline] SpawnMesh skipped. Reusing existing visuals while rebuilding runtime data."));
+	}
 
 	UE_LOG(LogRouteGen, Log, TEXT("[Pipeline] Complete."));
 	return true;
+}
+
+bool ATraversalRouteActor::HasGeneratedTunnelNavRuntimeData() const
+{
+	return IsValid(GeneratedTunnelNavData)
+		&& GeneratedTunnelNavData->Samples.Num() > 0
+		&& GeneratedTunnelNavData->Edges.Num() > 0;
+}
+
+void ATraversalRouteActor::EnsureRuntimeNavigationDataForCurrentSpec(bool bReusingExistingVisuals)
+{
+	if (RouteNetSpec.GenSpec.RouteLengthMeters <= 0.f)
+	{
+		return;
+	}
+
+	if (HasGeneratedTunnelNavRuntimeData())
+	{
+		return;
+	}
+
+	const bool bOk = RunPipeline(RouteNetSpec.GenSpec, RouteNetSpec.Seeds, !bReusingExistingVisuals);
+	const int32 GeneratedSampleCount = IsValid(GeneratedTunnelNavData) ? GeneratedTunnelNavData->Samples.Num() : 0;
+	const int32 GeneratedEdgeCount = IsValid(GeneratedTunnelNavData) ? GeneratedTunnelNavData->Edges.Num() : 0;
+	if (bOk)
+	{
+		UE_LOG(
+			LogRouteGen,
+			Log,
+			TEXT("ATraversalRouteActor: completed runtime navigation rebuild while reusing existing visuals. Hash=0x%08X Samples=%d Edges=%d"),
+			RouteNetSpec.BuildHash,
+			GeneratedSampleCount,
+			GeneratedEdgeCount);
+	}
+	else
+	{
+		UE_LOG(
+			LogRouteGen,
+			Warning,
+			TEXT("ATraversalRouteActor: failed runtime navigation rebuild while reusing existing visuals. Hash=0x%08X Samples=%d Edges=%d"),
+			RouteNetSpec.BuildHash,
+			GeneratedSampleCount,
+			GeneratedEdgeCount);
+	}
 }
 
 void ATraversalRouteActor::SpawnMeshComponentSection(const TArray<FRouteMeshChunkData>& Chunks, int32 StartIndex, int32 Count, int32 SectionIndex)
@@ -1686,6 +1790,7 @@ void ATraversalRouteActor::OnRep_RouteNetSpec()
 		if (TryResolveBakedAssetForHash(RouteNetSpec.BuildHash))
 		{
 			UE_LOG(LogRouteGen, Log, TEXT("ATraversalRouteActor [Client]: reusing baked static mesh asset; skipping replicated rebuild."));
+			EnsureRuntimeNavigationDataForCurrentSpec(true);
 			return;
 		}
 
@@ -1695,11 +1800,12 @@ void ATraversalRouteActor::OnRep_RouteNetSpec()
 			UE_LOG(LogRouteGen, Log,
 				TEXT("ATraversalRouteActor [Client]: reusing %d baked PMC components; skipping replicated rebuild."),
 				MeshComponents.Num());
+			EnsureRuntimeNavigationDataForCurrentSpec(true);
 			return;
 		}
 
 		ClearMeshComponents();
-		RunPipeline(RouteNetSpec.GenSpec, RouteNetSpec.Seeds);
+		RunPipeline(RouteNetSpec.GenSpec, RouteNetSpec.Seeds, true);
 		UE_LOG(LogRouteGen, Log, TEXT("ATraversalRouteActor [Client]: rebuilt route. Hash=0x%08X"), RouteNetSpec.BuildHash);
 	}
 }

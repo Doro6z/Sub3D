@@ -2,7 +2,7 @@
 
 namespace
 {
-void AddValidationMessage(
+void AddFunctionalGraphValidationMessage(
 	TArray<FLayoutValidationMessage>& OutMessages,
 	ELayoutValidationSeverity Severity,
 	FName RelatedId,
@@ -22,7 +22,7 @@ bool USubmarineFunctionalGraph::ValidateGraph(TArray<FLayoutValidationMessage>& 
 
 	if (Compartments.Num() < 2)
 	{
-		AddValidationMessage(
+		AddFunctionalGraphValidationMessage(
 			OutMessages,
 			ELayoutValidationSeverity::Error,
 			NAME_None,
@@ -38,7 +38,7 @@ bool USubmarineFunctionalGraph::ValidateGraph(TArray<FLayoutValidationMessage>& 
 	{
 		if (Compartment.CompartmentId.IsNone())
 		{
-			AddValidationMessage(
+			AddFunctionalGraphValidationMessage(
 				OutMessages,
 				ELayoutValidationSeverity::Error,
 				NAME_None,
@@ -48,7 +48,7 @@ bool USubmarineFunctionalGraph::ValidateGraph(TArray<FLayoutValidationMessage>& 
 
 		if (UniqueIds.Contains(Compartment.CompartmentId))
 		{
-			AddValidationMessage(
+			AddFunctionalGraphValidationMessage(
 				OutMessages,
 				ELayoutValidationSeverity::Error,
 				Compartment.CompartmentId,
@@ -65,7 +65,7 @@ bool USubmarineFunctionalGraph::ValidateGraph(TArray<FLayoutValidationMessage>& 
 	{
 		if (Passage.FromCompartmentId.IsNone() || Passage.ToCompartmentId.IsNone())
 		{
-			AddValidationMessage(
+			AddFunctionalGraphValidationMessage(
 				OutMessages,
 				ELayoutValidationSeverity::Error,
 				NAME_None,
@@ -75,7 +75,7 @@ bool USubmarineFunctionalGraph::ValidateGraph(TArray<FLayoutValidationMessage>& 
 
 		if (Passage.FromCompartmentId == Passage.ToCompartmentId)
 		{
-			AddValidationMessage(
+			AddFunctionalGraphValidationMessage(
 				OutMessages,
 				ELayoutValidationSeverity::Error,
 				Passage.FromCompartmentId,
@@ -85,7 +85,7 @@ bool USubmarineFunctionalGraph::ValidateGraph(TArray<FLayoutValidationMessage>& 
 
 		if (!ValidIds.Contains(Passage.FromCompartmentId) || !ValidIds.Contains(Passage.ToCompartmentId))
 		{
-			AddValidationMessage(
+			AddFunctionalGraphValidationMessage(
 				OutMessages,
 				ELayoutValidationSeverity::Error,
 				NAME_None,
@@ -137,7 +137,7 @@ bool USubmarineFunctionalGraph::ValidateGraph(TArray<FLayoutValidationMessage>& 
 		{
 			if (!Visited.Contains(CompartmentId))
 			{
-				AddValidationMessage(
+				AddFunctionalGraphValidationMessage(
 					OutMessages,
 					ELayoutValidationSeverity::Error,
 					CompartmentId,

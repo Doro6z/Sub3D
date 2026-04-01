@@ -5,7 +5,7 @@
 
 namespace
 {
-void AddValidationMessage(
+void AddBuildCompilerValidationMessage(
 	TArray<FLayoutValidationMessage>& OutMessages,
 	ELayoutValidationSeverity Severity,
 	FName RelatedId,
@@ -77,13 +77,13 @@ USubmarineLayoutAsset* USubmarineBuildCompiler::CompileToLayoutAsset(
 	if (Solution.HasErrors())
 	{
 		OutMessages = Solution.ValidationMessages;
-		AddValidationMessage(OutMessages, ELayoutValidationSeverity::Error, NAME_None, TEXT("Solution invalide : compilation refusee"));
+		AddBuildCompilerValidationMessage(OutMessages, ELayoutValidationSeverity::Error, NAME_None, TEXT("Solution invalide : compilation refusee"));
 		return nullptr;
 	}
 
 	if (Solution.Compartments.Num() == 0)
 	{
-		AddValidationMessage(OutMessages, ELayoutValidationSeverity::Error, NAME_None, TEXT("Solution vide : aucun compartiment a compiler"));
+		AddBuildCompilerValidationMessage(OutMessages, ELayoutValidationSeverity::Error, NAME_None, TEXT("Solution vide : aucun compartiment a compiler"));
 		return nullptr;
 	}
 
@@ -91,7 +91,7 @@ USubmarineLayoutAsset* USubmarineBuildCompiler::CompileToLayoutAsset(
 	USubmarineLayoutAsset* LayoutAsset = NewObject<USubmarineLayoutAsset>(EffectiveOuter);
 	if (!LayoutAsset)
 	{
-		AddValidationMessage(OutMessages, ELayoutValidationSeverity::Error, NAME_None, TEXT("Creation du LayoutAsset echouee"));
+		AddBuildCompilerValidationMessage(OutMessages, ELayoutValidationSeverity::Error, NAME_None, TEXT("Creation du LayoutAsset echouee"));
 		return nullptr;
 	}
 
@@ -99,6 +99,7 @@ USubmarineLayoutAsset* USubmarineBuildCompiler::CompileToLayoutAsset(
 	LayoutAsset->StructuralSheets.Reset();
 	LayoutAsset->Doors.Reset();
 	LayoutAsset->StationSlots.Reset();
+	LayoutAsset->WalkableSurfaces.Reset();
 	LayoutAsset->Metrics = Solution.Metrics;
 
 	for (const FCompartmentPlacement& Placement : Solution.Compartments)
@@ -123,6 +124,18 @@ USubmarineLayoutAsset* USubmarineBuildCompiler::CompileToLayoutAsset(
 		const float RadiusCm = FMath::Max(1.f, Placement.EffectiveRadiusCm);
 		const FVector2D SideSize(LengthCm, RadiusCm * 2.f);
 		const FVector2D CapSize(LengthCm, RadiusCm * 2.f);
+
+		FWalkableSurfaceDef WalkableSurface;
+		WalkableSurface.CompartmentId = Placement.CompartmentId;
+		WalkableSurface.LocalTransform = FTransform(
+			FRotator::ZeroRotator,
+			FVector(MidX, 0.f, Placement.FloorOffsetCm));
+		WalkableSurface.WidthCm = FMath::Max(1.f, Placement.FloorWidthCm);
+		WalkableSurface.LengthCm = LengthCm;
+		WalkableSurface.SurfaceType = FName(TEXT("CompartmentFloor"));
+		WalkableSurface.CollisionProfileName = FName(TEXT("SubInteriorWalkable"));
+		WalkableSurface.bSupportsCrew = true;
+		LayoutAsset->WalkableSurfaces.Add(MoveTemp(WalkableSurface));
 
 		AddExteriorSheet(
 			LayoutAsset->StructuralSheets,

@@ -63,10 +63,16 @@ public:
 	float PingHalfAngleDeg = 85.f;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Sonar")
+	bool bOmnidirectionalPing = true;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Sonar", meta = (ClampMin = "5.0", ClampMax = "89.0"))
+	float OmniPingVerticalHalfAngleDeg = 45.f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Sonar")
 	TEnumAsByte<ECollisionChannel> PingTraceChannel = ECC_Visibility;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Sonar", meta = (ClampMin = "0.0"))
-	float MinAcceptedHitDistanceCm = 120.f;
+	float MinAcceptedHitDistanceCm = 60.f;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Sonar")
 	bool bIgnoreAttachedActors = true;
@@ -92,6 +98,9 @@ public:
 	UPROPERTY(ReplicatedUsing = OnRep_SonarPoints, BlueprintReadOnly, Category = "Sonar")
 	TArray<FSonarHitPoint> SonarPoints;
 
+	UPROPERTY(Replicated, BlueprintReadOnly, Category = "Sonar")
+	TArray<float> RecentPingTimestamps;
+
 	// ── API ───────────────────────────────────────────────────────────────────
 
 	/**
@@ -115,6 +124,9 @@ public:
 	/** Server world time of the last accepted ping. Exposed for display widgets. */
 	UFUNCTION(BlueprintPure, Category = "Sonar")
 	float GetLastPingTime() const { return LastPingTime; }
+
+	UFUNCTION(BlueprintPure, Category = "Sonar")
+	const TArray<float>& GetRecentPingTimestamps() const { return RecentPingTimestamps; }
 
 	/**
 	 * Blueprint event fired on clients when SonarPoints is updated via replication.
@@ -140,4 +152,5 @@ private:
 	float LastPingTime = -1000.f;
 	bool bContinuousPingActive = false;
 	float ContinuousPingAccumulator = 0.f;
+	bool bLoggedReplicationPointCap = false;
 };

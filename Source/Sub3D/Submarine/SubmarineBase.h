@@ -17,6 +17,8 @@ class UFloodWaterVisualsComponent;
 class USubmarineFeedbackDirectorComponent;
 class USubSonarComponent;
 class USubSonarSystemComponent;
+class UTunnelNavigationRuntimeComponent;
+class UHelmNavigationDisplayComponent;
 class ATurretActor;
 class ASubDoorActor;
 class UPrimitiveComponent;
@@ -81,6 +83,12 @@ public:
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
 	USubSonarSystemComponent* SonarSystem;
 
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
+	UTunnelNavigationRuntimeComponent* TunnelNavigationRuntime;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
+	UHelmNavigationDisplayComponent* HelmNavigationDisplay;
+
 	// Attach point inside the sub for the helm station
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
 	USceneComponent* HelmSocket;
@@ -137,6 +145,16 @@ public:
 
 	UFUNCTION(BlueprintCallable, Category = "Submarine|Collision")
 	void RefreshMovementCollisionBinding();
+
+	// ── Interior / Crew support ──────────────────────────────────────────
+
+	/** Returns components that provide walkable surfaces for crew inside the submarine. */
+	UFUNCTION(BlueprintPure, Category = "Submarine|Interior")
+	virtual TArray<UPrimitiveComponent*> GetInteriorWalkableComponents() const;
+
+	/** Returns the canonical transform for crew embark (corrected for floor support). */
+	UFUNCTION(BlueprintPure, Category = "Submarine|Interior")
+	virtual FTransform GetCrewEmbarkTransform() const;
 
 	UFUNCTION(BlueprintCallable, CallInEditor, Category = "Submarine|Damage|Debug")
 	bool CreateDebugBreachOnFirstExteriorSheet(float DamageAmount = 150.f);

@@ -21,6 +21,16 @@
 - Do not say "rest unchanged".
 - Do not omit includes, macros, class members, declarations, or method bodies.
 
+### Writing quality
+- For plans, specs, handoffs, and editor setup guides, use plain technical language.
+- Do not invent hybrid labels or stylish compounds such as `debug-but-durable`, `production-adjacent`, or similar AI-shaped wording.
+- Every important adjective must map to a concrete property that can be observed or verified in code, assets, editor setup, or runtime behavior.
+- Prefer explicit terms such as `temporary`, `persistent`, `editor-assigned`, `validation-only`, `non-final`, `runtime-bound`, or `debug`.
+- If a screen or widget is not final UI, state what it is for in operational terms, for example `used to validate gameplay behavior in PIE`.
+- Avoid pseudo-precision and inflated wording such as `instrument`, `slice`, `layer`, or `reconstruction` unless the term is already defined and technically necessary.
+- If a phrase can be misread, rewrite it into a direct statement even if it sounds less polished.
+- Prefer requirement lines that are testable, editor-checkable, or implementation-checkable.
+
 ### Debugging and runtime work
 - For runtime bugs, prefer instrumentation and observability before deep rewrites.
 - Distinguish clearly between:
@@ -85,6 +95,14 @@
 - State clearly:
   - what was verified
   - what remains uncertain
+
+### Planning and handoff docs
+- Plans and handoffs must optimize for execution clarity, not style.
+- Do not compress multiple meanings into one adjective. Split them into separate statements.
+- When describing intermediate UI or tooling, specify whether it is temporary or persistent, debug-only or player-facing, asset-bound or runtime-spawned, and validation-only or expected to ship.
+- Replace vague phrases with concrete ones. Example:
+  - bad: `Three debug-but-durable panels`
+  - good: `Three validation panels, implemented as persistent editor-assigned widgets for this phase`
 
 ### Do not touch
 - `Binaries/`

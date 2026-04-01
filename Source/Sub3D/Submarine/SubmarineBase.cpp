@@ -2,12 +2,14 @@
 
 #include "BreachVfxManagerComponent.h"
 #include "FloodWaterVisualsComponent.h"
+#include "HelmNavigationDisplayComponent.h"
 #include "Components/PrimitiveComponent.h"
 #include "Engine/DamageEvents.h"
 #include "Net/UnrealNetwork.h"
 #include "SubmarineFeedbackDirectorComponent.h"
 #include "SubSonarComponent.h"
 #include "SubSonarSystemComponent.h"
+#include "TunnelNavigationRuntimeComponent.h"
 #include "SubDoorActor.h"
 #include "SubHullComponent.h"
 #include "SubMovementComponent.h"
@@ -43,6 +45,8 @@ ASubmarineBase::ASubmarineBase()
 	FeedbackManager = CreateDefaultSubobject<USubmarineFeedbackDirectorComponent>(TEXT("FeedbackManager"));
 	Sonar = CreateDefaultSubobject<USubSonarComponent>(TEXT("Sonar"));
 	SonarSystem = CreateDefaultSubobject<USubSonarSystemComponent>(TEXT("SonarSystem"));
+	TunnelNavigationRuntime = CreateDefaultSubobject<UTunnelNavigationRuntimeComponent>(TEXT("TunnelNavigationRuntime"));
+	HelmNavigationDisplay = CreateDefaultSubobject<UHelmNavigationDisplayComponent>(TEXT("HelmNavigationDisplay"));
 
 	HelmSocket = CreateDefaultSubobject<USceneComponent>(TEXT("HelmSocket"));
 	HelmSocket->SetupAttachment(HullMesh);
@@ -400,6 +404,16 @@ ASubDoorActor* ASubmarineBase::FindAttachedDoorById(FName DoorId) const
 	}
 
 	return nullptr;
+}
+
+TArray<UPrimitiveComponent*> ASubmarineBase::GetInteriorWalkableComponents() const
+{
+	return TArray<UPrimitiveComponent*>();
+}
+
+FTransform ASubmarineBase::GetCrewEmbarkTransform() const
+{
+	return GetPrimaryCrewSpawnTransform();
 }
 
 void ASubmarineBase::OnRep_RepState()

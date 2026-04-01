@@ -1,0 +1,233 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <title>Sub3D - Real World Scale Analysis</title>
+    <style>
+        :root {
+            --bg: #05070a;
+            --panel: rgba(15, 23, 42, 0.8);
+            --accent: #00f2ff;
+            --text: #e2e8f0;
+            --grid: rgba(226, 232, 240, 0.05);
+            --danger: #ff4757;
+            --warning: #ffa502;
+        }
+
+        body {
+            background-color: var(--bg);
+            color: var(--text);
+            font-family: 'Inter', -apple-system, sans-serif;
+            margin: 0;
+            display: flex;
+            flex-direction: column;
+            height: 100vh;
+            overflow: hidden;
+        }
+
+        header {
+            padding: 20px 40px;
+            background: linear-gradient(to bottom, #0f172a, transparent);
+            border-bottom: 1px solid rgba(255,255,255,0.1);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .stats-panel {
+            position: absolute;
+            bottom: 30px;
+            right: 30px;
+            width: 350px;
+            background: var(--panel);
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(255,255,255,0.1);
+            border-radius: 12px;
+            padding: 20px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.5);
+            z-index: 100;
+        }
+
+        .viewport {
+            flex: 1;
+            position: relative;
+            cursor: grab;
+        }
+
+        svg {
+            width: 100%;
+            height: 100%;
+            background-image: 
+                linear-gradient(var(--grid) 1px, transparent 1px),
+                linear-gradient(90deg, var(--grid) 1px, transparent 1px);
+            background-size: 50px 50px;
+        }
+
+        .sub-silhouette {
+            transition: all 0.3s ease;
+            filter: drop-shadow(0 0 10px rgba(0,242,255,0.2));
+            cursor: pointer;
+        }
+
+        .sub-silhouette:hover {
+            filter: drop-shadow(0 0 20px var(--accent));
+            opacity: 1 !important;
+        }
+
+        .human-probe {
+            fill: #ff4757;
+        }
+
+        .label-text {
+            font-size: 12px;
+            fill: #94a3b8;
+            font-family: monospace;
+        }
+
+        .highlight-box {
+            border-left: 4px solid var(--accent);
+            padding-left: 15px;
+            margin-bottom: 15px;
+        }
+
+        .mass-warning {
+            color: var(--warning);
+            font-size: 0.85rem;
+            margin-top: 10px;
+            border-top: 1px solid rgba(255,165,2,0.2);
+            padding-top: 10px;
+        }
+    </style>
+</head>
+<body>
+
+<header>
+    <div>
+        <h1 style="margin:0; font-size: 1.5rem; letter-spacing: 2px;">SUB3D // SCALE ANALYZER</h1>
+        <div style="color: var(--accent); font-size: 0.8rem;">REAL-WORLD PHYSICS VS GAMEPLAY TRUTH</div>
+    </div>
+    <div id="zoom-control" style="color: #64748b;">Scroll to Zoom | Drag to Pan</div>
+</header>
+
+<div class="viewport" id="view">
+    <svg id="main-svg" viewBox="0 0 1000 600">
+        <!-- Human for Scale (1.8m) at 0,0 -->
+        <g id="human" transform="translate(50, 480)">
+            <rect class="human-probe" x="-0.5" y="-1.8" width="1" height="1.8" />
+            <text x="5" y="-1" class="label-text" style="fill: var(--danger)">HUMAN (1.8m)</text>
+        </g>
+
+        <!-- Dynamic Content from JS -->
+        <g id="scaler" transform="translate(50, 480) scale(2.5)">
+            <!-- Grid 10m markers -->
+            <g id="markers"></g>
+            <g id="subs-container"></g>
+        </g>
+    </svg>
+</div>
+
+<div class="stats-panel" id="info">
+    <div class="highlight-box">
+        <h2 id="sub-name" style="margin:0; color: var(--accent);">SURVOLER UN SUB</h2>
+        <div id="sub-type" style="font-size: 0.9rem; color: #64748b;">Données techniques</div>
+    </div>
+    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
+        <div class="stat-item">
+            <label style="display:block; font-size:0.7rem; color:#64748b;">LONGUEUR</label>
+            <span id="sub-len" style="font-weight:bold;">--</span>
+        </div>
+        <div class="stat-item">
+            <label style="display:block; font-size:0.7rem; color:#64748b;">MASSE (ESTIMÉE)</label>
+            <span id="sub-mass" style="font-weight:bold;">--</span>
+        </div>
+    </div>
+    <div id="mass-comment" class="mass-warning">
+        Analyse de la densité...
+    </div>
+</div>
+
+<script>
+    const subs = [
+        { name: "Kaiten Type 1", len: 14.7, diam: 1.0, mass: 8300, type: "Human Torpedo (Suicide)", color: "#94a3b8" },
+        { name: "X-Craft", len: 15.6, diam: 1.75, mass: 30000, type: "Midget Submarine", color: "#64748b" },
+        { name: "Type 212A", len: 56.0, diam: 7.0, mass: 1830000, type: "Coastal Attack (AIP)", color: "#38bdf8" },
+        { name: "Classe Rubis", len: 73.6, diam: 7.6, mass: 2600000, type: "Nuclear Attack (SNA)", color: "#00f2ff" },
+        { name: "Los Angeles Class", len: 110.0, diam: 10.1, mass: 6900000, type: "Nuclear Attack (SSN)", color: "#0ea5e9" },
+        { name: "Typhoon (Akula)", len: 175.0, diam: 23.0, mass: 48000000, type: "Ballistic Missile (SSBN)", color: "#1e293b" },
+        { name: "Colossus-Class", len: 220.0, diam: 28.0, mass: 85000000, type: "Fictitious Heavy Carrier", color: "#f59e0b" },
+        { name: "Leviathan-Prime", len: 300.0, diam: 42.0, mass: 225000000, type: "Fictitious Super-Sub", color: "#ef4444" }
+    ];
+
+    const container = document.getElementById('subs-container');
+    const markers = document.getElementById('markers');
+    
+    // Draw markers up to 350m
+    for(let i=0; i<=350; i+=50) {
+        markers.innerHTML += `<line x1="${i}" y1="-150" x2="${i}" y2="5" stroke="rgba(255,255,255,0.05)" stroke-width="0.1" />`;
+        markers.innerHTML += `<text x="${i}" y="10" font-size="2" fill="rgba(255,255,255,0.2)">${i}m</text>`;
+    }
+
+    subs.forEach((sub, idx) => {
+        const g = document.createElementNS("http://www.w3.org/2000/svg", "g");
+        g.setAttribute("transform", `translate(0, ${-(idx * 16)})`);
+        g.classList.add('sub-silhouette');
+        g.style.opacity = (sub.len === 73.6) ? "1" : "0.5";
+
+        // Hull
+        const hull = document.createElementNS("http://www.w3.org/2000/svg", "rect");
+        hull.setAttribute("x", "0");
+        hull.setAttribute("y", -sub.diam);
+        hull.setAttribute("width", sub.len);
+        hull.setAttribute("height", sub.diam);
+        hull.setAttribute("rx", sub.diam/3);
+        hull.setAttribute("fill", sub.color);
+        
+        // Sail
+        const sail = document.createElementNS("http://www.w3.org/2000/svg", "rect");
+        sail.setAttribute("x", sub.len * 0.3);
+        sail.setAttribute("y", -sub.diam - (sub.diam * 0.3));
+        sail.setAttribute("width", sub.len * (sub.len > 100 ? 0.08 : 0.15));
+        sail.setAttribute("height", sub.diam * 0.4);
+        sail.setAttribute("rx", 1);
+        sail.setAttribute("fill", sub.color);
+
+        g.appendChild(hull);
+        g.appendChild(sail);
+        
+        g.onmouseenter = () => updateInfo(sub);
+        container.appendChild(g);
+    });
+
+    function updateInfo(sub) {
+        document.getElementById('sub-name').innerText = sub.name.toUpperCase();
+        document.getElementById('sub-type').innerText = sub.type;
+        document.getElementById('sub-len').innerText = sub.len + " m";
+        document.getElementById('sub-mass').innerText = (sub.mass / 1000).toLocaleString() + " Tonnes";
+        
+        let comment = "";
+        const density = sub.mass / sub.len;
+        
+        if (sub.len > 70 && sub.mass < 500000) {
+            comment = "⚠️ DENSITÉ INSUFFISANTE : À cette échelle, le sous-marin flotterait comme un ballon vide. Risque de comportement physique 'instable' dans Unreal.";
+        } else if (sub.len < 20) {
+            comment = "💡 GABARIT MIDGET : Parfait pour de l'infiltration en solo, mais trop étroit pour un intérieur multipont.";
+        } else {
+            comment = "✅ RÉALISME PHYSIQUE : Masse cohérente avec le volume déplacé. L'inertie en jeu sera crédible.";
+        }
+        document.getElementById('mass-comment').innerText = comment;
+    }
+
+    // Zoom & Pan Logic
+    let zoom = 4;
+    const scaler = document.getElementById('scaler');
+
+    window.addEventListener('wheel', (e) => {
+        e.preventDefault();
+        zoom += e.deltaY * -0.01;
+        zoom = Math.min(Math.max(0.5, zoom), 20);
+        scaler.setAttribute("transform", `translate(50, 400) scale(${zoom})`);
+    }, {passive:false});
+</script>
+
+</body>
+</html>

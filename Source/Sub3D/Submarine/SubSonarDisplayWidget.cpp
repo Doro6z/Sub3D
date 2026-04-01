@@ -144,19 +144,22 @@ int32 USubSonarDisplayWidget::NativePaint(
 
 	if (bDrawSweepPulse && CachedSonar.IsValid() && GetWorld() && CachedSonar->PropagationSpeedCmS > 0.f)
 	{
-		float LatestPingTimestamp = -1.f;
-		for (const FSonarHitPoint& Point : CachedSonar->SonarPoints)
+		const TArray<float>& RecentPingTimes = CachedSonar->GetRecentPingTimestamps();
+		const int32 FirstIndex = FMath::Max(0, RecentPingTimes.Num() - FMath::Max(1, MaxVisibleSweepPulses));
+		for (int32 PingIndex = FirstIndex; PingIndex < RecentPingTimes.Num(); ++PingIndex)
 		{
-			LatestPingTimestamp = FMath::Max(LatestPingTimestamp, Point.PingTimestamp);
-		}
+			const float PingTimestamp = RecentPingTimes[PingIndex];
+			if (PingTimestamp < 0.f)
+			{
+				continue;
+			}
 
-		if (LatestPingTimestamp >= 0.f)
-		{
 			const float MaxTravelTime = FMath::Max(CachedSonar->PingMaxRangeCm / CachedSonar->PropagationSpeedCmS, KINDA_SMALL_NUMBER);
-			const float Age = GetWorld()->GetTimeSeconds() - LatestPingTimestamp;
+			const float Age = GetWorld()->GetTimeSeconds() - PingTimestamp;
 			const float T = FMath::Clamp(Age / MaxTravelTime, 0.f, 1.25f);
 			const float Radius = FMath::Min(Size.X, Size.Y) * 0.49f * T;
-			const float SweepAlpha = (T <= 1.f) ? (1.f - (T * 0.6f)) : FMath::Clamp(1.25f - T, 0.f, 0.4f);
+			const float RawAlpha = (T <= 1.f) ? (1.f - (T * 0.6f)) : FMath::Clamp(1.25f - T, 0.f, 0.4f);
+			const float SweepAlpha = FMath::Pow(FMath::Clamp(RawAlpha, 0.f, 1.f), FMath::Max(0.1f, SweepFadeExponent));
 
 			if (Radius > 1.f && SweepAlpha > KINDA_SMALL_NUMBER)
 			{
@@ -173,7 +176,7 @@ int32 USubSonarDisplayWidget::NativePaint(
 				SweepLineColor.A *= SweepAlpha;
 				FSlateDrawElement::MakeLines(
 					OutDrawElements,
-					NextLayer++,
+					NextLayer,
 					AllottedGeometry.ToPaintGeometry(),
 					Circle,
 					ESlateDrawEffect::None,
@@ -182,6 +185,7 @@ int32 USubSonarDisplayWidget::NativePaint(
 					1.6f);
 			}
 		}
+		++NextLayer;
 	}
 
 	if (bDrawTopologyWireframe && CachedSonarSystem.IsValid())
@@ -199,7 +203,8 @@ int32 USubSonarDisplayWidget::NativePaint(
 				continue;
 			}
 
-			const FVector2D CellCenter(HalfW + Normalized.X * HalfW, HalfH - Normalized.Y * HalfH);
+			FVector2D CellCenter(HalfW + Normalized.X * HalfW, HalfH - Normalized.Y * HalfH);
+			CellCenter = ApplyHeightParallax(CellCenter, CellWorld, Size);
 			const float HalfCellPx = FMath::Max(1.0f, (CellSizeCm / FMath::Max(100.f, RangeCm)) * HalfW * 0.35f);
 			TArray<FVector2f> Rect;
 			Rect.Add(FVector2f(CellCenter.X - HalfCellPx, CellCenter.Y - HalfCellPx));
@@ -211,6 +216,7 @@ int32 USubSonarDisplayWidget::NativePaint(
 			FLinearColor TopoColor = DotColor;
 			TopoColor = ResolveSpatialColor(
 				Normalized,
+				CellWorld,
 				DotColor,
 				FMath::Clamp(static_cast<float>(Cell.Confidence01Byte) / 255.f, 0.08f, 0.85f));
 			FSlateDrawElement::MakeLines(
@@ -236,7 +242,8 @@ int32 USubSonarDisplayWidget::NativePaint(
 				continue;
 			}
 
-			const FVector2D Pos(HalfW + Normalized.X * HalfW, HalfH - Normalized.Y * HalfH);
+			FVector2D Pos(HalfW + Normalized.X * HalfW, HalfH - Normalized.Y * HalfH);
+			Pos = ApplyHeightParallax(Pos, FVector(Track.EstimatedWorldLocation), Size);
 			const float SizePx = Track.bPriority ? 8.f : 6.f;
 			const FLinearColor TrackColor = ResolveTrackColor(static_cast<uint8>(Track.State), Track.bPriority);
 
@@ -265,7 +272,8 @@ int32 USubSonarDisplayWidget::NativePaint(
 			}
 
 			const FVector2D Normalized = ProjectPointNormalized(Point);
-			const FVector2D PointPos(HalfW + Normalized.X * HalfW, HalfH - Normalized.Y * HalfH);
+			FVector2D PointPos(HalfW + Normalized.X * HalfW, HalfH - Normalized.Y * HalfH);
+			PointPos = ApplyHeightParallax(PointPos, FVector(Point.WorldLocation), Size);
 
 			float DepthScale = 1.f;
 			if (bDepthAffectsDotSize)
@@ -279,6 +287,7 @@ int32 USubSonarDisplayWidget::NativePaint(
 
 			FLinearColor GlowColor = ResolveSpatialColor(
 				Normalized,
+				FVector(Point.WorldLocation),
 				DotColor,
 				Alpha * FMath::Clamp(DotGlowAlpha, 0.f, 1.f));
 			const FVector2D GlowTopLeft = PointPos - FVector2D(GlowSize * 0.5f, GlowSize * 0.5f);
@@ -290,7 +299,7 @@ int32 USubSonarDisplayWidget::NativePaint(
 				ESlateDrawEffect::None,
 				GlowColor);
 
-			FLinearColor CoreColor = ResolveSpatialColor(Normalized, DotColor, Alpha);
+			FLinearColor CoreColor = ResolveSpatialColor(Normalized, FVector(Point.WorldLocation), DotColor, Alpha);
 			const FVector2D CoreTopLeft = PointPos - FVector2D(CoreSize * 0.5f, CoreSize * 0.5f);
 			FSlateDrawElement::MakeBox(
 				OutDrawElements,
@@ -437,19 +446,31 @@ float USubSonarDisplayWidget::ComputePointAlpha(const FSonarHitPoint& Point, flo
 	}
 
 	const float SafeSpeed = FMath::Max(CachedSonar->PropagationSpeedCmS, 1.f);
-	const float RevealTime = Point.PingTimestamp + Point.DistanceCm / SafeSpeed;
-	const float Age = CurrentTime - RevealTime;
-	if (Age < 0.f)
+	const auto ComputeContribution = [&](float PingTimestamp, float DistanceCm) -> float
 	{
-		return 0.f;
-	}
-	if (Age < CachedSonar->PointPeakDurationS)
-	{
-		return 1.f;
-	}
+		if (PingTimestamp < 0.f || DistanceCm < 0.f)
+		{
+			return 0.f;
+		}
 
-	const float FadeT = (Age - CachedSonar->PointPeakDurationS) / FMath::Max(CachedSonar->PointFadeDurationS, KINDA_SMALL_NUMBER);
-	return FMath::Clamp(1.f - FadeT, 0.f, 1.f);
+		const float RevealTime = PingTimestamp + DistanceCm / SafeSpeed;
+		const float Age = CurrentTime - RevealTime;
+		if (Age < 0.f)
+		{
+			return 0.f;
+		}
+		if (Age < CachedSonar->PointPeakDurationS)
+		{
+			return 1.f;
+		}
+
+		const float FadeT = (Age - CachedSonar->PointPeakDurationS) / FMath::Max(CachedSonar->PointFadeDurationS, KINDA_SMALL_NUMBER);
+		return FMath::Clamp(1.f - FadeT, 0.f, 1.f);
+	};
+
+	return FMath::Max(
+		ComputeContribution(Point.PingTimestamp, Point.DistanceCm),
+		ComputeContribution(Point.PreviousPingTimestamp, Point.PreviousDistanceCm));
 }
 
 FVector2D USubSonarDisplayWidget::ProjectToDisplayNormalized(FVector WorldLocation) const
@@ -491,6 +512,16 @@ float USubSonarDisplayWidget::GetSelfNoiseAggregate() const
 	return CachedSonarSystem.IsValid() ? CachedSonarSystem->SelfNoiseState.AggregateNoise : 0.f;
 }
 
+float USubSonarDisplayWidget::GetAcousticClutterLevel() const
+{
+	return CachedSonarSystem.IsValid() ? CachedSonarSystem->GetAcousticClutterLevel() : 0.f;
+}
+
+bool USubSonarDisplayWidget::IsSignalUnstable() const
+{
+	return CachedSonarSystem.IsValid() ? CachedSonarSystem->IsSignalUnstable() : false;
+}
+
 FVector2D USubSonarDisplayWidget::ProjectPointNormalized(const FSonarHitPoint& Point) const
 {
 	return ProjectToDisplayNormalized(Point.WorldLocation);
@@ -515,7 +546,7 @@ float USubSonarDisplayWidget::GetEffectiveDisplayRangeCm() const
 {
 	if (CachedSonarSystem.IsValid())
 	{
-		return FMath::Max(1000.f, CachedSonarSystem->GetCurrentRangeCm());
+		return FMath::Max(1000.f, CachedSonarSystem->GetDisplayRangeCm());
 	}
 	if (CachedSonar.IsValid())
 	{
@@ -524,22 +555,48 @@ float USubSonarDisplayWidget::GetEffectiveDisplayRangeCm() const
 	return 15000.f;
 }
 
-FLinearColor USubSonarDisplayWidget::ResolveSpatialColor(const FVector2D& Normalized, const FLinearColor& BaseColor, float Alpha) const
+FVector2D USubSonarDisplayWidget::ApplyHeightParallax(const FVector2D& ScreenPos, const FVector& WorldLocation, const FVector2D& Size) const
+{
+	if (!bUseHeightParallax)
+	{
+		return ScreenPos;
+	}
+
+	const FVector ReferenceLocation = GetSonarReferenceLocation();
+	const float HeightRange = FMath::Max(100.f, HeightParallaxRangeCm);
+	const float Height01 = FMath::Clamp((WorldLocation.Z - ReferenceLocation.Z) / HeightRange, -1.f, 1.f);
+	const float CenterDist01 = FVector2D::Distance(ScreenPos, Size * 0.5f) / FMath::Max(1.f, FMath::Min(Size.X, Size.Y) * 0.5f);
+	const float CenterWeight = 1.f - FMath::Clamp(CenterDist01, 0.f, 1.f);
+	return ScreenPos + FVector2D(0.f, -Height01 * HeightParallaxMaxOffsetPx * CenterWeight);
+}
+
+FLinearColor USubSonarDisplayWidget::ResolveSpatialColor(const FVector2D& Normalized, const FVector& WorldLocation, const FLinearColor& BaseColor, float Alpha) const
 {
 	FLinearColor OutColor = BaseColor;
 	if (bEnableSpatialColorCoding)
 	{
-		const float Lateral01 = FMath::Clamp((Normalized.X + 1.f) * 0.5f, 0.f, 1.f);
-		const float Distance01 = FMath::Clamp(Normalized.Size(), 0.f, 1.f);
-		const float Proximity01 = 1.f - Distance01;
+		if (SpatialColorMode == ESonarSpatialColorMode::AboveBelow)
+		{
+			const FVector ReferenceLocation = GetSonarReferenceLocation();
+			const float HeightRange = FMath::Max(100.f, VerticalColorRangeCm);
+			const float Height01 = FMath::Clamp(((WorldLocation.Z - ReferenceLocation.Z) / HeightRange + 1.f) * 0.5f, 0.f, 1.f);
+			const FLinearColor SpatialGradient = FLinearColor::LerpUsingHSV(BelowColor, AboveColor, Height01);
+			OutColor = FLinearColor::LerpUsingHSV(BaseColor, SpatialGradient, FMath::Clamp(SpatialColorBlend, 0.f, 1.f));
+		}
+		else
+		{
+			const float Lateral01 = FMath::Clamp((Normalized.X + 1.f) * 0.5f, 0.f, 1.f);
+			const float Distance01 = FMath::Clamp(Normalized.Size(), 0.f, 1.f);
+			const float Proximity01 = 1.f - Distance01;
 
-		const float MixT = FMath::Clamp(
-			(Lateral01 * FMath::Clamp(LateralColorWeight, 0.f, 1.f)) +
-			(Proximity01 * FMath::Clamp(ProximityColorWeight, 0.f, 1.f)),
-			0.f,
-			1.f);
-		const FLinearColor SpatialGradient = FLinearColor::LerpUsingHSV(LeftFarColor, RightNearColor, MixT);
-		OutColor = FLinearColor::LerpUsingHSV(BaseColor, SpatialGradient, FMath::Clamp(SpatialColorBlend, 0.f, 1.f));
+			const float MixT = FMath::Clamp(
+				(Lateral01 * FMath::Clamp(LateralColorWeight, 0.f, 1.f)) +
+				(Proximity01 * FMath::Clamp(ProximityColorWeight, 0.f, 1.f)),
+				0.f,
+				1.f);
+			const FLinearColor SpatialGradient = FLinearColor::LerpUsingHSV(LeftFarColor, RightNearColor, MixT);
+			OutColor = FLinearColor::LerpUsingHSV(BaseColor, SpatialGradient, FMath::Clamp(SpatialColorBlend, 0.f, 1.f));
+		}
 	}
 
 	OutColor.A = FMath::Clamp(Alpha, 0.f, 1.f);

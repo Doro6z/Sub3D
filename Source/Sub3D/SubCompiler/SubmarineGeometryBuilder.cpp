@@ -202,85 +202,102 @@ TArray<UProceduralMeshComponent*> USubmarineGeometryBuilder::BuildInteriorMeshes
 	for (int32 MeshIndex = 0; MeshIndex < MeshDataSet.Num(); ++MeshIndex)
 	{
 		const FSubmarineInteriorCompartmentMeshData& MeshData = MeshDataSet[MeshIndex];
-		const FName ComponentName(*FString::Printf(TEXT("PMC_Interior_%s"), *MeshData.CompartmentId.ToString()));
-
-		UProceduralMeshComponent* PMC = NewObject<UProceduralMeshComponent>(ParentActor, ComponentName);
-		if (!PMC)
+		const FName VisName(*FString::Printf(TEXT("PMC_Interior_Vis_%s"), *MeshData.CompartmentId.ToString()));
+		UProceduralMeshComponent* VisPMC = NewObject<UProceduralMeshComponent>(ParentActor, VisName);
+		if (VisPMC)
 		{
-			continue;
-		}
+			VisPMC->RegisterComponent();
+			VisPMC->AttachToComponent(ParentActor->GetRootComponent(), FAttachmentTransformRules::KeepRelativeTransform);
+			VisPMC->SetRelativeTransform(FTransform::Identity);
+			VisPMC->SetCanEverAffectNavigation(false);
+			VisPMC->bUseComplexAsSimpleCollision = bEnableCollision;
+			VisPMC->SetGenerateOverlapEvents(false);
+			VisPMC->SetCollisionProfileName(TEXT("SubInteriorVisual"));
+			VisPMC->SetCollisionEnabled(bEnableCollision ? ECollisionEnabled::QueryOnly : ECollisionEnabled::NoCollision);
 
-		PMC->RegisterComponent();
-		PMC->AttachToComponent(ParentActor->GetRootComponent(), FAttachmentTransformRules::KeepRelativeTransform);
-		PMC->SetRelativeTransform(FTransform::Identity);
-		PMC->SetCanEverAffectNavigation(false);
-		PMC->bUseComplexAsSimpleCollision = bEnableCollision;
-		PMC->SetGenerateOverlapEvents(false);
-		PMC->SetCollisionProfileName(TEXT("SubInteriorWalkable"));
-		PMC->SetCollisionEnabled(bEnableCollision ? ECollisionEnabled::QueryOnly : ECollisionEnabled::NoCollision);
-		PMC->SetCanEverAffectNavigation(false);
-
-		PMC->CreateMeshSection(
-			0,
-			MeshData.WallSection.Vertices,
-			MeshData.WallSection.Triangles,
-			MeshData.WallSection.Normals,
-			MeshData.WallSection.UVs,
-			TArray<FColor>(),
-			TArray<FProcMeshTangent>(),
-			bEnableCollision);
-
-		PMC->CreateMeshSection(
-			1,
-			MeshData.FloorSection.Vertices,
-			MeshData.FloorSection.Triangles,
-			MeshData.FloorSection.Normals,
-			MeshData.FloorSection.UVs,
-			TArray<FColor>(),
-			TArray<FProcMeshTangent>(),
-			bEnableCollision);
-
-		if (MeshData.BowCapSection.Vertices.Num() > 0)
-		{
-			PMC->CreateMeshSection(
-				2,
-				MeshData.BowCapSection.Vertices,
-				MeshData.BowCapSection.Triangles,
-				MeshData.BowCapSection.Normals,
-				MeshData.BowCapSection.UVs,
+			VisPMC->CreateMeshSection(
+				0,
+				MeshData.WallSection.Vertices,
+				MeshData.WallSection.Triangles,
+				MeshData.WallSection.Normals,
+				MeshData.WallSection.UVs,
 				TArray<FColor>(),
 				TArray<FProcMeshTangent>(),
 				bEnableCollision);
-		}
 
-		if (MeshData.SternCapSection.Vertices.Num() > 0)
-		{
-			PMC->CreateMeshSection(
-				3,
-				MeshData.SternCapSection.Vertices,
-				MeshData.SternCapSection.Triangles,
-				MeshData.SternCapSection.Normals,
-				MeshData.SternCapSection.UVs,
-				TArray<FColor>(),
-				TArray<FProcMeshTangent>(),
-				bEnableCollision);
-		}
-
-		if (MaterialOverride)
-		{
-			PMC->SetMaterial(0, MaterialOverride);
-			PMC->SetMaterial(1, MaterialOverride);
 			if (MeshData.BowCapSection.Vertices.Num() > 0)
 			{
-				PMC->SetMaterial(2, MaterialOverride);
+				VisPMC->CreateMeshSection(
+					2,
+					MeshData.BowCapSection.Vertices,
+					MeshData.BowCapSection.Triangles,
+					MeshData.BowCapSection.Normals,
+					MeshData.BowCapSection.UVs,
+					TArray<FColor>(),
+					TArray<FProcMeshTangent>(),
+					bEnableCollision);
 			}
+
 			if (MeshData.SternCapSection.Vertices.Num() > 0)
 			{
-				PMC->SetMaterial(3, MaterialOverride);
+				VisPMC->CreateMeshSection(
+					3,
+					MeshData.SternCapSection.Vertices,
+					MeshData.SternCapSection.Triangles,
+					MeshData.SternCapSection.Normals,
+					MeshData.SternCapSection.UVs,
+					TArray<FColor>(),
+					TArray<FProcMeshTangent>(),
+					bEnableCollision);
 			}
+
+			if (MaterialOverride)
+			{
+				VisPMC->SetMaterial(0, MaterialOverride);
+				if (MeshData.BowCapSection.Vertices.Num() > 0)
+				{
+					VisPMC->SetMaterial(2, MaterialOverride);
+				}
+				if (MeshData.SternCapSection.Vertices.Num() > 0)
+				{
+					VisPMC->SetMaterial(3, MaterialOverride);
+				}
+			}
+
+			BuiltMeshes.Add(VisPMC);
 		}
 
-		BuiltMeshes.Add(PMC);
+		const FName WalkName(*FString::Printf(TEXT("PMC_Interior_Walkable_%s"), *MeshData.CompartmentId.ToString()));
+		UProceduralMeshComponent* WalkPMC = NewObject<UProceduralMeshComponent>(ParentActor, WalkName);
+		if (WalkPMC)
+		{
+			WalkPMC->RegisterComponent();
+			WalkPMC->AttachToComponent(ParentActor->GetRootComponent(), FAttachmentTransformRules::KeepRelativeTransform);
+			WalkPMC->SetRelativeTransform(FTransform::Identity);
+			WalkPMC->SetCanEverAffectNavigation(false);
+			WalkPMC->bUseComplexAsSimpleCollision = bEnableCollision;
+			WalkPMC->SetGenerateOverlapEvents(false);
+			WalkPMC->SetCollisionProfileName(TEXT("SubInteriorWalkable"));
+			WalkPMC->SetCollisionEnabled(bEnableCollision ? ECollisionEnabled::QueryOnly : ECollisionEnabled::NoCollision);
+
+			WalkPMC->CreateMeshSection(
+				1,
+				MeshData.FloorSection.Vertices,
+				MeshData.FloorSection.Triangles,
+				MeshData.FloorSection.Normals,
+				MeshData.FloorSection.UVs,
+				TArray<FColor>(),
+				TArray<FProcMeshTangent>(),
+				bEnableCollision);
+
+			if (MaterialOverride)
+			{
+				WalkPMC->SetMaterial(1, MaterialOverride);
+			}
+
+			BuiltMeshes.Add(WalkPMC);
+		}
+
 	}
 
 	for (int32 MeshIndex = 0; MeshIndex < BulkheadMeshDataSet.Num(); ++MeshIndex)
@@ -300,7 +317,7 @@ TArray<UProceduralMeshComponent*> USubmarineGeometryBuilder::BuildInteriorMeshes
 		PMC->SetCanEverAffectNavigation(false);
 		PMC->bUseComplexAsSimpleCollision = bEnableCollision;
 		PMC->SetGenerateOverlapEvents(false);
-		PMC->SetCollisionProfileName(TEXT("SubInteriorWalkable"));
+		PMC->SetCollisionProfileName(TEXT("SubInteriorVisual"));
 		PMC->SetCollisionEnabled(bEnableCollision ? ECollisionEnabled::QueryOnly : ECollisionEnabled::NoCollision);
 
 		PMC->CreateMeshSection(

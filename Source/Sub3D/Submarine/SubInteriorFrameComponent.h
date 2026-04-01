@@ -38,6 +38,18 @@ public:
 	FRotator GetFrameRotationDelta() const { return FrameRotationDelta; }
 
 	UFUNCTION(BlueprintPure, Category = "Submarine|InteriorFrame")
+	FVector GetLocalLinearVelocity() const { return LocalLinearVelocity; }
+
+	UFUNCTION(BlueprintPure, Category = "Submarine|InteriorFrame")
+	FVector GetLocalLinearAcceleration() const { return LocalLinearAcceleration; }
+
+	UFUNCTION(BlueprintPure, Category = "Submarine|InteriorFrame")
+	FVector GetLocalAngularVelocityDegrees() const { return LocalAngularVelocityDegrees; }
+
+	UFUNCTION(BlueprintPure, Category = "Submarine|InteriorFrame")
+	FVector GetLocalAngularAccelerationDegrees() const { return LocalAngularAccelerationDegrees; }
+
+	UFUNCTION(BlueprintPure, Category = "Submarine|InteriorFrame")
 	FTransform GetSubTransform() const;
 
 	UPROPERTY(EditAnywhere, Category = "Submarine|Debug")
@@ -53,6 +65,12 @@ private:
 	FRotator PreviousRotation;
 	FVector FrameLocationDelta;
 	FRotator FrameRotationDelta;
+	FVector PreviousLocalLinearVelocity = FVector::ZeroVector;
+	FVector PreviousLocalAngularVelocityDegrees = FVector::ZeroVector;
+	FVector LocalLinearVelocity = FVector::ZeroVector;
+	FVector LocalLinearAcceleration = FVector::ZeroVector;
+	FVector LocalAngularVelocityDegrees = FVector::ZeroVector;
+	FVector LocalAngularAccelerationDegrees = FVector::ZeroVector;
 	float DebugLogTimer = 0.f;
 	bool bFrameValid = false;
 };

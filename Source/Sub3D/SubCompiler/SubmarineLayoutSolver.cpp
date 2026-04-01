@@ -5,7 +5,7 @@
 
 namespace
 {
-void AddValidationMessage(
+void AddLayoutSolverValidationMessage(
 	TArray<FLayoutValidationMessage>& OutMessages,
 	ELayoutValidationSeverity Severity,
 	FName RelatedId,
@@ -47,14 +47,14 @@ bool USubmarineLayoutSolver::Solve(
 
 	if (!Envelope)
 	{
-		AddValidationMessage(OutMessages, ELayoutValidationSeverity::Error, NAME_None, TEXT("Envelope invalide"));
+		AddLayoutSolverValidationMessage(OutMessages, ELayoutValidationSeverity::Error, NAME_None, TEXT("Envelope invalide"));
 		OutSolution.ValidationMessages = OutMessages;
 		return false;
 	}
 
 	if (!Graph)
 	{
-		AddValidationMessage(OutMessages, ELayoutValidationSeverity::Error, NAME_None, TEXT("Graph invalide"));
+		AddLayoutSolverValidationMessage(OutMessages, ELayoutValidationSeverity::Error, NAME_None, TEXT("Graph invalide"));
 		OutSolution.ValidationMessages = OutMessages;
 		return false;
 	}
@@ -84,7 +84,7 @@ bool USubmarineLayoutSolver::Solve(
 	const int32 TotalCompartmentCount = LockedCompartments.Num() + FreeCompartments.Num();
 	if (TotalCompartmentCount > Envelope->MaxCompartments)
 	{
-		AddValidationMessage(
+		AddLayoutSolverValidationMessage(
 			OutMessages,
 			ELayoutValidationSeverity::Error,
 			NAME_None,
@@ -104,7 +104,7 @@ bool USubmarineLayoutSolver::Solve(
 	{
 		if (Lock.LockedSpineRangeCm.IsNearlyZero())
 		{
-			AddValidationMessage(
+			AddLayoutSolverValidationMessage(
 				OutMessages,
 				ELayoutValidationSeverity::Error,
 				Lock.CompartmentId,
@@ -112,7 +112,7 @@ bool USubmarineLayoutSolver::Solve(
 		}
 		else if (Lock.LockedSpineRangeCm.X >= Lock.LockedSpineRangeCm.Y)
 		{
-			AddValidationMessage(
+			AddLayoutSolverValidationMessage(
 				OutMessages,
 				ELayoutValidationSeverity::Error,
 				Lock.CompartmentId,
@@ -125,7 +125,7 @@ bool USubmarineLayoutSolver::Solve(
 		{
 			if (Lock.LockedSpineRangeCm.X < -KINDA_SMALL_NUMBER || Lock.LockedSpineRangeCm.Y > Envelope->SpineLengthCm + KINDA_SMALL_NUMBER)
 			{
-				AddValidationMessage(
+				AddLayoutSolverValidationMessage(
 					OutMessages,
 					ELayoutValidationSeverity::Error,
 					Lock.CompartmentId,
@@ -139,7 +139,7 @@ bool USubmarineLayoutSolver::Solve(
 			const float LockLength = Lock.LockedSpineRangeCm.Y - Lock.LockedSpineRangeCm.X;
 			if (LockLength < Lock.MinLengthCm - KINDA_SMALL_NUMBER)
 			{
-				AddValidationMessage(
+				AddLayoutSolverValidationMessage(
 					OutMessages,
 					ELayoutValidationSeverity::Warning,
 					Lock.CompartmentId,
@@ -157,7 +157,7 @@ bool USubmarineLayoutSolver::Solve(
 		const FCompartmentNode& B = LockedCompartments[LockIndex + 1];
 		if (A.LockedSpineRangeCm.Y > B.LockedSpineRangeCm.X + KINDA_SMALL_NUMBER)
 		{
-			AddValidationMessage(
+			AddLayoutSolverValidationMessage(
 				OutMessages,
 				ELayoutValidationSeverity::Error,
 				A.CompartmentId,
@@ -241,7 +241,7 @@ bool USubmarineLayoutSolver::Solve(
 			{
 				Ids.Add(CompartmentId.ToString());
 			}
-			AddValidationMessage(
+			AddLayoutSolverValidationMessage(
 				OutMessages,
 				ELayoutValidationSeverity::Warning,
 				Pair.Value[0],
@@ -265,7 +265,7 @@ bool USubmarineLayoutSolver::Solve(
 	}
 	if (TotalFreeMinLength > TotalGapLength + KINDA_SMALL_NUMBER)
 	{
-		AddValidationMessage(
+		AddLayoutSolverValidationMessage(
 			OutMessages,
 			ELayoutValidationSeverity::Error,
 			NAME_None,
@@ -302,7 +302,7 @@ bool USubmarineLayoutSolver::Solve(
 
 		if (!bAssigned)
 		{
-			AddValidationMessage(
+			AddLayoutSolverValidationMessage(
 				OutMessages,
 				ELayoutValidationSeverity::Error,
 				FreeCompartments[FreeIndex].CompartmentId,
@@ -345,7 +345,7 @@ bool USubmarineLayoutSolver::Solve(
 
 		if (FloorWidth < Compartment.MinWidthCm)
 		{
-			AddValidationMessage(
+			AddLayoutSolverValidationMessage(
 				OutMessages,
 				ELayoutValidationSeverity::Warning,
 				Compartment.CompartmentId,
@@ -358,7 +358,7 @@ bool USubmarineLayoutSolver::Solve(
 
 		if (ClearanceHeight < Compartment.MinHeightCm)
 		{
-			AddValidationMessage(
+			AddLayoutSolverValidationMessage(
 				OutMessages,
 				ELayoutValidationSeverity::Error,
 				Compartment.CompartmentId,
@@ -476,7 +476,7 @@ bool USubmarineLayoutSolver::Solve(
 
 		if (FMath::Abs(*FromIndex - *ToIndex) != 1)
 		{
-			AddValidationMessage(
+			AddLayoutSolverValidationMessage(
 				OutMessages,
 				ELayoutValidationSeverity::Warning,
 				Passage.FromCompartmentId,
@@ -521,7 +521,7 @@ bool USubmarineLayoutSolver::Solve(
 			Bulkhead.DoorHeightCm = 0.f;
 			Bulkhead.DoorOffsetCm = FVector2D::ZeroVector;
 
-			AddValidationMessage(
+			AddLayoutSolverValidationMessage(
 				OutMessages,
 				ELayoutValidationSeverity::Warning,
 				ForeComp.CompartmentId,

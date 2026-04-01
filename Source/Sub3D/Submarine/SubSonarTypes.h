@@ -27,6 +27,12 @@ struct FSonarHitPoint
 	UPROPERTY(BlueprintReadOnly, Category = "Sonar")
 	float PingTimestamp = 0.f;
 
+	UPROPERTY(BlueprintReadOnly, Category = "Sonar")
+	float PreviousDistanceCm = -1.f;
+
+	UPROPERTY(BlueprintReadOnly, Category = "Sonar")
+	float PreviousPingTimestamp = -1.f;
+
 	// Surface normal at the hit point. Reserved for future intensity shading — not used by V1 display.
 	UPROPERTY(BlueprintReadOnly, Category = "Sonar")
 	FVector_NetQuantize Normal = FVector::UpVector;

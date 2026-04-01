@@ -9,6 +9,13 @@ class USubSonarComponent;
 class USubSonarSystemComponent;
 class UTexture2D;
 
+UENUM(BlueprintType)
+enum class ESonarSpatialColorMode : uint8
+{
+	LeftRight UMETA(DisplayName = "Left / Right"),
+	AboveBelow UMETA(DisplayName = "Above / Below")
+};
+
 UCLASS(Blueprintable)
 class SUB3D_API USubSonarDisplayWidget : public UUserWidget
 {
@@ -43,6 +50,12 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Sonar|Display")
 	float GetSelfNoiseAggregate() const;
 
+	UFUNCTION(BlueprintPure, Category = "Sonar|Display")
+	float GetAcousticClutterLevel() const;
+
+	UFUNCTION(BlueprintPure, Category = "Sonar|Display")
+	bool IsSignalUnstable() const;
+
 	UFUNCTION(BlueprintImplementableEvent, Category = "Sonar|Display")
 	void BP_OnNewPingReceived();
 
@@ -56,28 +69,31 @@ public:
 	bool bDrawSweepPulse = true;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Sonar|Style")
+	int32 MaxVisibleSweepPulses = 4;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Sonar|Style")
 	bool bDrawTracks = true;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Sonar|Style")
 	bool bDrawTopologyWireframe = true;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Sonar|Style")
-	float DotSizePx = 5.5f;
+	float DotSizePx = 4.0f;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Sonar|Style")
-	float DotGlowScale = 2.6f;
+	float DotGlowScale = 2.1f;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Sonar|Style")
-	float DotGlowAlpha = 0.35f;
+	float DotGlowAlpha = 0.22f;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Sonar|Style")
 	bool bDepthAffectsDotSize = true;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Sonar|Style")
-	float NearDotScale = 1.35f;
+	float NearDotScale = 1.10f;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Sonar|Style")
-	float FarDotScale = 0.75f;
+	float FarDotScale = 0.55f;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Sonar|Projection")
 	bool bUsePingFrameProjection = false;
@@ -101,7 +117,10 @@ public:
 	FLinearColor GridColor = FLinearColor(0.0f, 0.25f, 0.12f, 0.35f);
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Sonar|Style")
-	FLinearColor DotColor = FLinearColor(0.15f, 1.0f, 0.45f, 1.0f);
+	FLinearColor DotColor = FLinearColor(0.30f, 0.95f, 0.88f, 1.0f);
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Sonar|Style")
+	ESonarSpatialColorMode SpatialColorMode = ESonarSpatialColorMode::LeftRight;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Sonar|Style")
 	bool bEnableSpatialColorCoding = true;
@@ -112,6 +131,12 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Sonar|Style")
 	FLinearColor RightNearColor = FLinearColor(1.0f, 0.58f, 0.08f, 1.0f);
 
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Sonar|Style")
+	FLinearColor AboveColor = FLinearColor(0.95f, 0.58f, 0.26f, 1.0f);
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Sonar|Style")
+	FLinearColor BelowColor = FLinearColor(0.20f, 0.50f, 1.0f, 1.0f);
+
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Sonar|Style", meta = (ClampMin = "0.0", ClampMax = "1.0"))
 	float SpatialColorBlend = 0.85f;
 
@@ -121,8 +146,14 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Sonar|Style", meta = (ClampMin = "0.0", ClampMax = "1.0"))
 	float ProximityColorWeight = 0.30f;
 
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Sonar|Style", meta = (ClampMin = "100.0"))
+	float VerticalColorRangeCm = 3000.f;
+
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Sonar|Style")
-	FLinearColor SweepColor = FLinearColor(0.20f, 1.0f, 0.55f, 0.75f);
+	FLinearColor SweepColor = FLinearColor(0.32f, 0.82f, 1.0f, 0.72f);
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Sonar|Style", meta = (ClampMin = "0.1"))
+	float SweepFadeExponent = 1.8f;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Sonar|Style")
 	FLinearColor CenterTint = FLinearColor(0.18f, 1.0f, 0.5f, 0.8f);
@@ -132,6 +163,15 @@ public:
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Sonar|Style")
 	float SmudgeOverlayAlpha = 0.25f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Sonar|Style")
+	bool bUseHeightParallax = true;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Sonar|Style", meta = (ClampMin = "0.0"))
+	float HeightParallaxMaxOffsetPx = 16.f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Sonar|Style", meta = (ClampMin = "100.0"))
+	float HeightParallaxRangeCm = 3000.f;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Sonar|Textures")
 	TObjectPtr<UTexture2D> NoiseOverlayTexture = nullptr;
@@ -156,7 +196,8 @@ private:
 	FVector2D ProjectPointNormalized(const FSonarHitPoint& Point) const;
 	FVector GetSonarReferenceLocation() const;
 	float GetEffectiveDisplayRangeCm() const;
-	FLinearColor ResolveSpatialColor(const FVector2D& Normalized, const FLinearColor& BaseColor, float Alpha) const;
+	FVector2D ApplyHeightParallax(const FVector2D& ScreenPos, const FVector& WorldLocation, const FVector2D& Size) const;
+	FLinearColor ResolveSpatialColor(const FVector2D& Normalized, const FVector& WorldLocation, const FLinearColor& BaseColor, float Alpha) const;
 	FLinearColor ResolveTrackColor(uint8 StateValue, bool bPriority) const;
 
 	float LastKnownPingTime = -1000.f;

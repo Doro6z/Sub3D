@@ -3,6 +3,11 @@
 
 DEFINE_LOG_CATEGORY_STATIC(LogSonar, Log, All);
 
+namespace
+{
+constexpr int32 MaxNetworkSafeReplicatedSonarPoints = 1024;
+}
+
 USubSonarComponent::USubSonarComponent()
 {
 	PrimaryComponentTick.bCanEverTick = true;
@@ -13,6 +18,7 @@ void USubSonarComponent::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& O
 {
 	Super::GetLifetimeReplicatedProps(OutLifetimeProps);
 	DOREPLIFETIME(USubSonarComponent, SonarPoints);
+	DOREPLIFETIME(USubSonarComponent, RecentPingTimestamps);
 }
 
 void USubSonarComponent::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
@@ -116,63 +122,105 @@ void USubSonarComponent::ExecutePingRaycasts()
 	TArray<FSonarHitPoint> NewPoints;
 	NewPoints.Reserve(RayCount);
 
-	// Spherical Fibonacci sampling in a forward cone:
-	// uniform angular coverage without polar clustering.
-	for (int32 RayIdx = 0; RayIdx < RayCount; ++RayIdx)
+	const auto AddHitPoint = [&](const FHitResult& Hit) -> bool
 	{
-		const float U = (static_cast<float>(RayIdx) + 0.5f) / static_cast<float>(RayCount);
-		const float CosTheta = FMath::Lerp(1.f, CosHalfAngle, U);
-		const float SinTheta = FMath::Sqrt(FMath::Max(0.f, 1.f - CosTheta * CosTheta));
-		const float PhiRad = GoldenAngleRad * static_cast<float>(RayIdx);
-
-		// Local direction: submarine +X forward axis.
-		const FVector LocalDir(
-			CosTheta,
-			SinTheta * FMath::Cos(PhiRad),
-			SinTheta * FMath::Sin(PhiRad));
-
-		const FVector WorldDir = SubQuat.RotateVector(LocalDir);
-		const FVector End = Origin + WorldDir * PingMaxRangeCm;
-
-		TArray<FHitResult> Hits;
-		if (World->LineTraceMultiByChannel(Hits, Origin, End, PingTraceChannel, QueryParams))
+		const AActor* HitActor = Hit.GetActor();
+		if (!Hit.bBlockingHit || !HitActor)
 		{
-			for (const FHitResult& Hit : Hits)
+			return false;
+		}
+
+		if (Hit.Distance < MinAcceptedHitDistanceCm)
+		{
+			return false;
+		}
+
+		if (HitActor == GetOwner())
+		{
+			return false;
+		}
+
+		if (bIgnoreAttachedActors && HitActor->IsAttachedTo(GetOwner()))
+		{
+			return false;
+		}
+
+		FSonarHitPoint& Point = NewPoints.AddDefaulted_GetRef();
+		Point.WorldLocation = Hit.ImpactPoint;
+		Point.DistanceCm = Hit.Distance;
+		Point.PingTimestamp = PingTime;
+		Point.Normal = Hit.ImpactNormal;
+		Point.LocalLocationAtPing = GetOwner()->GetActorTransform().InverseTransformPosition(Hit.ImpactPoint);
+		return true;
+	};
+
+	if (bOmnidirectionalPing)
+	{
+		const float VerticalHalfAngleDeg = FMath::Clamp(OmniPingVerticalHalfAngleDeg, 5.f, 89.f);
+		for (int32 VerticalIdx = 0; VerticalIdx < VCount; ++VerticalIdx)
+		{
+			const float VerticalAlpha = (VCount > 1) ? (static_cast<float>(VerticalIdx) / static_cast<float>(VCount - 1)) : 0.5f;
+			const float PitchDeg = FMath::Lerp(-VerticalHalfAngleDeg, VerticalHalfAngleDeg, VerticalAlpha);
+
+			for (int32 HorizontalIdx = 0; HorizontalIdx < HCount; ++HorizontalIdx)
 			{
-				const AActor* HitActor = Hit.GetActor();
-				if (!Hit.bBlockingHit || !HitActor)
-				{
-					continue;
-				}
+				const float YawDeg = (360.f * static_cast<float>(HorizontalIdx)) / static_cast<float>(HCount);
+				const FVector LocalDir = FRotator(PitchDeg, YawDeg, 0.f).Vector();
+				const FVector WorldDir = SubQuat.RotateVector(LocalDir.GetSafeNormal());
+				const FVector End = Origin + WorldDir * PingMaxRangeCm;
 
-				if (Hit.Distance < MinAcceptedHitDistanceCm)
+				TArray<FHitResult> Hits;
+				if (World->LineTraceMultiByChannel(Hits, Origin, End, PingTraceChannel, QueryParams))
 				{
-					continue;
+					for (const FHitResult& Hit : Hits)
+					{
+						if (AddHitPoint(Hit))
+						{
+							break;
+						}
+					}
 				}
+			}
+		}
+	}
+	else
+	{
+		for (int32 RayIdx = 0; RayIdx < RayCount; ++RayIdx)
+		{
+			const float U = (static_cast<float>(RayIdx) + 0.5f) / static_cast<float>(RayCount);
+			const float CosTheta = FMath::Lerp(1.f, CosHalfAngle, U);
+			const float SinTheta = FMath::Sqrt(FMath::Max(0.f, 1.f - CosTheta * CosTheta));
+			const float PhiRad = GoldenAngleRad * static_cast<float>(RayIdx);
 
-				if (HitActor == GetOwner())
+			const FVector LocalDir(
+				CosTheta,
+				SinTheta * FMath::Cos(PhiRad),
+				SinTheta * FMath::Sin(PhiRad));
+
+			const FVector WorldDir = SubQuat.RotateVector(LocalDir);
+			const FVector End = Origin + WorldDir * PingMaxRangeCm;
+
+			TArray<FHitResult> Hits;
+			if (World->LineTraceMultiByChannel(Hits, Origin, End, PingTraceChannel, QueryParams))
+			{
+				for (const FHitResult& Hit : Hits)
 				{
-					continue;
+					if (AddHitPoint(Hit))
+					{
+						break;
+					}
 				}
-
-				if (bIgnoreAttachedActors && HitActor->IsAttachedTo(GetOwner()))
-				{
-					continue;
-				}
-
-				FSonarHitPoint& Point = NewPoints.AddDefaulted_GetRef();
-				Point.WorldLocation = Hit.ImpactPoint;
-				Point.DistanceCm = Hit.Distance;
-				Point.PingTimestamp = PingTime;
-				Point.Normal = Hit.ImpactNormal;
-				Point.LocalLocationAtPing = GetOwner()->GetActorTransform().InverseTransformPosition(Hit.ImpactPoint);
-				break;
 			}
 		}
 	}
 
 	MergePingPoints(MoveTemp(NewPoints), PingTime);
 	LastPingTime = PingTime;
+	RecentPingTimestamps.Add(PingTime);
+	while (RecentPingTimestamps.Num() > 6)
+	{
+		RecentPingTimestamps.RemoveAt(0, 1, EAllowShrinking::No);
+	}
 }
 
 void USubSonarComponent::TickCullExpiredPoints()
@@ -230,7 +278,7 @@ void USubSonarComponent::MergePingPoints(TArray<FSonarHitPoint>&& NewPoints, flo
 
 	for (FSonarHitPoint& NewPoint : NewPoints)
 	{
-		int32 FoundIndex = INDEX_NONE;
+		bool bOverlapsExisting = false;
 		for (int32 ExistingIdx = 0; ExistingIdx < SonarPoints.Num(); ++ExistingIdx)
 		{
 			const float DistSq = FVector::DistSquared(
@@ -238,30 +286,36 @@ void USubSonarComponent::MergePingPoints(TArray<FSonarHitPoint>&& NewPoints, flo
 				FVector(NewPoint.WorldLocation));
 			if (DistSq <= RefreshRadiusSq)
 			{
-				FoundIndex = ExistingIdx;
+				bOverlapsExisting = true;
 				break;
 			}
 		}
 
-		if (FoundIndex != INDEX_NONE)
+		NewPoint.PingTimestamp = PingTime;
+		NewPoint.PreviousDistanceCm = -1.f;
+		NewPoint.PreviousPingTimestamp = -1.f;
+		SonarPoints.Add(NewPoint);
+		++AddedCount;
+		if (bOverlapsExisting)
 		{
-			FSonarHitPoint& ExistingPoint = SonarPoints[FoundIndex];
-			ExistingPoint.WorldLocation = NewPoint.WorldLocation;
-			ExistingPoint.DistanceCm = NewPoint.DistanceCm;
-			ExistingPoint.PingTimestamp = PingTime;
-			ExistingPoint.Normal = NewPoint.Normal;
-			ExistingPoint.LocalLocationAtPing = NewPoint.LocalLocationAtPing;
 			++RefreshedCount;
-		}
-		else
-		{
-			NewPoint.PingTimestamp = PingTime;
-			SonarPoints.Add(NewPoint);
-			++AddedCount;
 		}
 	}
 
-	const int32 SafeMaxPoints = FMath::Max(MaxRetainedPoints, 64);
+	const int32 ConfiguredMaxPoints = FMath::Max(MaxRetainedPoints, 64);
+	const int32 SafeMaxPoints = FMath::Min(ConfiguredMaxPoints, MaxNetworkSafeReplicatedSonarPoints);
+	if (ConfiguredMaxPoints > MaxNetworkSafeReplicatedSonarPoints && !bLoggedReplicationPointCap)
+	{
+		UE_LOG(
+			LogSonar,
+			Warning,
+			TEXT("[%s] MaxRetainedPoints=%d exceeds the safe replicated sonar budget. Clamping to %d to avoid oversized net bunches."),
+			*GetOwner()->GetName(),
+			ConfiguredMaxPoints,
+			MaxNetworkSafeReplicatedSonarPoints);
+		bLoggedReplicationPointCap = true;
+	}
+
 	if (SonarPoints.Num() > SafeMaxPoints)
 	{
 		SonarPoints.Sort([](const FSonarHitPoint& A, const FSonarHitPoint& B)

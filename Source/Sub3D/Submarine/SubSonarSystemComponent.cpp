@@ -18,6 +18,8 @@ DEFINE_LOG_CATEGORY_STATIC(LogSubSonarSystem, Log, All);
 
 namespace
 {
+constexpr int32 MaxNetworkSafeReplicatedTopoCells = 1024;
+
 float NormalizeAngleDelta(float A, float B)
 {
 	return FMath::Abs(FMath::FindDeltaAngleDegrees(A, B));
@@ -62,6 +64,7 @@ void USubSonarSystemComponent::TickComponent(float DeltaTime, ELevelTick TickTyp
 	}
 
 	ProcessNewActivePing();
+	CommitPendingActivePingObservations();
 
 	const float SafeDeltaTime = FMath::Max(DeltaTime, 0.f);
 	NoiseUpdateAccumulator += SafeDeltaTime;
@@ -83,7 +86,7 @@ void USubSonarSystemComponent::TickComponent(float DeltaTime, ELevelTick TickTyp
 		if (bEnablePassiveSweep)
 		{
 			RunPassiveSweep();
-			if (CurrentMode == ESonarMode::TerrainScan)
+			if (CurrentMode == ESonarMode::TerrainScan || CurrentMode == ESonarMode::PassiveStandard)
 			{
 				RunTerrainSweep();
 			}
@@ -111,6 +114,8 @@ void USubSonarSystemComponent::GetLifetimeReplicatedProps(TArray<FLifetimeProper
 	DOREPLIFETIME(USubSonarSystemComponent, RangePresetIndex);
 	DOREPLIFETIME(USubSonarSystemComponent, FocusBearingDeg);
 	DOREPLIFETIME(USubSonarSystemComponent, SelfNoiseState);
+	DOREPLIFETIME(USubSonarSystemComponent, AcousticClutterLevel);
+	DOREPLIFETIME(USubSonarSystemComponent, bSignalUnstable);
 	DOREPLIFETIME(USubSonarSystemComponent, LastProcessedPingTimestamp);
 	DOREPLIFETIME(USubSonarSystemComponent, ReplicatedTracks);
 	DOREPLIFETIME(USubSonarSystemComponent, ReplicatedTopoWindow);
@@ -145,12 +150,41 @@ void USubSonarSystemComponent::SetRangePresetIndex(int32 NewIndex)
 		return;
 	}
 
-	const int32 MaxIndex = (SystemConfig && SystemConfig->RangePresetsCm.Num() > 0)
-		? (SystemConfig->RangePresetsCm.Num() - 1)
+	const int32 MaxIndex = (SystemConfig && SystemConfig->DisplayRangePresetsCm.Num() > 0)
+		? (SystemConfig->DisplayRangePresetsCm.Num() - 1)
 		: 0;
 	RangePresetIndex = FMath::Clamp(NewIndex, 0, MaxIndex);
 	RefreshReplicatedTopoWindow();
 	NotifyRuntimeUpdated();
+}
+
+int32 USubSonarSystemComponent::GetRangePresetCount() const
+{
+	return (SystemConfig && SystemConfig->DisplayRangePresetsCm.Num() > 0)
+		? SystemConfig->DisplayRangePresetsCm.Num()
+		: 1;
+}
+
+float USubSonarSystemComponent::GetRangePresetValueCm(int32 PresetIndex) const
+{
+	if (SystemConfig && SystemConfig->DisplayRangePresetsCm.IsValidIndex(PresetIndex))
+	{
+		return FMath::Max(2000.f, SystemConfig->DisplayRangePresetsCm[PresetIndex]);
+	}
+
+	return GetDisplayRangeCm();
+}
+
+int32 USubSonarSystemComponent::ResolveRangePresetIndexFromNormalized(float Normalized01) const
+{
+	const int32 PresetCount = GetRangePresetCount();
+	if (PresetCount <= 1)
+	{
+		return 0;
+	}
+
+	const float Clamped = FMath::Clamp(Normalized01, 0.f, 1.f);
+	return FMath::Clamp(FMath::RoundToInt(Clamped * static_cast<float>(PresetCount - 1)), 0, PresetCount - 1);
 }
 
 void USubSonarSystemComponent::MarkPriorityTrack(int32 TrackId, bool bPriority)
@@ -173,11 +207,37 @@ void USubSonarSystemComponent::MarkPriorityTrack(int32 TrackId, bool bPriority)
 
 float USubSonarSystemComponent::GetCurrentRangeCm() const
 {
-	if (SystemConfig && SystemConfig->RangePresetsCm.IsValidIndex(RangePresetIndex))
+	return GetDisplayRangeCm();
+}
+
+float USubSonarSystemComponent::GetDisplayRangeCm() const
+{
+	if (SystemConfig && SystemConfig->DisplayRangePresetsCm.IsValidIndex(RangePresetIndex))
 	{
-		return FMath::Max(2000.f, SystemConfig->RangePresetsCm[RangePresetIndex]);
+		return FMath::Max(2000.f, SystemConfig->DisplayRangePresetsCm[RangePresetIndex]);
 	}
 	return 15000.f;
+}
+
+float USubSonarSystemComponent::GetRuntimeScanRangeCm() const
+{
+	if (!SystemConfig)
+	{
+		return 15000.f;
+	}
+
+	switch (CurrentMode)
+	{
+	case ESonarMode::PassiveFocusSector:
+		return FMath::Max(2000.f, SystemConfig->PassiveFocusScanRangeCm);
+	case ESonarMode::TerrainScan:
+		return FMath::Max(2000.f, SystemConfig->TerrainScanRangeCm);
+	case ESonarMode::ActivePing:
+		return CachedSonar ? FMath::Max(2000.f, CachedSonar->PingMaxRangeCm) : 15000.f;
+	case ESonarMode::PassiveStandard:
+	default:
+		return FMath::Max(2000.f, SystemConfig->PassiveStandardScanRangeCm);
+	}
 }
 
 bool USubSonarSystemComponent::IsPingReady() const
@@ -292,13 +352,14 @@ void USubSonarSystemComponent::RunPassiveSweep()
 
 	TArray<FSonarDetectionSample> Samples;
 	const FVector SubLocation = OwnerActor->GetActorLocation();
-	const float MaxRange = GetCurrentRangeCm();
+	const float MaxRange = GetRuntimeScanRangeCm();
 	const float MinScore = SystemConfig ? FMath::Clamp(SystemConfig->PassiveMinDetectionScore, 0.01f, 1.f) : 0.12f;
 
 	float AmbientNoise = 0.f;
 	float Clutter = 0.f;
 	float PassiveModifier = 1.f;
-	ApplyAcousticVolumeModifiers(AmbientNoise, Clutter, PassiveModifier);
+	float ActivePingDistortion = 0.f;
+	ApplyAcousticVolumeModifiers(AmbientNoise, Clutter, PassiveModifier, ActivePingDistortion);
 
 	const float FocusHalfAngle = SystemConfig ? FMath::Max(5.f, SystemConfig->PassiveFocusHalfAngleDeg) : 25.f;
 
@@ -346,16 +407,17 @@ void USubSonarSystemComponent::RunPassiveSweep()
 
 		FSonarDetectionSample& Sample = Samples.AddDefaulted_GetRef();
 		const float Uncertainty = FMath::Clamp(1.f - DetectionScore, 0.f, 1.f);
+		const float AcousticUncertainty = FMath::Clamp(Uncertainty + (Clutter * 0.35f) + (AmbientNoise * 0.20f), 0.f, 1.f);
 		const FVector Jitter = FVector(
 			FMath::FRandRange(-1.f, 1.f),
 			FMath::FRandRange(-1.f, 1.f),
-			FMath::FRandRange(-0.2f, 0.2f)) * (450.f * Uncertainty);
+			FMath::FRandRange(-0.2f, 0.2f)) * (450.f * AcousticUncertainty);
 
 		Sample.EstimatedWorldLocation = Emitter->GetEmissionLocation() + Jitter;
 		Sample.BearingDeg = BearingDeg;
 		Sample.EstimatedDistanceCm = DistanceCm;
 		Sample.RawStrength = DetectionScore;
-		Sample.ConfidenceDelta = FMath::Clamp(DetectionScore * 0.35f, 0.03f, 0.25f);
+		Sample.ConfidenceDelta = FMath::Clamp((DetectionScore * 0.35f) / (1.f + (Clutter * 0.6f) + (AmbientNoise * 0.3f)), 0.02f, 0.25f);
 		Sample.SuggestedClass = Emitter->ContactClass;
 		Sample.bFromActivePing = false;
 		Sample.Timestamp = World->GetTimeSeconds();
@@ -380,9 +442,19 @@ void USubSonarSystemComponent::RunTerrainSweep()
 	}
 
 	const FVector Origin = OwnerActor->GetActorLocation();
-	const float ScanRange = GetCurrentRangeCm() * 0.7f;
+	const bool bWeakPassiveTerrain = (CurrentMode == ESonarMode::PassiveStandard);
+	const float ScanRange = bWeakPassiveTerrain
+		? (SystemConfig ? FMath::Max(1000.f, SystemConfig->PassiveStandardTerrainRangeCm) : 4500.f)
+		: (SystemConfig ? FMath::Max(2000.f, SystemConfig->TerrainScanRangeCm) : 12000.f);
 	const int32 RayCount = 42;
-	const float VerticalBias = SystemConfig ? FMath::Clamp(SystemConfig->PassiveTerrainWeight, 0.5f, 3.f) : 1.2f;
+	const float VerticalBias = bWeakPassiveTerrain
+		? 0.85f
+		: (SystemConfig ? FMath::Clamp(SystemConfig->PassiveTerrainWeight, 0.5f, 3.f) : 1.2f);
+	float AmbientNoise = 0.f;
+	float Clutter = 0.f;
+	float ActivePingDistortion = 0.f;
+	float UnusedPassiveModifier = 1.f;
+	ApplyAcousticVolumeModifiers(AmbientNoise, Clutter, UnusedPassiveModifier, ActivePingDistortion);
 
 	FCollisionQueryParams QueryParams(SCENE_QUERY_STAT(SonarTerrainSweep), false, OwnerActor);
 	QueryParams.bTraceComplex = false;
@@ -399,7 +471,17 @@ void USubSonarSystemComponent::RunTerrainSweep()
 		FHitResult Hit;
 		if (World->LineTraceSingleByChannel(Hit, Origin, End, TraceChannel, QueryParams) && Hit.bBlockingHit)
 		{
-			AddTopologyObservation(Hit.ImpactPoint, 0.9f, 0.22f, false);
+			const float Distortion = FMath::Clamp(ActivePingDistortion + (Clutter * 0.35f), 0.f, 1.f);
+			const FVector Jitter(
+				FMath::FRandRange(-1.f, 1.f),
+				FMath::FRandRange(-1.f, 1.f),
+				FMath::FRandRange(-0.15f, 0.15f));
+			const float JitterScale = bWeakPassiveTerrain ? 70.f : 120.f;
+			const FVector DistortedPoint = Hit.ImpactPoint + (Jitter * (JitterScale * Distortion));
+			const float BaseConfidence = bWeakPassiveTerrain ? 0.10f : 0.22f;
+			const float Confidence = FMath::Clamp(BaseConfidence / (1.f + (Clutter * 0.8f) + (AmbientNoise * 0.25f)), bWeakPassiveTerrain ? 0.03f : 0.05f, BaseConfidence);
+			const float Occupancy = bWeakPassiveTerrain ? 0.35f : 0.9f;
+			AddTopologyObservation(DistortedPoint, Occupancy, Confidence, false);
 		}
 	}
 }
@@ -417,18 +499,70 @@ void USubSonarSystemComponent::ProcessNewActivePing()
 		return;
 	}
 
+	float AmbientNoise = 0.f;
+	float Clutter = 0.f;
+	float ActivePingDistortion = 0.f;
+	float UnusedPassiveModifier = 1.f;
+	ApplyAcousticVolumeModifiers(AmbientNoise, Clutter, UnusedPassiveModifier, ActivePingDistortion);
+
 	for (const FSonarHitPoint& HitPoint : CachedSonar->SonarPoints)
 	{
 		if (FMath::Abs(HitPoint.PingTimestamp - LatestPing) > 0.005f)
 		{
 			continue;
 		}
-		AddTopologyObservation(HitPoint.WorldLocation, 1.f, 1.f, false);
+
+		const float Distortion = FMath::Clamp(ActivePingDistortion + (Clutter * 0.25f), 0.f, 1.f);
+		const FVector Jitter(
+			FMath::FRandRange(-1.f, 1.f),
+			FMath::FRandRange(-1.f, 1.f),
+			FMath::FRandRange(-0.12f, 0.12f));
+		const FVector DistortedPoint = HitPoint.WorldLocation + (Jitter * (180.f * Distortion));
+		const float Confidence = FMath::Clamp(1.f - (Distortion * 0.45f) - (AmbientNoise * 0.10f), 0.35f, 1.f);
+
+		FPendingActiveTopoObservation& PendingObservation = PendingActiveTopoObservations.AddDefaulted_GetRef();
+		PendingObservation.WorldLocation = DistortedPoint;
+		PendingObservation.Occupancy01 = 1.f;
+		PendingObservation.Confidence01 = Confidence;
+		PendingObservation.RevealTime = HitPoint.PingTimestamp + (HitPoint.DistanceCm / FMath::Max(CachedSonar->PropagationSpeedCmS, 1.f));
 	}
 
 	LastProcessedPingTimestamp = LatestPing;
-	RefreshReplicatedTopoWindow();
-	NotifyRuntimeUpdated();
+}
+
+void USubSonarSystemComponent::CommitPendingActivePingObservations()
+{
+	UWorld* World = GetWorld();
+	if (!World || PendingActiveTopoObservations.Num() == 0)
+	{
+		return;
+	}
+
+	const float Now = World->GetTimeSeconds();
+	bool bCommittedAny = false;
+
+	for (int32 Index = PendingActiveTopoObservations.Num() - 1; Index >= 0; --Index)
+	{
+		const FPendingActiveTopoObservation& PendingObservation = PendingActiveTopoObservations[Index];
+		if (Now + KINDA_SMALL_NUMBER < PendingObservation.RevealTime)
+		{
+			continue;
+		}
+
+		AddTopologyObservation(
+			PendingObservation.WorldLocation,
+			PendingObservation.Occupancy01,
+			PendingObservation.Confidence01,
+			false);
+		PendingActiveTopoObservations.RemoveAtSwap(Index, 1, EAllowShrinking::No);
+		bCommittedAny = true;
+	}
+
+	if (bCommittedAny)
+	{
+		RefreshReplicatedTopoWindow();
+		NotifyRuntimeUpdated();
+	}
 }
 
 void USubSonarSystemComponent::AddTopologyObservation(const FVector& WorldLocation, float Occupancy01, float Confidence01, bool bFromSeed)
@@ -496,7 +630,20 @@ void USubSonarSystemComponent::RefreshReplicatedTopoWindow()
 
 	const float CellSize = SystemConfig ? FMath::Max(100.f, SystemConfig->TopologyCellSizeCm) : 500.f;
 	const int32 HalfWindow = SystemConfig ? FMath::Max(4, SystemConfig->TopologyHalfWindowCells) : 44;
-	const int32 MaxCells = SystemConfig ? FMath::Max(64, SystemConfig->MaxReplicatedTopoCells) : 1500;
+	const int32 ConfiguredMaxCells = SystemConfig ? FMath::Max(64, SystemConfig->MaxReplicatedTopoCells) : 1500;
+	const int32 MaxCells = FMath::Min(ConfiguredMaxCells, MaxNetworkSafeReplicatedTopoCells);
+	if (ConfiguredMaxCells > MaxNetworkSafeReplicatedTopoCells && !bLoggedReplicatedTopoCap)
+	{
+		UE_LOG(
+			LogSubSonarSystem,
+			Warning,
+			TEXT("[%s] MaxReplicatedTopoCells=%d exceeds the safe replicated sonar topology budget. Clamping to %d to avoid oversized net bunches."),
+			*GetNameSafe(OwnerActor),
+			ConfiguredMaxCells,
+			MaxNetworkSafeReplicatedTopoCells);
+		bLoggedReplicatedTopoCap = true;
+	}
+
 	const FVector SubLoc = OwnerActor->GetActorLocation();
 	const int32 SubCellX = FMath::FloorToInt(SubLoc.X / CellSize);
 	const int32 SubCellY = FMath::FloorToInt(SubLoc.Y / CellSize);
@@ -539,11 +686,12 @@ void USubSonarSystemComponent::RefreshReplicatedTopoWindow()
 	ReplicatedTopoWindow = MoveTemp(Cells);
 }
 
-void USubSonarSystemComponent::ApplyAcousticVolumeModifiers(float& OutAmbientNoiseBias, float& OutClutterBias, float& OutPassiveModifier) const
+void USubSonarSystemComponent::ApplyAcousticVolumeModifiers(float& OutAmbientNoiseBias, float& OutClutterBias, float& OutPassiveModifier, float& OutActivePingDistortion) const
 {
 	OutAmbientNoiseBias = 0.f;
 	OutClutterBias = 0.f;
 	OutPassiveModifier = 1.f;
+	OutActivePingDistortion = 0.f;
 
 	const AActor* OwnerActor = GetOwner();
 	const UWorld* World = GetWorld();
@@ -564,7 +712,12 @@ void USubSonarSystemComponent::ApplyAcousticVolumeModifiers(float& OutAmbientNoi
 		OutAmbientNoiseBias += VolumeComp->AmbientNoiseBias;
 		OutClutterBias += VolumeComp->ClutterBias;
 		OutPassiveModifier *= FMath::Clamp(VolumeComp->PassiveDetectionModifier, 0.1f, 10.f);
+		OutActivePingDistortion += VolumeComp->ActivePingDistortion;
 	}
+
+	USubSonarSystemComponent* MutableThis = const_cast<USubSonarSystemComponent*>(this);
+	MutableThis->AcousticClutterLevel = FMath::Clamp(OutClutterBias + (OutAmbientNoiseBias * 0.5f) + FMath::Max(0.f, 1.f - OutPassiveModifier), 0.f, 2.5f);
+	MutableThis->bSignalUnstable = (MutableThis->AcousticClutterLevel >= 0.35f) || (OutActivePingDistortion >= 0.20f);
 }
 
 void USubSonarSystemComponent::SeedTopologyFromRoute()
@@ -600,7 +753,7 @@ void USubSonarSystemComponent::SeedTopologyFromRoute()
 	}
 
 	TArray<FVector> SeedPoints;
-	const float SeedRange = GetCurrentRangeCm() * 1.25f;
+	const float SeedRange = SystemConfig ? FMath::Max(2000.f, SystemConfig->RouteSeedRangeCm) : 18000.f;
 	const int32 SeedBudget = SystemConfig ? FMath::Max(128, SystemConfig->TopologySeedPointBudget) : 1600;
 	SonarField->CollectCoarseWaterSurfacePoints(OwnerActor->GetActorLocation(), SeedRange, SeedBudget, SeedPoints);
 

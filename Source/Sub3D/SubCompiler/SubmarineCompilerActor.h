@@ -26,6 +26,7 @@ public:
 	virtual void OnConstruction(const FTransform& Transform) override;
 	virtual void BeginPlay() override;
 	virtual UPrimitiveComponent* GetMovementCollisionComponent() const override;
+	virtual TArray<UPrimitiveComponent*> GetInteriorWalkableComponents() const override;
 	virtual bool ValidateSpawnCollision() const override;
 
 	UFUNCTION(BlueprintCallable, Category = "SubCompiler")
