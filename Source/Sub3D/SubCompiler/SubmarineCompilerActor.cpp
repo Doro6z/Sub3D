@@ -1,7 +1,8 @@
 #include "SubmarineCompilerActor.h"
 
 #include "Curves/RichCurve.h"
-#include "Components/BoxComponent.h"
+#include "Components/CapsuleComponent.h"
+#include "Components/PointLightComponent.h"
 #include "Materials/MaterialInterface.h"
 #include "ProceduralMeshComponent.h"
 #include "Components/PrimitiveComponent.h"
@@ -15,17 +16,24 @@
 #include "SubmarineLayoutSolver.h"
 #include "Submarine/SubDoorActor.h"
 #include "Submarine/SubHullComponent.h"
+#include "Submarine/SubHullVisualDamageComponent.h"
 #include "Submarine/SubStationBase.h"
 #include "Submarine/SubmarineLayoutAsset.h"
 #include "Submarine/SubmarineStationManagerComponent.h"
+
+#if WITH_EDITOR
+#include "Editor.h"
+#endif
 
 ASubmarineCompilerActor::ASubmarineCompilerActor()
 {
 	PrimaryActorTick.bCanEverTick = false;
 	DoorActorClass = ASubDoorActor::StaticClass();
 
-	ExteriorCollisionProxy = CreateDefaultSubobject<UBoxComponent>(TEXT("ExteriorCollisionProxy"));
+	ExteriorCollisionProxy = CreateDefaultSubobject<UCapsuleComponent>(TEXT("ExteriorCollisionProxy"));
 	ExteriorCollisionProxy->SetupAttachment(HullMesh);
+	// Rotate capsule 90° so its axis aligns with the submarine longitudinal X axis.
+	ExteriorCollisionProxy->SetRelativeRotation(FRotator(90.f, 0.f, 0.f));
 	ConfigureExteriorCollisionProxy();
 }
 
@@ -122,7 +130,9 @@ bool ASubmarineCompilerActor::ValidateSpawnCollision() const
 		ExteriorCollisionProxy->GetComponentLocation(),
 		ExteriorCollisionProxy->GetComponentQuat(),
 		TEXT("SubmarineHull"),
-		FCollisionShape::MakeBox(ExteriorCollisionProxy->GetScaledBoxExtent()),
+		FCollisionShape::MakeCapsule(
+			ExteriorCollisionProxy->GetScaledCapsuleRadius(),
+			ExteriorCollisionProxy->GetScaledCapsuleHalfHeight()),
 		Params);
 
 	UE_LOG(LogTemp, Log,
@@ -186,7 +196,7 @@ bool ASubmarineCompilerActor::CompileCurrentDefinitions()
 
 	LastMessages = MoveTemp(SolveMessages);
 	TArray<FLayoutValidationMessage> CompileMessages;
-	CompiledLayoutAsset = Compiler->CompileToLayoutAsset(LastSolution, this, CompileMessages);
+	CompiledLayoutAsset = Compiler->CompileToLayoutAsset(LastSolution, this, CompileMessages, ResolvedEnvelopeDef);
 	LastMessages.Append(MoveTemp(CompileMessages));
 	if (!CompiledLayoutAsset)
 	{
@@ -223,14 +233,22 @@ bool ASubmarineCompilerActor::BuildGeneratedGeometry()
 
 	const float SectionExp = ResolvedEnvelopeDef ? ResolvedEnvelopeDef->SectionExponent : 2.f;
 	const float WHR = ResolvedEnvelopeDef ? ResolvedEnvelopeDef->WidthToHeightRatio : 1.f;
+	const int32 ArcSegs = ResolvedEnvelopeDef ? ResolvedEnvelopeDef->InteriorArcSegments : 24;
+	const float WallInset = ResolvedEnvelopeDef ? ResolvedEnvelopeDef->WallThicknessCm : 12.f;
+	UMaterialInterface* EffectiveWallMaterial = InteriorWallMaterial ? InteriorWallMaterial.Get() : InteriorMaterial.Get();
+	UMaterialInterface* EffectiveFloorMaterial = FloorMaterial ? FloorMaterial.Get() : InteriorMaterial.Get();
+	UMaterialInterface* EffectiveExteriorMaterial = ExteriorMaterial ? ExteriorMaterial.Get() : InteriorMaterial.Get();
 
 	TArray<UProceduralMeshComponent*> BuiltMeshes = GeometryBuilder->BuildInteriorMeshes(
 		LastSolution,
 		this,
-		InteriorMaterial,
+		EffectiveWallMaterial,
+		EffectiveFloorMaterial,
 		bEnableInteriorCollision,
 		SectionExp,
-		WHR);
+		WHR,
+		ArcSegs,
+		WallInset);
 
 	GeneratedInteriorMeshes.Reserve(BuiltMeshes.Num());
 	for (UProceduralMeshComponent* Mesh : BuiltMeshes)
@@ -241,7 +259,7 @@ bool ASubmarineCompilerActor::BuildGeneratedGeometry()
 	GeneratedExteriorMesh = GeometryBuilder->BuildExteriorMesh(
 		LastSolution,
 		this,
-		InteriorMaterial,
+		EffectiveExteriorMaterial,
 		true,
 		ResolvedEnvelopeDef ? ResolvedEnvelopeDef->ExteriorRadialSegments : 32,
 		ResolvedEnvelopeDef ? ResolvedEnvelopeDef->ExteriorLongitudinalSubdivisionsPerSpan : 6,
@@ -253,10 +271,48 @@ bool ASubmarineCompilerActor::BuildGeneratedGeometry()
 	{
 		GeneratedExteriorMesh->SetGenerateOverlapEvents(true);
 		GeneratedExteriorMesh->SetCollisionResponseToChannel(ECC_GameTraceChannel1, ECR_Block);
+		GeneratedExteriorMesh->SetVisibility(true);
+		GeneratedExteriorMesh->SetHiddenInGame(false);
+		if (EffectiveExteriorMaterial)
+		{
+			GeneratedExteriorMesh->SetMaterial(0, EffectiveExteriorMaterial);
+		}
+	}
+
+	if (USubHullVisualDamageComponent* VisualDamageComponent = FindComponentByClass<USubHullVisualDamageComponent>())
+	{
+		VisualDamageComponent->RefreshFromCurrentBreaches();
 	}
 
 	RefreshExteriorCollisionProxy();
 	RefreshMovementCollisionBinding();
+
+	// Spawn compartment lights for interior visibility.
+	for (UPointLightComponent* OldLight : GeneratedCompartmentLights)
+	{
+		if (OldLight) { OldLight->DestroyComponent(); }
+	}
+	GeneratedCompartmentLights.Reset();
+
+	for (const FCompartmentPlacement& Comp : LastSolution.Compartments)
+	{
+		const float MidX = (Comp.SpineStartCm + Comp.SpineEndCm) * 0.5f;
+		const float LightZ = Comp.FloorOffsetCm + FMath::Max(10.f, Comp.EffectiveRadiusCm * 0.6f);
+		const FName LightName(*FString::Printf(TEXT("CompartmentLight_%s"), *Comp.CompartmentId.ToString()));
+
+		UPointLightComponent* Light = NewObject<UPointLightComponent>(this, LightName);
+		if (Light)
+		{
+			Light->RegisterComponent();
+			Light->AttachToComponent(GetRootComponent(), FAttachmentTransformRules::KeepRelativeTransform);
+			Light->SetRelativeLocation(FVector(MidX, 0.f, LightZ));
+			Light->SetIntensity(5000.f);
+			Light->SetAttenuationRadius((Comp.SpineEndCm - Comp.SpineStartCm) * 0.7f);
+			Light->SetLightColor(FLinearColor(1.f, 0.9f, 0.75f)); // warm white
+			Light->SetCastShadows(false);
+			GeneratedCompartmentLights.Add(Light);
+		}
+	}
 
 	const int32 ExpectedInteriorMeshCount = (LastSolution.Compartments.Num() * 2) + LastSolution.Bulkheads.Num();
 	return GeneratedInteriorMeshes.Num() == ExpectedInteriorMeshCount
@@ -332,6 +388,16 @@ bool ASubmarineCompilerActor::CompileAndBuildDirty()
 	return true;
 }
 
+void ASubmarineCompilerActor::CompileAndBuildInEditor()
+{
+	CompileAndBuild();
+}
+
+void ASubmarineCompilerActor::CompileAndBuildDirtyInEditor()
+{
+	CompileAndBuildDirty();
+}
+
 bool ASubmarineCompilerActor::SavePreviewToEnvelope()
 {
 	EnsureDefaultDefinitions();
@@ -351,7 +417,12 @@ bool ASubmarineCompilerActor::SavePreviewToEnvelope()
 
 	if (!HasAnyFlags(RF_ClassDefaultObject) && bBuildOnConstruction)
 	{
-		return CompileAndBuild();
+		// Automation tests can create transient actors without a valid world.
+		// In that case we only persist preview values and skip runtime mesh rebuild.
+		if (GetWorld())
+		{
+			return CompileAndBuild();
+		}
 	}
 
 	return true;
@@ -415,6 +486,9 @@ USubmarineEnvelopeDef* ASubmarineCompilerActor::ResolveEnvelopeDefinition()
 	WorkingEnvelope->SternProfile = EnvelopeDef->SternProfile;
 	WorkingEnvelope->BowTaperFraction = EnvelopeDef->BowTaperFraction;
 	WorkingEnvelope->SternTaperFraction = EnvelopeDef->SternTaperFraction;
+	WorkingEnvelope->ExteriorHullOffsetCm = EnvelopeDef->ExteriorHullOffsetCm;
+	WorkingEnvelope->InteriorArcSegments = EnvelopeDef->InteriorArcSegments;
+	WorkingEnvelope->WallThicknessCm = EnvelopeDef->WallThicknessCm;
 
 	if (bUseEnvelopePreviewOverrides)
 	{
@@ -437,6 +511,9 @@ void ASubmarineCompilerActor::ApplyPreviewOverridesToEnvelope(USubmarineEnvelope
 	Envelope.SternProfile = PreviewSternProfile;
 	Envelope.BowTaperFraction = PreviewBowTaperFraction;
 	Envelope.SternTaperFraction = PreviewSternTaperFraction;
+	Envelope.ExteriorHullOffsetCm = PreviewExteriorHullOffsetCm;
+	Envelope.InteriorArcSegments = PreviewInteriorArcSegments;
+	Envelope.WallThicknessCm = PreviewWallThicknessCm;
 
 	FRichCurve* Curve = Envelope.RadiusProfile.GetRichCurve();
 	if (!Curve)
@@ -532,12 +609,12 @@ void ASubmarineCompilerActor::RefreshExteriorCollisionProxy()
 		: FMath::Max(0.5f, PreviewWidthToHeightRatio);
 
 	const float HalfLength = FMath::Max(50.f, (MaxX - MinX) * 0.5f) + ExteriorCollisionPaddingCm;
-	const float HalfWidth = FMath::Max(50.f, MaxRadiusCm * WidthToHeightRatio) + ExteriorCollisionPaddingCm;
-	const float HalfHeight = FMath::Max(50.f, MaxRadiusCm) + ExteriorCollisionPaddingCm;
+	const float CapsuleRadius = FMath::Max(50.f, FMath::Max(MaxRadiusCm * WidthToHeightRatio, MaxRadiusCm)) + ExteriorCollisionPaddingCm;
 	const float CenterX = (MinX + MaxX) * 0.5f;
 
 	ExteriorCollisionProxy->SetRelativeLocation(FVector(CenterX, 0.f, 0.f));
-	ExteriorCollisionProxy->SetBoxExtent(FVector(HalfLength, HalfWidth, HalfHeight));
+	// Capsule is rotated 90° so its internal axis maps to X. HalfHeight = half-length.
+	ExteriorCollisionProxy->SetCapsuleSize(CapsuleRadius, HalfLength);
 	ExteriorCollisionProxy->SetVisibility(bShowExteriorCollisionProxyInEditor);
 
 	if (HullMesh)
@@ -568,14 +645,15 @@ void ASubmarineCompilerActor::LogExteriorCollisionProxyState() const
 		return;
 	}
 
-	const FVector Extent = ExteriorCollisionProxy->GetUnscaledBoxExtent();
+	const float CapsuleRadius = ExteriorCollisionProxy->GetUnscaledCapsuleRadius();
+	const float CapsuleHalfHeight = ExteriorCollisionProxy->GetUnscaledCapsuleHalfHeight();
 	const FVector WorldLocation = ExteriorCollisionProxy->GetComponentLocation();
 	const FVector LocalLocation = ExteriorCollisionProxy->GetRelativeLocation();
 	const UPrimitiveComponent* ActiveMovementCollision = GetMovementCollisionComponent();
 	UE_LOG(
 		LogTemp,
 		Log,
-		TEXT("[SubCompiler][CollisionProxy] UseProxy=%d | PreferGenerated=%d | Active=%s | ProxyCollision=%s | GeneratedCollision=%s | LocalCenter=%s | WorldCenter=%s | Extent=%s | HullCollision=%s"),
+		TEXT("[SubCompiler][CollisionProxy] UseProxy=%d | PreferGenerated=%d | Active=%s | ProxyCollision=%s | GeneratedCollision=%s | LocalCenter=%s | WorldCenter=%s | Radius=%.1f | HalfHeight=%.1f | HullCollision=%s"),
 		bUseExteriorCollisionProxy ? 1 : 0,
 		bPreferGeneratedExteriorMeshCollision ? 1 : 0,
 		*GetNameSafe(ActiveMovementCollision),
@@ -583,7 +661,8 @@ void ASubmarineCompilerActor::LogExteriorCollisionProxyState() const
 		GeneratedExteriorMesh ? *UEnum::GetValueAsString(GeneratedExteriorMesh->GetCollisionEnabled()) : TEXT("None"),
 		*LocalLocation.ToCompactString(),
 		*WorldLocation.ToCompactString(),
-		*Extent.ToCompactString(),
+		CapsuleRadius,
+		CapsuleHalfHeight,
 		HullMesh ? *UEnum::GetValueAsString(HullMesh->GetCollisionEnabled()) : TEXT("NoHullMesh"));
 }
 
@@ -643,6 +722,14 @@ void ASubmarineCompilerActor::LogValidationMessages() const
 void ASubmarineCompilerActor::DestroyGeneratedInteriorMeshes()
 {
 	TInlineComponentArray<UProceduralMeshComponent*> MeshComponents(this);
+
+#if WITH_EDITOR
+	if (GEditor && (MeshComponents.Num() > 0 || GeneratedCompartmentLights.Num() > 0))
+	{
+		GEditor->SelectNone(true, true);
+	}
+#endif
+
 	for (UProceduralMeshComponent* MeshComponent : MeshComponents)
 	{
 		if (!MeshComponent)
@@ -661,6 +748,13 @@ void ASubmarineCompilerActor::DestroyGeneratedInteriorMeshes()
 
 	GeneratedInteriorMeshes.Reset();
 	GeneratedExteriorMesh = nullptr;
+
+	// Destroy compartment lights.
+	for (UPointLightComponent* Light : GeneratedCompartmentLights)
+	{
+		if (Light) { Light->DestroyComponent(); }
+	}
+	GeneratedCompartmentLights.Reset();
 }
 
 bool ASubmarineCompilerActor::BuildGeneratedStations()

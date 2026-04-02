@@ -6,7 +6,7 @@
 #include "SubmarineCompilerActor.generated.h"
 
 class UMaterialInterface;
-class UBoxComponent;
+class UCapsuleComponent;
 class UProceduralMeshComponent;
 class USubmarineEnvelopeDef;
 class USubmarineFunctionalGraph;
@@ -14,6 +14,7 @@ class USubmarineLayoutAsset;
 class ASubDoorActor;
 class ASubStationBase;
 class UPrimitiveComponent;
+class UPointLightComponent;
 
 UCLASS(Blueprintable)
 class SUB3D_API ASubmarineCompilerActor : public ASubmarineBase
@@ -40,6 +41,12 @@ public:
 
 	UFUNCTION(BlueprintCallable, CallInEditor, Category = "SubCompiler")
 	bool CompileAndBuildDirty();
+
+	UFUNCTION(CallInEditor, Category = "SubCompiler", meta = (DisplayName = "Compile And Build"))
+	void CompileAndBuildInEditor();
+
+	UFUNCTION(CallInEditor, Category = "SubCompiler", meta = (DisplayName = "Compile And Build Dirty"))
+	void CompileAndBuildDirtyInEditor();
 
 	UFUNCTION(BlueprintCallable, Category = "SubCompiler|Preview")
 	bool SavePreviewToEnvelope();
@@ -98,7 +105,10 @@ public:
 	int32 PreviewExteriorLongitudinalSubdivisionsPerSpan = 3;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "SubCompiler|Preview", meta = (EditCondition = "bUseEnvelopePreviewOverrides", ClampMin = "12", ClampMax = "64"))
-	int32 PreviewExteriorRadialSegments = 15;
+	int32 PreviewExteriorRadialSegments = 32;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "SubCompiler|Preview", meta = (EditCondition = "bUseEnvelopePreviewOverrides", ClampMin = "8", ClampMax = "48"))
+	int32 PreviewInteriorArcSegments = 24;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "SubCompiler|Preview", meta = (EditCondition = "bUseEnvelopePreviewOverrides", ClampMin = "0.5", ClampMax = "8.0"))
 	float PreviewSectionExponent = 2.f;
@@ -118,7 +128,22 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "SubCompiler|Preview", meta = (EditCondition = "bUseEnvelopePreviewOverrides", ClampMin = "0.0", ClampMax = "0.4"))
 	float PreviewSternTaperFraction = 0.15f;
 
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "SubCompiler")
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "SubCompiler|Preview", meta = (EditCondition = "bUseEnvelopePreviewOverrides", ClampMin = "0.0", ClampMax = "50.0"))
+	float PreviewExteriorHullOffsetCm = 12.f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "SubCompiler|Preview", meta = (EditCondition = "bUseEnvelopePreviewOverrides", ClampMin = "2.0", ClampMax = "20.0"))
+	float PreviewWallThicknessCm = 12.f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "SubCompiler|Materials")
+	TObjectPtr<UMaterialInterface> ExteriorMaterial = nullptr;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "SubCompiler|Materials")
+	TObjectPtr<UMaterialInterface> InteriorWallMaterial = nullptr;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "SubCompiler|Materials")
+	TObjectPtr<UMaterialInterface> FloorMaterial = nullptr;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "SubCompiler|Materials")
 	TObjectPtr<UMaterialInterface> InteriorMaterial = nullptr;
 
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "SubCompiler")
@@ -134,7 +159,7 @@ public:
 	bool bPreferGeneratedExteriorMeshCollision = false;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "SubCompiler|Collision", meta = (ClampMin = "0.0"))
-	float ExteriorCollisionPaddingCm = 35.f;
+	float ExteriorCollisionPaddingCm = 15.f;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "SubCompiler|Collision")
 	bool bShowExteriorCollisionProxyInEditor = false;
@@ -172,8 +197,11 @@ public:
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Transient, Category = "SubCompiler")
 	TArray<TObjectPtr<ASubDoorActor>> GeneratedDoors;
 
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Transient, Category = "SubCompiler")
+	TArray<TObjectPtr<UPointLightComponent>> GeneratedCompartmentLights;
+
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "SubCompiler|Collision")
-	TObjectPtr<UBoxComponent> ExteriorCollisionProxy = nullptr;
+	TObjectPtr<UCapsuleComponent> ExteriorCollisionProxy = nullptr;
 
 	UFUNCTION(BlueprintCallable, CallInEditor, Category = "SubCompiler|Collision")
 	void RefreshExteriorCollisionProxy();

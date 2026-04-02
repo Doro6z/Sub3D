@@ -34,6 +34,20 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Envelope|Exterior", meta = (ClampMin = "12", ClampMax = "64"))
 	int32 ExteriorRadialSegments = 32;
 
+	// Distance in cm between the interior wall and the exterior hull surface.
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Envelope|Exterior", meta = (ClampMin = "0.0", ClampMax = "50.0"))
+	float ExteriorHullOffsetCm = 12.f;
+
+	// Number of arc segments for interior wall cross-section generation.
+	// Higher values produce smoother walls but more geometry.
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Envelope|Interior", meta = (ClampMin = "8", ClampMax = "48"))
+	int32 InteriorArcSegments = 24;
+
+	// Thickness of the hull wall in cm. Interior surfaces are inset by this amount
+	// from the envelope radius. Also used as collision boundary for crew.
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Envelope|Interior", meta = (ClampMin = "2.0", ClampMax = "20.0"))
+	float WallThicknessCm = 12.f;
+
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Envelope", meta = (ClampMin = "1"))
 	int32 MaxCompartments = 6;
 
@@ -68,4 +82,28 @@ public:
 	// Returns a radius multiplier in [0, 1].
 	UFUNCTION(BlueprintPure, Category = "Envelope")
 	float EvaluateBowSternTaper(float NormalizedPosition) const;
+
+	// Shared cross-section truth: evaluate the half-width of the hull interior
+	// at a given local radius and vertical offset from the section center.
+	// Uses SectionExponent and WidthToHeightRatio.
+	// Returns 0 if the vertical offset is at or beyond the section boundary.
+	UFUNCTION(BlueprintPure, Category = "Envelope")
+	float EvaluateSectionHalfWidth(float LocalRadius, float VerticalOffset) const;
+
+	/**
+	 * Shared cross-section truth: Evaluate a point on the superellipse arc.
+	 * @param LocalRadius Current envelope radius at this longitudinal position.
+	 * @param Angle Radian angle around the cross-section.
+	 * @param OutPosition Resulting Y-Z coordinates in the section plane.
+	 * @param OutInwardNormal Normalized vector pointing from the surface toward the center.
+	 */
+	UFUNCTION(BlueprintCallable, Category = "Envelope")
+	void EvaluateSectionPoint(float LocalRadius, float Angle, FVector2D& OutPosition, FVector2D& OutInwardNormal) const;
+
+	/**
+	 * Numerical approximation of the arc length of the superellipse section.
+	 * Use for consistent UV mapping across different exponents and ratios.
+	 */
+	UFUNCTION(BlueprintPure, Category = "Envelope")
+	float GetSectionArcLength(float LocalRadius, float StartAngle, float EndAngle, int32 Samples = 16) const;
 };

@@ -1,5 +1,6 @@
 #include "SubmarineBuildCompiler.h"
 
+#include "SubmarineEnvelopeDef.h"
 #include "Submarine/SubmarineLayoutAsset.h"
 #include "Submarine/StructuralHullTypes.h"
 
@@ -63,14 +64,57 @@ void AddExteriorSheet(
 	Sheet.GridResolutionX = ComputeGridResolution(SizeCm.X);
 	Sheet.GridResolutionY = ComputeGridResolution(SizeCm.Y);
 	Sheet.bCanOpenToExterior = true;
+	Sheet.bSupportsVisualRupture = true;
+	Sheet.ExteriorVisualMaterialSlot = 0;
+	Sheet.VisualLocalOrigin = Origin;
+	Sheet.VisualLocalTangentX = TangentX;
+	Sheet.VisualLocalTangentY = TangentY;
+	Sheet.VisualProjectionSizeCm = SizeCm;
+	Sheet.MaxVisibleRuptureRadiusCm = FMath::Max(40.f, 0.35f * FMath::Min(SizeCm.X, SizeCm.Y));
+	Sheet.PreferredRuptureBorderScale = 1.f;
 	OutSheets.Add(Sheet);
+}
+
+FVector2D GetChartMinForSide(ESheetSide Side)
+{
+	switch (Side)
+	{
+	case ESheetSide::Starboard:
+		return FVector2D(0.f, 0.875f);
+	case ESheetSide::Top:
+		return FVector2D(0.f, 0.125f);
+	case ESheetSide::Port:
+		return FVector2D(0.f, 0.375f);
+	case ESheetSide::Bottom:
+		return FVector2D(0.f, 0.625f);
+	default:
+		return FVector2D(0.f, 0.f);
+	}
+}
+
+FVector2D GetChartMaxForSide(ESheetSide Side)
+{
+	switch (Side)
+	{
+	case ESheetSide::Starboard:
+		return FVector2D(1.f, 1.f);
+	case ESheetSide::Top:
+		return FVector2D(1.f, 0.375f);
+	case ESheetSide::Port:
+		return FVector2D(1.f, 0.625f);
+	case ESheetSide::Bottom:
+		return FVector2D(1.f, 0.875f);
+	default:
+		return FVector2D(1.f, 1.f);
+	}
 }
 }
 
 USubmarineLayoutAsset* USubmarineBuildCompiler::CompileToLayoutAsset(
 	const FSubmarineLayoutSolution& Solution,
 	UObject* Outer,
-	TArray<FLayoutValidationMessage>& OutMessages)
+	TArray<FLayoutValidationMessage>& OutMessages,
+	const USubmarineEnvelopeDef* EnvelopeDef)
 {
 	OutMessages.Reset();
 
@@ -97,13 +141,32 @@ USubmarineLayoutAsset* USubmarineBuildCompiler::CompileToLayoutAsset(
 
 	LayoutAsset->Compartments.Reset();
 	LayoutAsset->StructuralSheets.Reset();
+	LayoutAsset->CompiledSheetBindings.Reset();
 	LayoutAsset->Doors.Reset();
 	LayoutAsset->StationSlots.Reset();
 	LayoutAsset->WalkableSurfaces.Reset();
 	LayoutAsset->Metrics = Solution.Metrics;
 
-	for (const FCompartmentPlacement& Placement : Solution.Compartments)
+	const int32 EffectiveExteriorRadialSegments = FMath::Clamp(
+		EnvelopeDef ? EnvelopeDef->ExteriorRadialSegments : 32,
+		12,
+		64);
+	const int32 EffectiveExteriorLongitudinalSubdivisions = FMath::Clamp(
+		EnvelopeDef ? EnvelopeDef->ExteriorLongitudinalSubdivisionsPerSpan : 6,
+		1,
+		16);
+	const int32 EffectiveInteriorArcSegments = FMath::Clamp(
+		EnvelopeDef ? EnvelopeDef->InteriorArcSegments : 24,
+		8,
+		48);
+
+	const int32 ExteriorTrianglesPerSpan = EffectiveExteriorRadialSegments * 2;
+	const int32 InteriorTrianglesPerCompartment = EffectiveInteriorArcSegments * 2;
+	const int32 InteriorVerticesPerCompartment = (EffectiveInteriorArcSegments + 1) * 2;
+
+	for (int32 CompartmentIndex = 0; CompartmentIndex < Solution.Compartments.Num(); ++CompartmentIndex)
 	{
+		const FCompartmentPlacement& Placement = Solution.Compartments[CompartmentIndex];
 		FSubCompartmentDef CompartmentDef;
 		CompartmentDef.CompartmentId = Placement.CompartmentId;
 		CompartmentDef.DisplayName = FText::FromName(Placement.CompartmentId);
@@ -125,6 +188,17 @@ USubmarineLayoutAsset* USubmarineBuildCompiler::CompileToLayoutAsset(
 		const FVector2D SideSize(LengthCm, RadiusCm * 2.f);
 		const FVector2D CapSize(LengthCm, RadiusCm * 2.f);
 
+		const int32 ExteriorRingStart = CompartmentIndex * EffectiveExteriorLongitudinalSubdivisions;
+		const int32 ExteriorRingCount = (CompartmentIndex == Solution.Compartments.Num() - 1)
+			? EffectiveExteriorLongitudinalSubdivisions + 1
+			: EffectiveExteriorLongitudinalSubdivisions;
+		const int32 ExteriorVertexStart = ExteriorRingStart * EffectiveExteriorRadialSegments;
+		const int32 ExteriorVertexCount = ExteriorRingCount * EffectiveExteriorRadialSegments;
+		const int32 ExteriorTriangleStart = CompartmentIndex * EffectiveExteriorLongitudinalSubdivisions * ExteriorTrianglesPerSpan;
+		const int32 ExteriorTriangleCount = EffectiveExteriorLongitudinalSubdivisions * ExteriorTrianglesPerSpan;
+		const int32 InteriorVertexStart = CompartmentIndex * InteriorVerticesPerCompartment;
+		const int32 InteriorTriangleStart = CompartmentIndex * InteriorTrianglesPerCompartment;
+
 		FWalkableSurfaceDef WalkableSurface;
 		WalkableSurface.CompartmentId = Placement.CompartmentId;
 		WalkableSurface.LocalTransform = FTransform(
@@ -137,45 +211,83 @@ USubmarineLayoutAsset* USubmarineBuildCompiler::CompileToLayoutAsset(
 		WalkableSurface.bSupportsCrew = true;
 		LayoutAsset->WalkableSurfaces.Add(MoveTemp(WalkableSurface));
 
-		AddExteriorSheet(
-			LayoutAsset->StructuralSheets,
-			MakeExteriorSheetId(Placement.CompartmentId, TEXT("Port")),
-			Placement.CompartmentId,
+		auto AddExteriorSheetAndBinding = [&](
+			const TCHAR* Suffix,
+			const FVector& Origin,
+			const FVector& Normal,
+			const FVector& TangentX,
+			const FVector& TangentY,
+			const FVector2D& Size,
+			ESheetSide Side)
+		{
+			const FName SheetId = MakeExteriorSheetId(Placement.CompartmentId, Suffix);
+			AddExteriorSheet(
+				LayoutAsset->StructuralSheets,
+				SheetId,
+				Placement.CompartmentId,
+				Origin,
+				Normal,
+				TangentX,
+				TangentY,
+				Size);
+
+			FStructuralSheetCompiledBinding Binding;
+			Binding.SheetId = SheetId;
+			Binding.CompartmentIndex = CompartmentIndex;
+			Binding.Side = Side;
+			Binding.ChartMin = GetChartMinForSide(Side);
+			Binding.ChartMax = GetChartMaxForSide(Side);
+			Binding.MeshRange.SectionIndexStart = ExteriorRingStart;
+			Binding.MeshRange.SectionIndexEnd = ExteriorRingStart + ExteriorRingCount;
+			Binding.MeshRange.ExteriorVertexStart = ExteriorVertexStart;
+			Binding.MeshRange.ExteriorVertexCount = ExteriorVertexCount;
+			Binding.MeshRange.ExteriorTriangleStart = ExteriorTriangleStart;
+			Binding.MeshRange.ExteriorTriangleCount = ExteriorTriangleCount;
+			Binding.MeshRange.InteriorVertexStart = InteriorVertexStart;
+			Binding.MeshRange.InteriorVertexCount = InteriorVerticesPerCompartment;
+			Binding.MeshRange.InteriorTriangleStart = InteriorTriangleStart;
+			Binding.MeshRange.InteriorTriangleCount = InteriorTrianglesPerCompartment;
+			Binding.MeshRange.LocalCenter = FVector(MidX, 0.f, Placement.FloorOffsetCm + Placement.ClearanceHeightCm * 0.5f);
+			Binding.MeshRange.LocalNormal = Normal;
+			Binding.MeshRange.LocalBounds = FBox(CompartmentDef.HydroBoundsMin, CompartmentDef.HydroBoundsMax);
+			LayoutAsset->CompiledSheetBindings.Add(MoveTemp(Binding));
+		};
+
+		AddExteriorSheetAndBinding(
+			TEXT("Port"),
 			FVector(MidX, -RadiusCm, 0.f),
 			FVector(0.f, -1.f, 0.f),
 			FVector(1.f, 0.f, 0.f),
 			FVector(0.f, 0.f, 1.f),
-			SideSize);
+			SideSize,
+			ESheetSide::Port);
 
-		AddExteriorSheet(
-			LayoutAsset->StructuralSheets,
-			MakeExteriorSheetId(Placement.CompartmentId, TEXT("Starboard")),
-			Placement.CompartmentId,
+		AddExteriorSheetAndBinding(
+			TEXT("Starboard"),
 			FVector(MidX, RadiusCm, 0.f),
 			FVector(0.f, 1.f, 0.f),
 			FVector(1.f, 0.f, 0.f),
 			FVector(0.f, 0.f, 1.f),
-			SideSize);
+			SideSize,
+			ESheetSide::Starboard);
 
-		AddExteriorSheet(
-			LayoutAsset->StructuralSheets,
-			MakeExteriorSheetId(Placement.CompartmentId, TEXT("Top")),
-			Placement.CompartmentId,
+		AddExteriorSheetAndBinding(
+			TEXT("Top"),
 			FVector(MidX, 0.f, RadiusCm),
 			FVector(0.f, 0.f, 1.f),
 			FVector(1.f, 0.f, 0.f),
 			FVector(0.f, 1.f, 0.f),
-			CapSize);
+			CapSize,
+			ESheetSide::Top);
 
-		AddExteriorSheet(
-			LayoutAsset->StructuralSheets,
-			MakeExteriorSheetId(Placement.CompartmentId, TEXT("Bottom")),
-			Placement.CompartmentId,
+		AddExteriorSheetAndBinding(
+			TEXT("Bottom"),
 			FVector(MidX, 0.f, -RadiusCm),
 			FVector(0.f, 0.f, -1.f),
 			FVector(1.f, 0.f, 0.f),
 			FVector(0.f, 1.f, 0.f),
-			CapSize);
+			CapSize,
+			ESheetSide::Bottom);
 	}
 
 	for (const FBulkheadPlacement& Bulkhead : Solution.Bulkheads)
@@ -196,7 +308,34 @@ USubmarineLayoutAsset* USubmarineBuildCompiler::CompileToLayoutAsset(
 		BulkheadSheet.GridResolutionX = ComputeGridResolution(BulkheadSheet.SizeCm.X);
 		BulkheadSheet.GridResolutionY = ComputeGridResolution(BulkheadSheet.SizeCm.Y);
 		BulkheadSheet.bCanOpenToExterior = false;
+		BulkheadSheet.bSupportsVisualRupture = false;
+		BulkheadSheet.ExteriorVisualMaterialSlot = 0;
+		BulkheadSheet.VisualLocalOrigin = BulkheadSheet.LocalOrigin;
+		BulkheadSheet.VisualLocalTangentX = BulkheadSheet.LocalTangentX;
+		BulkheadSheet.VisualLocalTangentY = BulkheadSheet.LocalTangentY;
+		BulkheadSheet.VisualProjectionSizeCm = BulkheadSheet.SizeCm;
+		BulkheadSheet.MaxVisibleRuptureRadiusCm = 0.f;
+		BulkheadSheet.PreferredRuptureBorderScale = 1.f;
 		LayoutAsset->StructuralSheets.Add(BulkheadSheet);
+
+		FStructuralSheetCompiledBinding BulkheadBinding;
+		BulkheadBinding.SheetId = BulkheadSheetId;
+		BulkheadBinding.CompartmentIndex = INDEX_NONE;
+		BulkheadBinding.Side = ESheetSide::Bulkhead;
+		BulkheadBinding.ChartMin = FVector2D(0.f, 0.f);
+		BulkheadBinding.ChartMax = FVector2D(1.f, 1.f);
+		BulkheadBinding.MeshRange.SectionIndexStart = INDEX_NONE;
+		BulkheadBinding.MeshRange.SectionIndexEnd = INDEX_NONE;
+		BulkheadBinding.MeshRange.ExteriorVertexStart = INDEX_NONE;
+		BulkheadBinding.MeshRange.ExteriorTriangleStart = INDEX_NONE;
+		BulkheadBinding.MeshRange.InteriorVertexStart = INDEX_NONE;
+		BulkheadBinding.MeshRange.InteriorTriangleStart = INDEX_NONE;
+		BulkheadBinding.MeshRange.LocalCenter = BulkheadSheet.LocalOrigin;
+		BulkheadBinding.MeshRange.LocalNormal = BulkheadSheet.LocalNormal;
+		BulkheadBinding.MeshRange.LocalBounds = FBox::BuildAABB(
+			BulkheadSheet.LocalOrigin,
+			FVector(5.f, BulkheadSheet.SizeCm.X * 0.5f, BulkheadSheet.SizeCm.Y * 0.5f));
+		LayoutAsset->CompiledSheetBindings.Add(MoveTemp(BulkheadBinding));
 
 		if (Bulkhead.PassageType == EPassageType::SealedBulkhead)
 		{
@@ -225,6 +364,23 @@ USubmarineLayoutAsset* USubmarineBuildCompiler::CompileToLayoutAsset(
 		SlotDef.CompartmentId = Station.CompartmentId;
 		SlotDef.LocalTransform = Station.LocalTransform;
 		LayoutAsset->StationSlots.Add(SlotDef);
+	}
+
+	for (const FStructuralSheetCompiledBinding& Binding : LayoutAsset->CompiledSheetBindings)
+	{
+		const bool bExteriorRangeValid = (Binding.MeshRange.ExteriorVertexStart == INDEX_NONE && Binding.MeshRange.ExteriorVertexCount == 0)
+			|| (Binding.MeshRange.ExteriorVertexStart >= 0 && Binding.MeshRange.ExteriorVertexCount > 0);
+		const bool bInteriorRangeValid = (Binding.MeshRange.InteriorVertexStart == INDEX_NONE && Binding.MeshRange.InteriorVertexCount == 0)
+			|| (Binding.MeshRange.InteriorVertexStart >= 0 && Binding.MeshRange.InteriorVertexCount > 0);
+
+		if (!bExteriorRangeValid || !bInteriorRangeValid)
+		{
+			AddBuildCompilerValidationMessage(
+				OutMessages,
+				ELayoutValidationSeverity::Warning,
+				Binding.SheetId,
+				FString::Printf(TEXT("Binding invalide pour %s (ranges ext/int incoherents)"), *Binding.SheetId.ToString()));
+		}
 	}
 
 	return LayoutAsset;

@@ -3,6 +3,7 @@
 #include "CoreMinimal.h"
 #include "UObject/Object.h"
 #include "SubCompilerTypes.h"
+#include "ProceduralMeshComponent.h"
 #include "SubmarineGeometryBuilder.generated.h"
 
 class AActor;
@@ -26,6 +27,21 @@ struct FSubmarineMeshSectionData
 
 	UPROPERTY(BlueprintReadOnly, Category = "Geometry")
 	TArray<FVector2D> UVs;
+
+	UPROPERTY(BlueprintReadOnly, Category = "Geometry")
+	TArray<FProcMeshTangent> Tangents;
+
+	UPROPERTY(BlueprintReadOnly, Category = "Geometry")
+	int32 VertexStart = 0;
+
+	UPROPERTY(BlueprintReadOnly, Category = "Geometry")
+	int32 VertexCount = 0;
+
+	UPROPERTY(BlueprintReadOnly, Category = "Geometry")
+	int32 TriangleStart = 0;
+
+	UPROPERTY(BlueprintReadOnly, Category = "Geometry")
+	int32 TriangleCount = 0;
 };
 
 USTRUCT(BlueprintType)
@@ -65,6 +81,9 @@ struct FSubmarineBulkheadMeshData
 
 	UPROPERTY(BlueprintReadOnly, Category = "Geometry")
 	FSubmarineMeshSectionData PanelSection;
+
+	UPROPERTY(BlueprintReadOnly, Category = "Geometry")
+	EPassageType PassageType = EPassageType::WatertightDoor;
 };
 
 UCLASS(BlueprintType)
@@ -78,12 +97,16 @@ public:
 		const FSubmarineLayoutSolution& Solution,
 		TArray<FSubmarineInteriorCompartmentMeshData>& OutMeshData,
 		float SectionExponent = 2.f,
-		float WidthToHeightRatio = 1.f) const;
+		float WidthToHeightRatio = 1.f,
+		int32 InteriorArcSegments = 24,
+		float WallThicknessCm = 12.f) const;
 
 	UFUNCTION(BlueprintCallable, Category = "SubCompiler|Geometry")
 	bool GenerateBulkheadMeshData(
 		const FSubmarineLayoutSolution& Solution,
-		TArray<FSubmarineBulkheadMeshData>& OutMeshData) const;
+		TArray<FSubmarineBulkheadMeshData>& OutMeshData,
+		float SectionExponent = 2.f,
+		float WidthToHeightRatio = 1.f) const;
 
 	UFUNCTION(BlueprintCallable, Category = "SubCompiler|Geometry")
 	bool GenerateExteriorMeshData(
@@ -99,16 +122,19 @@ public:
 	TArray<UProceduralMeshComponent*> BuildInteriorMeshes(
 		const FSubmarineLayoutSolution& Solution,
 		AActor* ParentActor,
-		UMaterialInterface* MaterialOverride = nullptr,
+		UMaterialInterface* WallMaterialOverride = nullptr,
+		UMaterialInterface* FloorMaterialOverride = nullptr,
 		bool bEnableCollision = false,
 		float SectionExponent = 2.f,
-		float WidthToHeightRatio = 1.f) const;
+		float WidthToHeightRatio = 1.f,
+		int32 InteriorArcSegments = 24,
+		float WallThicknessCm = 12.f) const;
 
 	UFUNCTION(BlueprintCallable, Category = "SubCompiler|Geometry")
 	UProceduralMeshComponent* BuildExteriorMesh(
 		const FSubmarineLayoutSolution& Solution,
 		AActor* ParentActor,
-		UMaterialInterface* MaterialOverride = nullptr,
+		UMaterialInterface* ExteriorMaterialOverride = nullptr,
 		bool bEnableCollision = false,
 		int32 RadialSegments = 32,
 		int32 LongitudinalSubdivisionsPerSpan = 6,
@@ -123,10 +149,14 @@ private:
 		bool bGenerateSternCap,
 		float SectionExponent,
 		float WidthToHeightRatio,
+		int32 InteriorArcSegments,
+		float WallThicknessCm,
 		FSubmarineInteriorCompartmentMeshData& OutMeshData) const;
 
 	bool GenerateSingleBulkheadMeshData(
 		const FSubmarineLayoutSolution& Solution,
 		const FBulkheadPlacement& Bulkhead,
+		float SectionExponent,
+		float WidthToHeightRatio,
 		FSubmarineBulkheadMeshData& OutMeshData) const;
 };

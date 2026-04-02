@@ -6,6 +6,7 @@
 #include "SubmarineBuildCompiler.generated.h"
 
 class USubmarineLayoutAsset;
+class USubmarineEnvelopeDef;
 
 UCLASS()
 class SUB3D_API USubmarineBuildCompiler : public UObject
@@ -17,5 +18,6 @@ public:
 	USubmarineLayoutAsset* CompileToLayoutAsset(
 		const FSubmarineLayoutSolution& Solution,
 		UObject* Outer,
-		TArray<FLayoutValidationMessage>& OutMessages);
+		TArray<FLayoutValidationMessage>& OutMessages,
+		const USubmarineEnvelopeDef* EnvelopeDef = nullptr);
 };

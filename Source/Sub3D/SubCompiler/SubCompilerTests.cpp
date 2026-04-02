@@ -357,6 +357,220 @@ bool FSubCompilerBuildCompilerTest::RunTest(const FString& Parameters)
 }
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FSubCompilerBuildCompilerBindingsValidRangesTest,
+	"Sub3D.SubCompiler.BuildCompiler.CompiledSheetBindings_ValidRanges",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FSubCompilerBuildCompilerBindingsValidRangesTest::RunTest(const FString& Parameters)
+{
+	USubmarineEnvelopeDef* Envelope = FSubCompilerMvpFactory::CreateEnvelope(GetTransientPackage());
+	USubmarineFunctionalGraph* Graph = FSubCompilerMvpFactory::CreateFunctionalGraph(GetTransientPackage());
+	USubmarineLayoutSolver* Solver = NewObject<USubmarineLayoutSolver>();
+	USubmarineBuildCompiler* Compiler = NewObject<USubmarineBuildCompiler>();
+
+	if (!Envelope || !Graph || !Solver || !Compiler)
+	{
+		return false;
+	}
+
+	FSubmarineLayoutSolution Solution;
+	TArray<FLayoutValidationMessage> Messages;
+	TestTrue(TEXT("Solver should succeed before compile"), Solver->Solve(Envelope, Graph, Solution, Messages));
+
+	USubmarineLayoutAsset* LayoutAsset = Compiler->CompileToLayoutAsset(Solution, GetTransientPackage(), Messages, Envelope);
+	TestNotNull(TEXT("Compiled layout asset should exist"), LayoutAsset);
+	if (!LayoutAsset)
+	{
+		return false;
+	}
+
+	const int32 CompartmentCount = Solution.Compartments.Num();
+	const int32 ExteriorRadialSegments = FMath::Clamp(Envelope->ExteriorRadialSegments, 12, 64);
+	const int32 ExteriorLongitudinalSubdivisions = FMath::Clamp(Envelope->ExteriorLongitudinalSubdivisionsPerSpan, 1, 16);
+	const int32 InteriorArcSegments = FMath::Clamp(Envelope->InteriorArcSegments, 8, 48);
+	const int32 ExteriorTotalVertexCount = (CompartmentCount * ExteriorLongitudinalSubdivisions + 1) * ExteriorRadialSegments;
+	const int32 ExteriorTotalTriangleCount = CompartmentCount * ExteriorLongitudinalSubdivisions * ExteriorRadialSegments * 2;
+	const int32 InteriorTotalVertexCount = CompartmentCount * (InteriorArcSegments + 1) * 2;
+	const int32 InteriorTotalTriangleCount = CompartmentCount * InteriorArcSegments * 2;
+	const int32 MaxSectionIndexExclusive = CompartmentCount * ExteriorLongitudinalSubdivisions + 1;
+
+	for (const FStructuralSheetCompiledBinding& Binding : LayoutAsset->CompiledSheetBindings)
+	{
+		const FStructuralSheetDef* Sheet = LayoutAsset->StructuralSheets.FindByPredicate(
+			[&Binding](const FStructuralSheetDef& Candidate)
+			{
+				return Candidate.SheetId == Binding.SheetId;
+			});
+		TestNotNull(
+			FString::Printf(TEXT("Binding %s should map to a structural sheet"), *Binding.SheetId.ToString()),
+			Sheet);
+		if (!Sheet)
+		{
+			continue;
+		}
+
+		const bool bIsBulkhead = Binding.Side == ESheetSide::Bulkhead;
+		if (bIsBulkhead)
+		{
+			TestEqual(
+				FString::Printf(TEXT("Bulkhead binding %s should not expose exterior vertex range"), *Binding.SheetId.ToString()),
+				Binding.MeshRange.ExteriorVertexStart,
+				INDEX_NONE);
+			TestEqual(
+				FString::Printf(TEXT("Bulkhead binding %s should not expose interior vertex range"), *Binding.SheetId.ToString()),
+				Binding.MeshRange.InteriorVertexStart,
+				INDEX_NONE);
+			continue;
+		}
+
+		TestTrue(
+			FString::Printf(TEXT("Binding %s section start should be valid"), *Binding.SheetId.ToString()),
+			Binding.MeshRange.SectionIndexStart >= 0);
+		TestTrue(
+			FString::Printf(TEXT("Binding %s section end should be > start"), *Binding.SheetId.ToString()),
+			Binding.MeshRange.SectionIndexEnd > Binding.MeshRange.SectionIndexStart);
+		TestTrue(
+			FString::Printf(TEXT("Binding %s section end should stay inside ring stack"), *Binding.SheetId.ToString()),
+			Binding.MeshRange.SectionIndexEnd <= MaxSectionIndexExclusive);
+
+		TestTrue(
+			FString::Printf(TEXT("Binding %s exterior vertex start should be valid"), *Binding.SheetId.ToString()),
+			Binding.MeshRange.ExteriorVertexStart >= 0);
+		TestTrue(
+			FString::Printf(TEXT("Binding %s exterior vertex count should be > 0"), *Binding.SheetId.ToString()),
+			Binding.MeshRange.ExteriorVertexCount > 0);
+		TestTrue(
+			FString::Printf(TEXT("Binding %s exterior triangles should be valid"), *Binding.SheetId.ToString()),
+			Binding.MeshRange.ExteriorTriangleStart >= 0 && Binding.MeshRange.ExteriorTriangleCount > 0);
+		TestTrue(
+			FString::Printf(TEXT("Binding %s exterior vertex range should stay in buffer"), *Binding.SheetId.ToString()),
+			Binding.MeshRange.ExteriorVertexStart + Binding.MeshRange.ExteriorVertexCount <= ExteriorTotalVertexCount);
+		TestTrue(
+			FString::Printf(TEXT("Binding %s exterior triangle range should stay in buffer"), *Binding.SheetId.ToString()),
+			Binding.MeshRange.ExteriorTriangleStart + Binding.MeshRange.ExteriorTriangleCount <= ExteriorTotalTriangleCount);
+
+		TestTrue(
+			FString::Printf(TEXT("Binding %s interior vertex start should be valid"), *Binding.SheetId.ToString()),
+			Binding.MeshRange.InteriorVertexStart >= 0);
+		TestTrue(
+			FString::Printf(TEXT("Binding %s interior vertex count should be > 0"), *Binding.SheetId.ToString()),
+			Binding.MeshRange.InteriorVertexCount > 0);
+		TestTrue(
+			FString::Printf(TEXT("Binding %s interior triangles should be valid"), *Binding.SheetId.ToString()),
+			Binding.MeshRange.InteriorTriangleStart >= 0 && Binding.MeshRange.InteriorTriangleCount > 0);
+		TestTrue(
+			FString::Printf(TEXT("Binding %s interior vertex range should stay in buffer"), *Binding.SheetId.ToString()),
+			Binding.MeshRange.InteriorVertexStart + Binding.MeshRange.InteriorVertexCount <= InteriorTotalVertexCount);
+		TestTrue(
+			FString::Printf(TEXT("Binding %s interior triangle range should stay in buffer"), *Binding.SheetId.ToString()),
+			Binding.MeshRange.InteriorTriangleStart + Binding.MeshRange.InteriorTriangleCount <= InteriorTotalTriangleCount);
+
+		TestTrue(
+			FString::Printf(TEXT("Binding %s chart min/max X should be valid"), *Binding.SheetId.ToString()),
+			Binding.ChartMin.X >= 0.f && Binding.ChartMax.X <= 1.f && Binding.ChartMax.X > Binding.ChartMin.X);
+		TestTrue(
+			FString::Printf(TEXT("Binding %s chart min/max Y should be valid"), *Binding.SheetId.ToString()),
+			Binding.ChartMin.Y >= 0.f && Binding.ChartMax.Y <= 1.f && Binding.ChartMax.Y > Binding.ChartMin.Y);
+	}
+
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FSubCompilerBuildCompilerBindingsDeterministicTest,
+	"Sub3D.SubCompiler.BuildCompiler.CompiledSheetBindings_Deterministic",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FSubCompilerBuildCompilerBindingsDeterministicTest::RunTest(const FString& Parameters)
+{
+	USubmarineEnvelopeDef* Envelope = FSubCompilerMvpFactory::CreateEnvelope(GetTransientPackage());
+	USubmarineFunctionalGraph* Graph = FSubCompilerMvpFactory::CreateFunctionalGraph(GetTransientPackage());
+	USubmarineLayoutSolver* Solver = NewObject<USubmarineLayoutSolver>();
+	USubmarineBuildCompiler* Compiler = NewObject<USubmarineBuildCompiler>();
+
+	if (!Envelope || !Graph || !Solver || !Compiler)
+	{
+		return false;
+	}
+
+	FSubmarineLayoutSolution Solution;
+	TArray<FLayoutValidationMessage> Messages;
+	TestTrue(TEXT("Solver should succeed before deterministic compile check"), Solver->Solve(Envelope, Graph, Solution, Messages));
+
+	USubmarineLayoutAsset* LayoutA = Compiler->CompileToLayoutAsset(Solution, GetTransientPackage(), Messages, Envelope);
+	USubmarineLayoutAsset* LayoutB = Compiler->CompileToLayoutAsset(Solution, GetTransientPackage(), Messages, Envelope);
+	TestNotNull(TEXT("First compiled layout should exist"), LayoutA);
+	TestNotNull(TEXT("Second compiled layout should exist"), LayoutB);
+	if (!LayoutA || !LayoutB)
+	{
+		return false;
+	}
+
+	TestEqual(
+		TEXT("Compiled binding count should be deterministic"),
+		LayoutA->CompiledSheetBindings.Num(),
+		LayoutB->CompiledSheetBindings.Num());
+
+	for (const FStructuralSheetCompiledBinding& BindingA : LayoutA->CompiledSheetBindings)
+	{
+		const FStructuralSheetCompiledBinding* BindingB = LayoutB->CompiledSheetBindings.FindByPredicate(
+			[&BindingA](const FStructuralSheetCompiledBinding& Candidate)
+			{
+				return Candidate.SheetId == BindingA.SheetId;
+			});
+
+		TestNotNull(
+			FString::Printf(TEXT("Binding %s should exist in second compile"), *BindingA.SheetId.ToString()),
+			BindingB);
+		if (!BindingB)
+		{
+			continue;
+		}
+
+		TestEqual(
+			FString::Printf(TEXT("Binding %s side should be deterministic"), *BindingA.SheetId.ToString()),
+			BindingA.Side,
+			BindingB->Side);
+		TestEqual(
+			FString::Printf(TEXT("Binding %s compartment index should be deterministic"), *BindingA.SheetId.ToString()),
+			BindingA.CompartmentIndex,
+			BindingB->CompartmentIndex);
+		TestEqual(
+			FString::Printf(TEXT("Binding %s section start should be deterministic"), *BindingA.SheetId.ToString()),
+			BindingA.MeshRange.SectionIndexStart,
+			BindingB->MeshRange.SectionIndexStart);
+		TestEqual(
+			FString::Printf(TEXT("Binding %s section end should be deterministic"), *BindingA.SheetId.ToString()),
+			BindingA.MeshRange.SectionIndexEnd,
+			BindingB->MeshRange.SectionIndexEnd);
+		TestEqual(
+			FString::Printf(TEXT("Binding %s exterior vertex start should be deterministic"), *BindingA.SheetId.ToString()),
+			BindingA.MeshRange.ExteriorVertexStart,
+			BindingB->MeshRange.ExteriorVertexStart);
+		TestEqual(
+			FString::Printf(TEXT("Binding %s exterior triangle start should be deterministic"), *BindingA.SheetId.ToString()),
+			BindingA.MeshRange.ExteriorTriangleStart,
+			BindingB->MeshRange.ExteriorTriangleStart);
+		TestEqual(
+			FString::Printf(TEXT("Binding %s interior vertex start should be deterministic"), *BindingA.SheetId.ToString()),
+			BindingA.MeshRange.InteriorVertexStart,
+			BindingB->MeshRange.InteriorVertexStart);
+		TestEqual(
+			FString::Printf(TEXT("Binding %s interior triangle start should be deterministic"), *BindingA.SheetId.ToString()),
+			BindingA.MeshRange.InteriorTriangleStart,
+			BindingB->MeshRange.InteriorTriangleStart);
+		TestTrue(
+			FString::Printf(TEXT("Binding %s chart min should be deterministic"), *BindingA.SheetId.ToString()),
+			BindingA.ChartMin.Equals(BindingB->ChartMin, KINDA_SMALL_NUMBER));
+		TestTrue(
+			FString::Printf(TEXT("Binding %s chart max should be deterministic"), *BindingA.SheetId.ToString()),
+			BindingA.ChartMax.Equals(BindingB->ChartMax, KINDA_SMALL_NUMBER));
+	}
+
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 	FSubCompilerGeometryBuilderInteriorTest,
 	"Sub3D.SubCompiler.GeometryBuilder.Interior",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
@@ -412,7 +626,7 @@ bool FSubCompilerGeometryBuilderInteriorTest::RunTest(const FString& Parameters)
 		TestEqual(
 			FString::Printf(TEXT("Floor should have 4 triangles for %s"), *MeshData.CompartmentId.ToString()),
 			MeshData.FloorSection.Triangles.Num(),
-			12);
+			6);
 
 		const bool bIsFirstCompartment = MeshIndex == 0;
 		const bool bIsLastCompartment = MeshIndex == MeshDataSet.Num() - 1;
@@ -596,7 +810,9 @@ bool FSubCompilerSuperellipseExponent2MatchesCircleTest::RunTest(const FString& 
 	TestTrue(TEXT("Solve should succeed"), Solver->Solve(Envelope, Graph, Solution, Messages));
 
 	TArray<FSubmarineInteriorCompartmentMeshData> MeshData_N2;
-	TestTrue(TEXT("Interior generation should succeed with n=2"), Builder->GenerateInteriorMeshData(Solution, MeshData_N2, 2.f, 1.f));
+	TestTrue(
+		TEXT("Interior generation should succeed with n=2"),
+		Builder->GenerateInteriorMeshData(Solution, MeshData_N2, 2.f, 1.f, 24, Envelope->WallThicknessCm));
 
 	// With n=2, WHR=1, every wall vertex should satisfy Y^2 + Z^2 ≈ R^2 (circle)
 	for (const FSubmarineInteriorCompartmentMeshData& Compartment : MeshData_N2)
@@ -607,14 +823,14 @@ bool FSubCompilerSuperellipseExponent2MatchesCircleTest::RunTest(const FString& 
 		{
 			continue;
 		}
-		const float R = Placement->EffectiveRadiusCm;
+		const float InnerR = FMath::Max(10.f, Placement->EffectiveRadiusCm - Envelope->WallThicknessCm);
 		for (const FVector& V : Compartment.WallSection.Vertices)
 		{
 			const float DistFromCenter = FMath::Sqrt(V.Y * V.Y + V.Z * V.Z);
 			TestTrue(
-				FString::Printf(TEXT("n=2 wall vertex should be on circle (R=%.1f, dist=%.1f) for %s"),
-					R, DistFromCenter, *Compartment.CompartmentId.ToString()),
-				FMath::IsNearlyEqual(DistFromCenter, R, 1.f));
+				FString::Printf(TEXT("n=2 wall vertex should be on inset circle (R=%.1f, dist=%.1f) for %s"),
+					InnerR, DistFromCenter, *Compartment.CompartmentId.ToString()),
+				FMath::IsNearlyEqual(DistFromCenter, InnerR, 1.f));
 		}
 	}
 

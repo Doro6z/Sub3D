@@ -335,12 +335,13 @@ bool USubmarineLayoutSolver::Solve(
 			: 0.f;
 
 		const float EffectiveRadius = Envelope->EvaluateRadius(NormalizedPos);
+		const float InternalRadius = FMath::Max(10.f, EffectiveRadius - Envelope->WallThicknessCm);
 		const float RequestedFloorOffset = -FMath::Max(0.f, Envelope->FloorDropBiasCm);
-		const float LowestAllowedFloorOffset = -EffectiveRadius;
-		const float HighestAllowedFloorOffset = FMath::Max(LowestAllowedFloorOffset, EffectiveRadius - Compartment.MinHeightCm);
+		const float LowestAllowedFloorOffset = -InternalRadius;
+		const float HighestAllowedFloorOffset = FMath::Max(LowestAllowedFloorOffset, InternalRadius - Compartment.MinHeightCm);
 		const float FloorOffset = FMath::Clamp(RequestedFloorOffset, LowestAllowedFloorOffset, HighestAllowedFloorOffset);
-		const float ClearanceHeight = EffectiveRadius - FloorOffset;
-		const float FloorHalfWidth = FMath::Sqrt(FMath::Max(0.f, FMath::Square(EffectiveRadius) - FMath::Square(FloorOffset)));
+		const float ClearanceHeight = InternalRadius - FloorOffset;
+		const float FloorHalfWidth = Envelope->EvaluateSectionHalfWidth(InternalRadius, FloorOffset);
 		const float FloorWidth = FloorHalfWidth * 2.f;
 
 		if (FloorWidth < Compartment.MinWidthCm)
