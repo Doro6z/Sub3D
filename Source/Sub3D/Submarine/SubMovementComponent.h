@@ -39,10 +39,10 @@ public:
 	float NeutralBuoyancyMassBiasKg = 0.f;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physics")
-	FVector DragCoefficients = FVector(0.045f, 0.32f, 0.30f);
+	FVector DragCoefficients = FVector(0.18f, 1.2f, 1.1f);
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physics")
-	FVector CrossSections = FVector(1.5f, 7.f, 7.f);
+	FVector CrossSections = FVector(2.f, 20.f, 20.f);
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physics")
 	float MaxThrust = 25000.f;
@@ -57,13 +57,10 @@ public:
 	float MaxVerticalSpeed = 180.f;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physics")
-	float IdleForwardSpeedDamping = 0.22f;
+	float IdleForwardSpeedDamping = 0.7f;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physics")
-	float IdleDampingSpeedThreshold = 120.f;
-
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physics")
-	float LateralSpeedDamping = 1.35f;
+	float LateralSpeedDamping = 4.f;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physics")
 	float ContactVelocityDamping = 8.f;
@@ -124,9 +121,6 @@ public:
 
 	UPROPERTY(EditAnywhere, Category = "Submarine|Debug")
 	bool bDebugLogSubMovement = false;
-
-	UPROPERTY(EditAnywhere, Category = "Submarine|Debug")
-	bool bDebugLogCollisionSweeps = false;
 
 	FOnSubmarineSnapped OnSubmarineSnapped;
 

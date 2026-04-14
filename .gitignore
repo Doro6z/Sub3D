@@ -19,3 +19,15 @@ Saved/
 *.xccheckout
 *.xcscmblueprint
 Content/GeneratedRoutes/
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Blender
+*.blend1
+*.blend2
+*.blend3
+*.blend4
+*.blend5

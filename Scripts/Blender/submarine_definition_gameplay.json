@@ -1,0 +1,374 @@
+{
+  "submarine_name": "FP_Blockout_Gameplay",
+  "hull_radius": 280.0,
+  "spine_length": 5400.0,
+  "wall_thickness": 14.0,
+  "compartments": [
+    {
+      "id": "Torpedo_Upper",
+      "semantic_type": "Crew",
+      "deck": "upper",
+      "hydro_bounds_min": [
+        1188.0,
+        -265.9981202941103,
+        1.0
+      ],
+      "hydro_bounds_max": [
+        1728.0,
+        265.9981202941103,
+        266.0
+      ],
+      "walkable_floor_z": 1.0,
+      "capacity_liters": 12000.0
+    },
+    {
+      "id": "Torpedo_Lower",
+      "semantic_type": "Crew",
+      "deck": "lower",
+      "hydro_bounds_min": [
+        1188.0,
+        -167.05388352265265,
+        -266.0
+      ],
+      "hydro_bounds_max": [
+        1728.0,
+        167.05388352265265,
+        -21.0
+      ],
+      "walkable_floor_z": -207.0,
+      "capacity_liters": 12000.0
+    },
+    {
+      "id": "Helm_Upper",
+      "semantic_type": "Helm",
+      "deck": "upper",
+      "hydro_bounds_min": [
+        1728.0,
+        -265.9981202941103,
+        1.0
+      ],
+      "hydro_bounds_max": [
+        2268.0,
+        265.9981202941103,
+        266.0
+      ],
+      "walkable_floor_z": 1.0,
+      "capacity_liters": 12000.0
+    },
+    {
+      "id": "Helm_Lower",
+      "semantic_type": "Helm",
+      "deck": "lower",
+      "hydro_bounds_min": [
+        1728.0,
+        -167.05388352265265,
+        -266.0
+      ],
+      "hydro_bounds_max": [
+        2268.0,
+        167.05388352265265,
+        -21.0
+      ],
+      "walkable_floor_z": -207.0,
+      "capacity_liters": 12000.0
+    },
+    {
+      "id": "Crew_Upper",
+      "semantic_type": "Crew",
+      "deck": "upper",
+      "hydro_bounds_min": [
+        2268.0,
+        -265.9981202941103,
+        1.0
+      ],
+      "hydro_bounds_max": [
+        2808.0,
+        265.9981202941103,
+        266.0
+      ],
+      "walkable_floor_z": 1.0,
+      "capacity_liters": 12000.0
+    },
+    {
+      "id": "Crew_Lower",
+      "semantic_type": "Crew",
+      "deck": "lower",
+      "hydro_bounds_min": [
+        2268.0,
+        -167.05388352265265,
+        -266.0
+      ],
+      "hydro_bounds_max": [
+        2808.0,
+        167.05388352265265,
+        -21.0
+      ],
+      "walkable_floor_z": -207.0,
+      "capacity_liters": 12000.0
+    },
+    {
+      "id": "Crew2_Upper",
+      "semantic_type": "Crew",
+      "deck": "upper",
+      "hydro_bounds_min": [
+        2808.0,
+        -265.9981202941103,
+        1.0
+      ],
+      "hydro_bounds_max": [
+        3348.0,
+        265.9981202941103,
+        266.0
+      ],
+      "walkable_floor_z": 1.0,
+      "capacity_liters": 12000.0
+    },
+    {
+      "id": "Crew2_Lower",
+      "semantic_type": "Crew",
+      "deck": "lower",
+      "hydro_bounds_min": [
+        2808.0,
+        -167.05388352265265,
+        -266.0
+      ],
+      "hydro_bounds_max": [
+        3348.0,
+        167.05388352265265,
+        -21.0
+      ],
+      "walkable_floor_z": -207.0,
+      "capacity_liters": 12000.0
+    },
+    {
+      "id": "Aux_Upper",
+      "semantic_type": "Crew",
+      "deck": "upper",
+      "hydro_bounds_min": [
+        3348.0,
+        -265.9981202941103,
+        1.0
+      ],
+      "hydro_bounds_max": [
+        3888.0,
+        265.9981202941103,
+        266.0
+      ],
+      "walkable_floor_z": 1.0,
+      "capacity_liters": 12000.0
+    },
+    {
+      "id": "Aux_Lower",
+      "semantic_type": "Crew",
+      "deck": "lower",
+      "hydro_bounds_min": [
+        3348.0,
+        -167.05388352265265,
+        -266.0
+      ],
+      "hydro_bounds_max": [
+        3888.0,
+        167.05388352265265,
+        -21.0
+      ],
+      "walkable_floor_z": -207.0,
+      "capacity_liters": 12000.0
+    },
+    {
+      "id": "Engine_Upper",
+      "semantic_type": "Engine",
+      "deck": "upper",
+      "hydro_bounds_min": [
+        3888.0,
+        -265.9981202941103,
+        1.0
+      ],
+      "hydro_bounds_max": [
+        4428.0,
+        265.9981202941103,
+        266.0
+      ],
+      "walkable_floor_z": 1.0,
+      "capacity_liters": 12000.0
+    },
+    {
+      "id": "Engine_Lower",
+      "semantic_type": "Engine",
+      "deck": "lower",
+      "hydro_bounds_min": [
+        3888.0,
+        -167.05388352265265,
+        -266.0
+      ],
+      "hydro_bounds_max": [
+        4428.0,
+        167.05388352265265,
+        -21.0
+      ],
+      "walkable_floor_z": -207.0,
+      "capacity_liters": 12000.0
+    }
+  ],
+  "connections": [
+    {
+      "id": "BH0_Upper",
+      "compartment_a": "Torpedo_Upper",
+      "compartment_b": "Helm_Upper",
+      "type": "Door",
+      "door_width": 90.0,
+      "door_height": 180.0,
+      "position_x": 1728.0,
+      "starts_closed": true
+    },
+    {
+      "id": "BH0_Lower",
+      "compartment_a": "Torpedo_Lower",
+      "compartment_b": "Helm_Lower",
+      "type": "Door",
+      "door_width": 80.0,
+      "door_height": 160.0,
+      "position_x": 1728.0,
+      "starts_closed": true
+    },
+    {
+      "id": "BH1_Upper",
+      "compartment_a": "Helm_Upper",
+      "compartment_b": "Crew_Upper",
+      "type": "Door",
+      "door_width": 90.0,
+      "door_height": 180.0,
+      "position_x": 2268.0,
+      "starts_closed": true
+    },
+    {
+      "id": "BH1_Lower",
+      "compartment_a": "Helm_Lower",
+      "compartment_b": "Crew_Lower",
+      "type": "Door",
+      "door_width": 80.0,
+      "door_height": 160.0,
+      "position_x": 2268.0,
+      "starts_closed": true
+    },
+    {
+      "id": "BH2_Upper",
+      "compartment_a": "Crew_Upper",
+      "compartment_b": "Crew2_Upper",
+      "type": "Door",
+      "door_width": 90.0,
+      "door_height": 180.0,
+      "position_x": 2808.0,
+      "starts_closed": true
+    },
+    {
+      "id": "BH2_Lower",
+      "compartment_a": "Crew_Lower",
+      "compartment_b": "Crew2_Lower",
+      "type": "Door",
+      "door_width": 80.0,
+      "door_height": 160.0,
+      "position_x": 2808.0,
+      "starts_closed": true
+    },
+    {
+      "id": "BH3_Upper",
+      "compartment_a": "Crew2_Upper",
+      "compartment_b": "Aux_Upper",
+      "type": "Door",
+      "door_width": 90.0,
+      "door_height": 180.0,
+      "position_x": 3348.0,
+      "starts_closed": true
+    },
+    {
+      "id": "BH3_Lower",
+      "compartment_a": "Crew2_Lower",
+      "compartment_b": "Aux_Lower",
+      "type": "Door",
+      "door_width": 80.0,
+      "door_height": 160.0,
+      "position_x": 3348.0,
+      "starts_closed": true
+    },
+    {
+      "id": "BH4_Upper",
+      "compartment_a": "Aux_Upper",
+      "compartment_b": "Engine_Upper",
+      "type": "Door",
+      "door_width": 90.0,
+      "door_height": 180.0,
+      "position_x": 3888.0,
+      "starts_closed": true
+    },
+    {
+      "id": "BH4_Lower",
+      "compartment_a": "Aux_Lower",
+      "compartment_b": "Engine_Lower",
+      "type": "Door",
+      "door_width": 80.0,
+      "door_height": 160.0,
+      "position_x": 3888.0,
+      "starts_closed": true
+    },
+    {
+      "id": "Hatch_Torpedo",
+      "compartment_a": "Torpedo_Upper",
+      "compartment_b": "Torpedo_Lower",
+      "type": "Hatch",
+      "door_width": 80.0,
+      "door_height": 80.0,
+      "position_x": 1458.0,
+      "starts_closed": false
+    },
+    {
+      "id": "Hatch_Helm",
+      "compartment_a": "Helm_Upper",
+      "compartment_b": "Helm_Lower",
+      "type": "Hatch",
+      "door_width": 80.0,
+      "door_height": 80.0,
+      "position_x": 1998.0,
+      "starts_closed": false
+    },
+    {
+      "id": "Hatch_Crew",
+      "compartment_a": "Crew_Upper",
+      "compartment_b": "Crew_Lower",
+      "type": "Hatch",
+      "door_width": 80.0,
+      "door_height": 80.0,
+      "position_x": 2538.0,
+      "starts_closed": false
+    },
+    {
+      "id": "Hatch_Crew2",
+      "compartment_a": "Crew2_Upper",
+      "compartment_b": "Crew2_Lower",
+      "type": "Hatch",
+      "door_width": 80.0,
+      "door_height": 80.0,
+      "position_x": 3078.0,
+      "starts_closed": false
+    },
+    {
+      "id": "Hatch_Aux",
+      "compartment_a": "Aux_Upper",
+      "compartment_b": "Aux_Lower",
+      "type": "Hatch",
+      "door_width": 80.0,
+      "door_height": 80.0,
+      "position_x": 3618.0,
+      "starts_closed": false
+    },
+    {
+      "id": "Hatch_Engine",
+      "compartment_a": "Engine_Upper",
+      "compartment_b": "Engine_Lower",
+      "type": "Hatch",
+      "door_width": 80.0,
+      "door_height": 80.0,
+      "position_x": 4158.0,
+      "starts_closed": false
+    }
+  ]
+}

@@ -1,0 +1,109 @@
+import sys
+try:
+    import bpy
+except ImportError:
+    print("Script annulé : Doit être exécuté DANS Blender.")
+    sys.exit(0)
+import math
+
+def reset_scene():
+    # Nettoie la scène de tous les objets initiaux (cube, lampe, camera...)
+    bpy.ops.object.select_all(action='SELECT')
+    bpy.ops.object.delete(use_global=False)
+    
+    # Ajoute un lighting plat basique
+    bpy.ops.object.light_add(type='SUN', location=(5, -5, 5))
+    bpy.context.active_object.data.energy = 2.0
+
+def create_block(name, loc, dims):
+    """
+    Crée un cube aux coordonnées et dimensions spécifiées
+    """
+    bpy.ops.mesh.primitive_cube_add(size=1, location=loc)
+    obj = bpy.context.active_object
+    obj.name = name
+    # On applique les dimensions (X, Y, Z)
+    obj.scale = dims
+    # On applique les transformations pour que l'échelle revienne à 1,1,1
+    bpy.ops.object.transform_apply(location=False, rotation=False, scale=True)
+    return obj
+
+def generate_base_mesh():
+    reset_scene()
+    
+    parts = []
+    
+    # --- DIMENSIONS & POSITIONS (Aspect fin / low poly) ---
+    # Z = Hauteur. La base des pieds est à ~0. Le perso fera ~2 mètres.
+    
+    # Tronc central
+    parts.append(create_block("Pelvis",   (0, 0, 0.95), (0.35, 0.20, 0.20)))
+    parts.append(create_block("Torso",    (0, 0, 1.35), (0.42, 0.24, 0.60)))
+    parts.append(create_block("Neck",     (0, 0, 1.70), (0.10, 0.10, 0.12)))
+    parts.append(create_block("Head",     (0, 0, 1.85), (0.24, 0.26, 0.28)))
+    
+    # Bras gauche (A-pose pour le rigging)
+    parts.append(create_block("L_Shoulder", (0.28, 0, 1.55), (0.15, 0.18, 0.20)))
+    parts.append(create_block("L_ArmUpper", (0.34, 0, 1.25), (0.13, 0.14, 0.45)))
+    parts.append(create_block("L_ArmLower", (0.34, 0, 0.80), (0.11, 0.12, 0.45)))
+    parts.append(create_block("L_Hand",     (0.34, 0, 0.52), (0.08, 0.14, 0.15)))
+
+    # Bras droit
+    parts.append(create_block("R_Shoulder", (-0.28, 0, 1.55), (0.15, 0.18, 0.20)))
+    parts.append(create_block("R_ArmUpper", (-0.34, 0, 1.25), (0.13, 0.14, 0.45)))
+    parts.append(create_block("R_ArmLower", (-0.34, 0, 0.80), (0.11, 0.12, 0.45)))
+    parts.append(create_block("R_Hand",     (-0.34, 0, 0.52), (0.08, 0.14, 0.15)))
+
+    # Jambe gauche
+    parts.append(create_block("L_Thigh",  (0.12, 0, 0.65), (0.16, 0.18, 0.40)))
+    parts.append(create_block("L_Calf",   (0.12, 0, 0.25), (0.14, 0.16, 0.40)))
+    parts.append(create_block("L_Foot",   (0.12, -0.04, 0.00), (0.14, 0.24, 0.10)))
+
+    # Jambe droite
+    parts.append(create_block("R_Thigh",  (-0.12, 0, 0.65), (0.16, 0.18, 0.40)))
+    parts.append(create_block("R_Calf",   (-0.12, 0, 0.25), (0.14, 0.16, 0.40)))
+    parts.append(create_block("R_Foot",   (-0.12, -0.04, 0.00), (0.14, 0.24, 0.10)))
+
+    # --- FUSION DES BLOCS ---
+    # On sélectionne toutes les parties créées
+    bpy.ops.object.select_all(action='DESELECT')
+    for p in parts:
+        p.select_set(True)
+    
+    # On active le premier élément de la liste
+    bpy.context.view_layer.objects.active = parts[0]
+    
+    # Jointure de tous les blocs (Ctrl+J dans Blender)
+    bpy.ops.object.join()
+    final_mesh = bpy.context.active_object
+    final_mesh.name = "SubCrew_VoxelBase"
+    
+    # --- MODIFICATEUR VOXEL REMESH ---
+    # Cette étape est primordiale pour combiner la silhouette en un seul mesh solidifié (boolean union instantané)
+    # et donner cet aspect 60% Voxel 40% Low Poly.
+    remesh_mod = final_mesh.modifiers.new(name="VoxelRemesh", type='REMESH')
+    remesh_mod.mode = 'VOXEL'
+    remesh_mod.voxel_size = 0.035  # Modifiez cette valeur pour ajuster la résolution du bloc
+    remesh_mod.use_smooth_shade = False
+    
+    # Application du modificateur
+    bpy.ops.object.modifier_apply(modifier="VoxelRemesh")
+    
+    # --- MATERIAU ---
+    mat = bpy.data.materials.new(name="Base_Mat_Grey")
+    mat.use_nodes = True
+    bsdf = mat.node_tree.nodes.get("Principled BSDF")
+    if bsdf:
+        bsdf.inputs['Base Color'].default_value = (0.5, 0.5, 0.5, 1)
+        bsdf.inputs['Roughness'].default_value = 0.7  # Visuel mat, style plâtre
+        
+    final_mesh.data.materials.append(mat)
+    
+    # Recentrer l'origine
+    bpy.ops.object.origin_set(type='ORIGIN_CENTER_OF_MASS', center='BOUNDS')
+    
+    print("Mannequin d'équipage généré avec succès!")
+
+# Exécution du script
+if __name__ == "__main__":
+    generate_base_mesh()

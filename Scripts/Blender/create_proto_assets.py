@@ -13,7 +13,7 @@ def create_blueprint_asset(asset_name, package_path, parent_class):
     else:
         unreal.log_error(f"Failed to create Blueprint: {asset_name}")
         return None
-
+\
 def create_widget_blueprint_asset(asset_name, package_path, parent_class):
     # For Widget Blueprints, we use the WidgetBlueprintFactory
     factory = unreal.WidgetBlueprintFactory()
