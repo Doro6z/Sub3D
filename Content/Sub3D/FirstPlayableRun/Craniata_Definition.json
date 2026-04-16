@@ -1,0 +1,1272 @@
+{
+  "airlock": {
+    "chamber_compartment_id": "C_upper_Airlock",
+    "exterior_connection_id": "N_upper_UpperAirlock_Exit__to_EXT",
+    "inner_connection_id": "N_upper_UpperAirlock_Inner",
+    "outer_connection_id": "N_upper_UpperAirlock_Exit"
+  },
+  "bulkheads": [
+    {
+      "deck": "main",
+      "door_h": 200.0,
+      "door_w": 100.0,
+      "name": "Fwd",
+      "x_norm": 0.224
+    },
+    {
+      "deck": "main",
+      "door_h": 200.0,
+      "door_w": 100.0,
+      "name": "Control",
+      "x_norm": 0.628
+    },
+    {
+      "deck": "lower",
+      "door_h": 200.0,
+      "door_w": 100.0,
+      "name": "BallastFwd",
+      "x_norm": 0.335
+    },
+    {
+      "deck": "lower",
+      "door_h": 200.0,
+      "door_w": 100.0,
+      "name": "BallastAft",
+      "x_norm": 0.515
+    },
+    {
+      "deck": "upper",
+      "door_h": 200.0,
+      "door_w": 100.0,
+      "name": "UpperAirlock_Inner",
+      "x_norm": 0.6416190476190475
+    },
+    {
+      "deck": "upper",
+      "door_h": 200.0,
+      "door_w": 100.0,
+      "name": "UpperAirlock_Exit",
+      "x_norm": 0.694
+    }
+  ],
+  "compartments": [
+    {
+      "deck": "main",
+      "deck_z_cm": -20.0,
+      "id": "C_main_Bow",
+      "length_cm": 604.8000000000001,
+      "max_x_cm": 940.8000000000001,
+      "min_x_cm": 336.0,
+      "semantic": "Bow",
+      "x_norm_max": 0.224,
+      "x_norm_min": 0.08
+    },
+    {
+      "deck": "main",
+      "deck_z_cm": -20.0,
+      "id": "C_main_Fwd",
+      "length_cm": 1696.8000000000002,
+      "max_x_cm": 2637.6,
+      "min_x_cm": 940.8000000000001,
+      "semantic": "Fwd",
+      "x_norm_max": 0.628,
+      "x_norm_min": 0.224
+    },
+    {
+      "deck": "main",
+      "deck_z_cm": -20.0,
+      "id": "C_main_Aft",
+      "length_cm": 1226.4,
+      "max_x_cm": 3864.0,
+      "min_x_cm": 2637.6,
+      "semantic": "Aft",
+      "x_norm_max": 0.92,
+      "x_norm_min": 0.628
+    },
+    {
+      "deck": "upper",
+      "deck_z_cm": 130.0,
+      "id": "C_upper_UpperFwd",
+      "length_cm": 2190.7999999999997,
+      "max_x_cm": 2694.7999999999997,
+      "min_x_cm": 504.0,
+      "semantic": "UpperFwd",
+      "x_norm_max": 0.6416190476190475,
+      "x_norm_min": 0.12
+    },
+    {
+      "deck": "upper",
+      "deck_z_cm": 130.0,
+      "id": "C_upper_Airlock",
+      "length_cm": 220.00000000000014,
+      "max_x_cm": 2914.7999999999997,
+      "min_x_cm": 2694.7999999999997,
+      "semantic": "Airlock",
+      "x_norm_max": 0.694,
+      "x_norm_min": 0.6416190476190475
+    },
+    {
+      "deck": "upper",
+      "deck_z_cm": 130.0,
+      "id": "C_upper_UpperAft",
+      "length_cm": 361.20000000000033,
+      "max_x_cm": 3276.0,
+      "min_x_cm": 2914.7999999999997,
+      "semantic": "UpperAft",
+      "x_norm_max": 0.78,
+      "x_norm_min": 0.694
+    },
+    {
+      "deck": "lower",
+      "deck_z_cm": -240.0,
+      "id": "C_lower_BallastFwd",
+      "length_cm": 777.0000000000001,
+      "max_x_cm": 1407.0,
+      "min_x_cm": 630.0,
+      "semantic": "BallastFwd",
+      "x_norm_max": 0.335,
+      "x_norm_min": 0.15
+    },
+    {
+      "deck": "lower",
+      "deck_z_cm": -240.0,
+      "id": "C_lower_Hub",
+      "length_cm": 756.0,
+      "max_x_cm": 2163.0,
+      "min_x_cm": 1407.0,
+      "semantic": "Hub",
+      "x_norm_max": 0.515,
+      "x_norm_min": 0.335
+    },
+    {
+      "deck": "lower",
+      "deck_z_cm": -240.0,
+      "id": "C_lower_BallastAft",
+      "length_cm": 1197.0000000000002,
+      "max_x_cm": 3360.0,
+      "min_x_cm": 2163.0,
+      "semantic": "BallastAft",
+      "x_norm_max": 0.8,
+      "x_norm_min": 0.515
+    }
+  ],
+  "connections": [
+    {
+      "deck": "lower",
+      "door_h_cm": 200.0,
+      "door_w_cm": 100.0,
+      "from": "C_lower_BallastFwd",
+      "id": "N_lower_BallastFwd",
+      "sill_z_cm": -230.0,
+      "to": "C_lower_Hub",
+      "type": "WatertightDoor",
+      "x_cm": 1407.0,
+      "x_norm": 0.335
+    },
+    {
+      "deck": "lower",
+      "door_h_cm": 200.0,
+      "door_w_cm": 100.0,
+      "from": "C_lower_Hub",
+      "id": "N_lower_BallastAft",
+      "sill_z_cm": -230.0,
+      "to": "C_lower_BallastAft",
+      "type": "WatertightDoor",
+      "x_cm": 2163.0,
+      "x_norm": 0.515
+    },
+    {
+      "deck": "main",
+      "door_h_cm": 200.0,
+      "door_w_cm": 100.0,
+      "from": "C_main_Bow",
+      "id": "N_main_Fwd",
+      "sill_z_cm": -10.0,
+      "to": "C_main_Fwd",
+      "type": "WatertightDoor",
+      "x_cm": 940.8000000000001,
+      "x_norm": 0.224
+    },
+    {
+      "deck": "main",
+      "door_h_cm": 200.0,
+      "door_w_cm": 100.0,
+      "from": "C_main_Fwd",
+      "id": "N_main_Control",
+      "sill_z_cm": -10.0,
+      "to": "C_main_Aft",
+      "type": "WatertightDoor",
+      "x_cm": 2637.6,
+      "x_norm": 0.628
+    },
+    {
+      "coaming_height_cm": 48.0,
+      "deck": "main->lower",
+      "from": "C_main_Fwd",
+      "half_length_cm": null,
+      "half_width_cm": null,
+      "id": "N_vert_LowerAccess",
+      "radius_cm": 56.0,
+      "shape": "round",
+      "to": "C_lower_Hub",
+      "type": "Hatch",
+      "x_cm": 1785.0,
+      "x_norm": 0.425
+    },
+    {
+      "deck": "upper",
+      "door_h_cm": 200.0,
+      "door_w_cm": 100.0,
+      "from": "C_upper_UpperFwd",
+      "id": "N_upper_UpperAirlock_Inner",
+      "sill_z_cm": 140.0,
+      "to": "C_upper_Airlock",
+      "type": "Airlock",
+      "x_cm": 2694.7999999999997,
+      "x_norm": 0.6416190476190475
+    },
+    {
+      "deck": "upper",
+      "door_h_cm": 200.0,
+      "door_w_cm": 100.0,
+      "from": "C_upper_Airlock",
+      "id": "N_upper_UpperAirlock_Exit",
+      "sill_z_cm": 140.0,
+      "to": "C_upper_UpperAft",
+      "type": "Airlock",
+      "x_cm": 2914.7999999999997,
+      "x_norm": 0.694
+    },
+    {
+      "deck": "upper",
+      "door_h_cm": 200.0,
+      "door_w_cm": 100.0,
+      "from": "C_upper_UpperAft",
+      "id": "N_upper_UpperAirlock_Exit__to_EXT",
+      "sill_z_cm": 140.0,
+      "to": "EXT",
+      "type": "AirlockExterior",
+      "x_cm": 2914.7999999999997,
+      "x_norm": 0.694
+    },
+    {
+      "coaming_height_cm": 52.0,
+      "deck": "upper->main",
+      "from": "C_upper_UpperFwd",
+      "half_length_cm": 188.0,
+      "half_width_cm": 68.0,
+      "id": "N_vert_UpperAccess",
+      "radius_cm": null,
+      "shape": "rect",
+      "to": "C_main_Fwd",
+      "type": "Ladder",
+      "x_cm": 1402.8000000000002,
+      "x_norm": 0.334
+    }
+  ],
+  "decks": [
+    {
+      "name": "upper",
+      "x_end_norm": 0.78,
+      "x_start_norm": 0.12,
+      "z": 130
+    },
+    {
+      "name": "main",
+      "x_end_norm": 0.92,
+      "x_start_norm": 0.08,
+      "z": -20
+    },
+    {
+      "name": "lower",
+      "x_end_norm": 0.8,
+      "x_start_norm": 0.15,
+      "z": -180
+    }
+  ],
+  "flood_graph": {
+    "edges": [
+      {
+        "capacity_area_cm2": 20000.0,
+        "connection_id": "N_lower_BallastAft",
+        "from": "C_lower_Hub",
+        "to": "C_lower_BallastAft",
+        "type": "WatertightDoor"
+      },
+      {
+        "capacity_area_cm2": 20000.0,
+        "connection_id": "N_lower_BallastFwd",
+        "from": "C_lower_BallastFwd",
+        "to": "C_lower_Hub",
+        "type": "WatertightDoor"
+      },
+      {
+        "capacity_area_cm2": 20000.0,
+        "connection_id": "N_main_Control",
+        "from": "C_main_Fwd",
+        "to": "C_main_Aft",
+        "type": "WatertightDoor"
+      },
+      {
+        "capacity_area_cm2": 20000.0,
+        "connection_id": "N_main_Fwd",
+        "from": "C_main_Bow",
+        "to": "C_main_Fwd",
+        "type": "WatertightDoor"
+      },
+      {
+        "capacity_area_cm2": 20000.0,
+        "connection_id": "N_upper_UpperAirlock_Exit",
+        "from": "C_upper_Airlock",
+        "to": "C_upper_UpperAft",
+        "type": "Airlock"
+      },
+      {
+        "capacity_area_cm2": 20000.0,
+        "connection_id": "N_upper_UpperAirlock_Exit__to_EXT",
+        "from": "C_upper_UpperAft",
+        "to": "EXT",
+        "type": "AirlockExterior"
+      },
+      {
+        "capacity_area_cm2": 20000.0,
+        "connection_id": "N_upper_UpperAirlock_Inner",
+        "from": "C_upper_UpperFwd",
+        "to": "C_upper_Airlock",
+        "type": "Airlock"
+      },
+      {
+        "capacity_area_cm2": 9852.03456165759,
+        "connection_id": "N_vert_LowerAccess",
+        "from": "C_main_Fwd",
+        "to": "C_lower_Hub",
+        "type": "Hatch"
+      },
+      {
+        "capacity_area_cm2": 51136.0,
+        "connection_id": "N_vert_UpperAccess",
+        "from": "C_upper_UpperFwd",
+        "to": "C_main_Fwd",
+        "type": "Ladder"
+      }
+    ],
+    "nodes": [
+      {
+        "deck": "main",
+        "id": "C_main_Bow",
+        "volume_proxy": 604.8000000000001
+      },
+      {
+        "deck": "main",
+        "id": "C_main_Fwd",
+        "volume_proxy": 1696.8000000000002
+      },
+      {
+        "deck": "main",
+        "id": "C_main_Aft",
+        "volume_proxy": 1226.4
+      },
+      {
+        "deck": "upper",
+        "id": "C_upper_UpperFwd",
+        "volume_proxy": 2190.7999999999997
+      },
+      {
+        "deck": "upper",
+        "id": "C_upper_Airlock",
+        "volume_proxy": 220.00000000000014
+      },
+      {
+        "deck": "upper",
+        "id": "C_upper_UpperAft",
+        "volume_proxy": 361.20000000000033
+      },
+      {
+        "deck": "lower",
+        "id": "C_lower_BallastFwd",
+        "volume_proxy": 777.0000000000001
+      },
+      {
+        "deck": "lower",
+        "id": "C_lower_Hub",
+        "volume_proxy": 756.0
+      },
+      {
+        "deck": "lower",
+        "id": "C_lower_BallastAft",
+        "volume_proxy": 1197.0000000000002
+      },
+      {
+        "deck": "exterior",
+        "id": "EXT",
+        "volume_proxy": 0.0
+      }
+    ]
+  },
+  "hull": {
+    "profile_samples": [
+      {
+        "label": "Bow tip",
+        "profile": [
+          [
+            0,
+            0
+          ]
+        ],
+        "x_norm": 0.0
+      },
+      {
+        "label": "Bow nose — blunt",
+        "profile": [
+          [
+            0,
+            -80
+          ],
+          [
+            50,
+            -75
+          ],
+          [
+            75,
+            -55
+          ],
+          [
+            80,
+            -25
+          ],
+          [
+            80,
+            0
+          ],
+          [
+            80,
+            25
+          ],
+          [
+            75,
+            55
+          ],
+          [
+            50,
+            75
+          ],
+          [
+            0,
+            80
+          ]
+        ],
+        "x_norm": 0.015
+      },
+      {
+        "label": "Bow — opening fast (blunt bow characteristic)",
+        "profile": [
+          [
+            0,
+            -180
+          ],
+          [
+            100,
+            -175
+          ],
+          [
+            160,
+            -145
+          ],
+          [
+            185,
+            -95
+          ],
+          [
+            190,
+            -40
+          ],
+          [
+            190,
+            40
+          ],
+          [
+            185,
+            95
+          ],
+          [
+            160,
+            145
+          ],
+          [
+            100,
+            175
+          ],
+          [
+            0,
+            180
+          ]
+        ],
+        "x_norm": 0.04
+      },
+      {
+        "label": "Bow — nearly full section",
+        "profile": [
+          [
+            0,
+            -280
+          ],
+          [
+            150,
+            -275
+          ],
+          [
+            250,
+            -245
+          ],
+          [
+            300,
+            -180
+          ],
+          [
+            320,
+            -100
+          ],
+          [
+            325,
+            0
+          ],
+          [
+            320,
+            100
+          ],
+          [
+            300,
+            180
+          ],
+          [
+            250,
+            245
+          ],
+          [
+            150,
+            275
+          ],
+          [
+            0,
+            280
+          ]
+        ],
+        "x_norm": 0.075
+      },
+      {
+        "label": "Forward body — full circular section",
+        "profile": [
+          [
+            0,
+            -340
+          ],
+          [
+            175,
+            -335
+          ],
+          [
+            300,
+            -300
+          ],
+          [
+            365,
+            -220
+          ],
+          [
+            390,
+            -120
+          ],
+          [
+            395,
+            0
+          ],
+          [
+            390,
+            120
+          ],
+          [
+            365,
+            220
+          ],
+          [
+            300,
+            300
+          ],
+          [
+            175,
+            335
+          ],
+          [
+            0,
+            340
+          ]
+        ],
+        "x_norm": 0.11
+      },
+      {
+        "label": "Body start — constant section begins",
+        "profile": [
+          [
+            0,
+            -360
+          ],
+          [
+            185,
+            -355
+          ],
+          [
+            320,
+            -320
+          ],
+          [
+            385,
+            -235
+          ],
+          [
+            410,
+            -130
+          ],
+          [
+            415,
+            0
+          ],
+          [
+            410,
+            130
+          ],
+          [
+            385,
+            235
+          ],
+          [
+            320,
+            320
+          ],
+          [
+            185,
+            355
+          ],
+          [
+            0,
+            360
+          ]
+        ],
+        "x_norm": 0.16
+      },
+      {
+        "label": "Body — constant (peak)",
+        "profile": [
+          [
+            0,
+            -365
+          ],
+          [
+            190,
+            -360
+          ],
+          [
+            325,
+            -325
+          ],
+          [
+            390,
+            -240
+          ],
+          [
+            415,
+            -130
+          ],
+          [
+            420,
+            0
+          ],
+          [
+            415,
+            130
+          ],
+          [
+            390,
+            240
+          ],
+          [
+            325,
+            325
+          ],
+          [
+            190,
+            360
+          ],
+          [
+            0,
+            365
+          ]
+        ],
+        "x_norm": 0.3
+      },
+      {
+        "label": "Mid body — constant",
+        "profile": [
+          [
+            0,
+            -365
+          ],
+          [
+            190,
+            -360
+          ],
+          [
+            325,
+            -325
+          ],
+          [
+            390,
+            -240
+          ],
+          [
+            415,
+            -130
+          ],
+          [
+            420,
+            0
+          ],
+          [
+            415,
+            130
+          ],
+          [
+            390,
+            240
+          ],
+          [
+            325,
+            325
+          ],
+          [
+            190,
+            360
+          ],
+          [
+            0,
+            365
+          ]
+        ],
+        "x_norm": 0.5
+      },
+      {
+        "label": "Body — still constant",
+        "profile": [
+          [
+            0,
+            -365
+          ],
+          [
+            190,
+            -360
+          ],
+          [
+            325,
+            -325
+          ],
+          [
+            390,
+            -240
+          ],
+          [
+            415,
+            -130
+          ],
+          [
+            420,
+            0
+          ],
+          [
+            415,
+            130
+          ],
+          [
+            390,
+            240
+          ],
+          [
+            325,
+            325
+          ],
+          [
+            190,
+            360
+          ],
+          [
+            0,
+            365
+          ]
+        ],
+        "x_norm": 0.65
+      },
+      {
+        "label": "Body end — constant section ends",
+        "profile": [
+          [
+            0,
+            -360
+          ],
+          [
+            185,
+            -355
+          ],
+          [
+            320,
+            -320
+          ],
+          [
+            385,
+            -235
+          ],
+          [
+            410,
+            -130
+          ],
+          [
+            415,
+            0
+          ],
+          [
+            410,
+            130
+          ],
+          [
+            385,
+            235
+          ],
+          [
+            320,
+            320
+          ],
+          [
+            185,
+            355
+          ],
+          [
+            0,
+            360
+          ]
+        ],
+        "x_norm": 0.75
+      },
+      {
+        "label": "Stern approach — starting to narrow",
+        "profile": [
+          [
+            0,
+            -340
+          ],
+          [
+            175,
+            -335
+          ],
+          [
+            300,
+            -300
+          ],
+          [
+            360,
+            -220
+          ],
+          [
+            385,
+            -120
+          ],
+          [
+            390,
+            0
+          ],
+          [
+            385,
+            120
+          ],
+          [
+            360,
+            220
+          ],
+          [
+            300,
+            300
+          ],
+          [
+            175,
+            335
+          ],
+          [
+            0,
+            340
+          ]
+        ],
+        "x_norm": 0.82
+      },
+      {
+        "label": "Stern — narrowing",
+        "profile": [
+          [
+            0,
+            -280
+          ],
+          [
+            145,
+            -275
+          ],
+          [
+            250,
+            -245
+          ],
+          [
+            300,
+            -180
+          ],
+          [
+            320,
+            -100
+          ],
+          [
+            325,
+            0
+          ],
+          [
+            320,
+            100
+          ],
+          [
+            300,
+            180
+          ],
+          [
+            250,
+            245
+          ],
+          [
+            145,
+            275
+          ],
+          [
+            0,
+            280
+          ]
+        ],
+        "x_norm": 0.88
+      },
+      {
+        "label": "Stern — cone",
+        "profile": [
+          [
+            0,
+            -200
+          ],
+          [
+            105,
+            -195
+          ],
+          [
+            180,
+            -170
+          ],
+          [
+            215,
+            -125
+          ],
+          [
+            230,
+            -65
+          ],
+          [
+            230,
+            0
+          ],
+          [
+            230,
+            65
+          ],
+          [
+            215,
+            125
+          ],
+          [
+            180,
+            170
+          ],
+          [
+            105,
+            195
+          ],
+          [
+            0,
+            200
+          ]
+        ],
+        "x_norm": 0.93
+      },
+      {
+        "label": "Stern — narrow",
+        "profile": [
+          [
+            0,
+            -120
+          ],
+          [
+            65,
+            -115
+          ],
+          [
+            105,
+            -95
+          ],
+          [
+            125,
+            -60
+          ],
+          [
+            130,
+            -25
+          ],
+          [
+            130,
+            0
+          ],
+          [
+            130,
+            25
+          ],
+          [
+            125,
+            60
+          ],
+          [
+            105,
+            95
+          ],
+          [
+            65,
+            115
+          ],
+          [
+            0,
+            120
+          ]
+        ],
+        "x_norm": 0.965
+      },
+      {
+        "label": "Stern tip — truncated (not pointed)",
+        "profile": [
+          [
+            0,
+            -55
+          ],
+          [
+            30,
+            -50
+          ],
+          [
+            50,
+            -35
+          ],
+          [
+            55,
+            -15
+          ],
+          [
+            55,
+            0
+          ],
+          [
+            55,
+            15
+          ],
+          [
+            50,
+            35
+          ],
+          [
+            30,
+            50
+          ],
+          [
+            0,
+            55
+          ]
+        ],
+        "x_norm": 0.99
+      },
+      {
+        "label": "Stern end — flat truncation",
+        "profile": [
+          [
+            0,
+            -35
+          ],
+          [
+            20,
+            -30
+          ],
+          [
+            30,
+            -18
+          ],
+          [
+            35,
+            0
+          ],
+          [
+            30,
+            18
+          ],
+          [
+            20,
+            30
+          ],
+          [
+            0,
+            35
+          ]
+        ],
+        "x_norm": 1.0
+      }
+    ]
+  },
+  "meta": {
+    "bulkhead_thick_cm": 14.0,
+    "deck_thick_cm": 18.0,
+    "hull_thick_cm": 15.0,
+    "length_cm": 4200.0,
+    "sub_name": "Craniata"
+  },
+  "schema_version": 1,
+  "source_hashes": {
+    "main_py": "5ba382bf7fc511d41d386936940b3d009953b341edaff1a9cb262c2f3b524334",
+    "stations_json": "000c8242b54c389e10378ae576f677def9e4922e94082cd32d40b33555509c43"
+  },
+  "spawn_points": [
+    {
+      "compartment": "C_main_Bow",
+      "id": "SP_C_main_Bow",
+      "x_cm": 638.4000000000001,
+      "y_cm": 0.0,
+      "yaw_deg": 0.0,
+      "z_cm": -20.0
+    },
+    {
+      "compartment": "C_main_Fwd",
+      "id": "SP_C_main_Fwd",
+      "x_cm": 1789.2,
+      "y_cm": 0.0,
+      "yaw_deg": 0.0,
+      "z_cm": -20.0
+    },
+    {
+      "compartment": "C_main_Aft",
+      "id": "SP_C_main_Aft",
+      "x_cm": 3250.8,
+      "y_cm": 0.0,
+      "yaw_deg": 0.0,
+      "z_cm": -20.0
+    },
+    {
+      "compartment": "C_upper_UpperFwd",
+      "id": "SP_C_upper_UpperFwd",
+      "x_cm": 1599.3999999999999,
+      "y_cm": 0.0,
+      "yaw_deg": 0.0,
+      "z_cm": 130.0
+    },
+    {
+      "compartment": "C_upper_Airlock",
+      "id": "SP_C_upper_Airlock",
+      "x_cm": 2804.7999999999997,
+      "y_cm": 0.0,
+      "yaw_deg": 0.0,
+      "z_cm": 130.0
+    },
+    {
+      "compartment": "C_upper_UpperAft",
+      "id": "SP_C_upper_UpperAft",
+      "x_cm": 3095.3999999999996,
+      "y_cm": 0.0,
+      "yaw_deg": 0.0,
+      "z_cm": 130.0
+    },
+    {
+      "compartment": "C_lower_BallastFwd",
+      "id": "SP_C_lower_BallastFwd",
+      "x_cm": 1018.5,
+      "y_cm": 0.0,
+      "yaw_deg": 0.0,
+      "z_cm": -240.0
+    },
+    {
+      "compartment": "C_lower_Hub",
+      "id": "SP_C_lower_Hub",
+      "x_cm": 1785.0,
+      "y_cm": 0.0,
+      "yaw_deg": 0.0,
+      "z_cm": -240.0
+    },
+    {
+      "compartment": "C_lower_BallastAft",
+      "id": "SP_C_lower_BallastAft",
+      "x_cm": 2761.5,
+      "y_cm": 0.0,
+      "yaw_deg": 0.0,
+      "z_cm": -240.0
+    }
+  ],
+  "station_slots": [
+    {
+      "compartment": "C_main_Fwd",
+      "type": "Helm",
+      "x_cm": 1789.2,
+      "y_cm": 0.0,
+      "yaw_deg": 0.0,
+      "z_cm": -20.0
+    },
+    {
+      "compartment": "C_main_Aft",
+      "type": "Engine",
+      "x_cm": 3250.8,
+      "y_cm": 0.0,
+      "yaw_deg": 180.0,
+      "z_cm": -20.0
+    },
+    {
+      "compartment": "C_lower_Hub",
+      "type": "Ballast",
+      "x_cm": 1785.0,
+      "y_cm": 0.0,
+      "yaw_deg": 0.0,
+      "z_cm": -240.0
+    }
+  ],
+  "turret_hardpoints": [
+    {
+      "height": 14.0,
+      "length": 56.0,
+      "mount": "top",
+      "name": "FwdTop",
+      "width": 74.0,
+      "x_norm": 0.098
+    },
+    {
+      "height": 10.0,
+      "length": 52.0,
+      "mount": "top",
+      "name": "AftTop",
+      "width": 66.0,
+      "x_norm": 0.756
+    },
+    {
+      "height": 14.0,
+      "length": 52.0,
+      "mount": "bottom",
+      "name": "FwdBottom",
+      "width": 72.0,
+      "x_norm": 0.108
+    }
+  ]
+}
