@@ -42,6 +42,9 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Turret")
 	float DamagePerShot = 20.f;
 
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Turret|Ammo", meta = (ClampMin = "1"))
+	int32 MaxAmmo = 50;
+
 	UPROPERTY(BlueprintReadOnly, Replicated, Category = "Turret")
 	FRotator CurrentAim = FRotator::ZeroRotator;
 
@@ -53,6 +56,21 @@ public:
 
 	UPROPERTY(BlueprintReadOnly, Replicated, Category = "Turret")
 	bool bOnline = true;
+
+	UPROPERTY(BlueprintReadOnly, Replicated, Category = "Turret|Ammo")
+	int32 CurrentAmmo = 50;
+
+	// Server world time of the last successful shot. Clients observe this to
+	// trigger one-shot fire feedback (HUD flash, audio, camera kick).
+	UPROPERTY(BlueprintReadOnly, ReplicatedUsing = OnRep_LastFireTime, Category = "Turret")
+	float LastFireServerTime = 0.f;
+
+	UFUNCTION()
+	void OnRep_LastFireTime();
+
+	// Blueprint hook so cosmetic clients can run FX on the replicated fire event.
+	UFUNCTION(BlueprintImplementableEvent, Category = "Turret")
+	void BP_OnFiredReplicated();
 
 	UFUNCTION(BlueprintCallable, Category = "Turret")
 	void SetAimCommand(const FRotator& InAim);

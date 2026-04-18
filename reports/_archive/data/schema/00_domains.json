@@ -1,0 +1,49 @@
+{
+  "domains": [
+    {
+      "id": 1,
+      "name": "Hull & Authoring",
+      "color": "#4E9AF1"
+    },
+    {
+      "id": 2,
+      "name": "Modules & Stations",
+      "color": "#A855F7"
+    },
+    {
+      "id": 3,
+      "name": "Catalog & Product",
+      "color": "#06B6D4"
+    },
+    {
+      "id": 4,
+      "name": "Enemies & Fauna",
+      "color": "#EF4444"
+    },
+    {
+      "id": 5,
+      "name": "Items & Loot",
+      "color": "#F59E0B"
+    },
+    {
+      "id": 6,
+      "name": "World & Spawning",
+      "color": "#10B981"
+    },
+    {
+      "id": 7,
+      "name": "Breach & Flood",
+      "color": "#F97316"
+    },
+    {
+      "id": 8,
+      "name": "Mission & Rewards",
+      "color": "#8B5CF6"
+    },
+    {
+      "id": 9,
+      "name": "Difficulty & Economy",
+      "color": "#6B7280"
+    }
+  ]
+}

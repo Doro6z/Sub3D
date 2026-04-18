@@ -1,0 +1,295 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1400 1050" font-family="Consolas, monospace" font-size="12">
+  <defs>
+    <marker id="arrow" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto">
+      <path d="M0,0 L8,3 L0,6 Z" fill="#555"/>
+    </marker>
+    <marker id="arrow-blue" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto">
+      <path d="M0,0 L8,3 L0,6 Z" fill="#3b82f6"/>
+    </marker>
+    <marker id="arrow-green" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto">
+      <path d="M0,0 L8,3 L0,6 Z" fill="#22c55e"/>
+    </marker>
+    <marker id="arrow-orange" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto">
+      <path d="M0,0 L8,3 L0,6 Z" fill="#f59e0b"/>
+    </marker>
+    <marker id="arrow-red" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto">
+      <path d="M0,0 L8,3 L0,6 Z" fill="#ef4444"/>
+    </marker>
+  </defs>
+
+  <!-- Background -->
+  <rect width="1400" height="1050" fill="#0f172a" rx="8"/>
+
+  <!-- Title -->
+  <text x="700" y="35" text-anchor="middle" fill="#e2e8f0" font-size="18" font-weight="bold">Sub3D — Submarine Generator Architecture (Phase 1-5C)</text>
+  <text x="700" y="52" text-anchor="middle" fill="#64748b" font-size="11">2026-04-09 | Phases 1-5C Complete | Terrain Ready for Phase 6</text>
+
+  <!-- ═══════════════ LAYER 1: EDITOR / SPEC ═══════════════ -->
+  <rect x="30" y="70" width="400" height="170" rx="6" fill="#1e293b" stroke="#334155" stroke-width="1.5"/>
+  <text x="230" y="90" text-anchor="middle" fill="#94a3b8" font-size="11" font-weight="bold">EDITOR LAYER (Data Assets)</text>
+
+  <!-- USubmarineGeneratorSpec -->
+  <rect x="50" y="105" width="170" height="55" rx="4" fill="#1e3a5f" stroke="#3b82f6" stroke-width="1.5"/>
+  <text x="135" y="122" text-anchor="middle" fill="#93c5fd" font-size="11" font-weight="bold">USubGeneratorSpec</text>
+  <text x="135" y="136" text-anchor="middle" fill="#64748b" font-size="9">Hull profile</text>
+  <text x="135" y="148" text-anchor="middle" fill="#64748b" font-size="9">Compartment count/rules</text>
+
+  <!-- USubmarineEnvelopeDef -->
+  <rect x="240" y="105" width="170" height="55" rx="4" fill="#1e3a5f" stroke="#3b82f6" stroke-width="1.5"/>
+  <text x="325" y="122" text-anchor="middle" fill="#93c5fd" font-size="11" font-weight="bold">USubEnvelopeDef</text>
+  <text x="325" y="136" text-anchor="middle" fill="#64748b" font-size="9">Superellipse radii</text>
+  <text x="325" y="148" text-anchor="middle" fill="#64748b" font-size="9">Bow/stern taper curves</text>
+
+  <!-- Phase labels on spec -->
+  <rect x="55" y="165" width="52" height="16" rx="3" fill="#1e40af"/>
+  <text x="81" y="176" text-anchor="middle" fill="#dbeafe" font-size="9">Phase 1</text>
+  <rect x="245" y="165" width="52" height="16" rx="3" fill="#1e40af"/>
+  <text x="271" y="176" text-anchor="middle" fill="#dbeafe" font-size="9">Phase 1</text>
+
+  <!-- ═══════════════ LAYER 2: GENERATOR ═══════════════ -->
+  <rect x="30" y="260" width="620" height="130" rx="6" fill="#1e293b" stroke="#334155" stroke-width="1.5"/>
+  <text x="340" y="280" text-anchor="middle" fill="#94a3b8" font-size="11" font-weight="bold">GENERATION PIPELINE (Server, BeginPlay or Editor-time)</text>
+
+  <!-- USubmarineGenerator -->
+  <rect x="50" y="295" width="180" height="55" rx="4" fill="#14532d" stroke="#22c55e" stroke-width="1.5"/>
+  <text x="140" y="312" text-anchor="middle" fill="#86efac" font-size="11" font-weight="bold">USubmarineGenerator</text>
+  <text x="140" y="326" text-anchor="middle" fill="#64748b" font-size="9">Layout + Connections</text>
+  <text x="140" y="338" text-anchor="middle" fill="#64748b" font-size="9">FloodGraph + Stations</text>
+
+  <!-- USubmarineMeshBuilder -->
+  <rect x="250" y="295" width="180" height="55" rx="4" fill="#14532d" stroke="#22c55e" stroke-width="1.5"/>
+  <text x="340" y="312" text-anchor="middle" fill="#86efac" font-size="11" font-weight="bold">USubMeshBuilder</text>
+  <text x="340" y="326" text-anchor="middle" fill="#64748b" font-size="9">Exterior hull mesh</text>
+  <text x="340" y="338" text-anchor="middle" fill="#64748b" font-size="9">Interior + Bulkheads</text>
+
+  <!-- Phase labels -->
+  <rect x="55" y="355" width="85" height="16" rx="3" fill="#166534"/>
+  <text x="97" y="366" text-anchor="middle" fill="#bbf7d0" font-size="9">Phase 2-4</text>
+  <rect x="255" y="355" width="85" height="16" rx="3" fill="#166534"/>
+  <text x="297" y="366" text-anchor="middle" fill="#bbf7d0" font-size="9">Phase 5B</text>
+
+  <!-- Arrow: Spec → Generator -->
+  <line x1="135" y1="160" x2="135" y2="293" stroke="#3b82f6" stroke-width="1.5" marker-end="url(#arrow-blue)"/>
+  <text x="145" y="230" fill="#3b82f6" font-size="9">Generate()</text>
+
+  <!-- Arrow: Envelope → MeshBuilder -->
+  <line x1="325" y1="160" x2="340" y2="293" stroke="#3b82f6" stroke-width="1.5" marker-end="url(#arrow-blue)"/>
+  <text x="345" y="230" fill="#3b82f6" font-size="9">BuildMeshData()</text>
+
+  <!-- ═══════════════ LAYER 3: DEFINITION (Central) ═══════════════ -->
+  <rect x="460" y="70" width="310" height="170" rx="6" fill="#1e293b" stroke="#f59e0b" stroke-width="2"/>
+  <text x="615" y="90" text-anchor="middle" fill="#fbbf24" font-size="13" font-weight="bold">USubmarineDefinition</text>
+  <text x="615" y="106" text-anchor="middle" fill="#94a3b8" font-size="10">Single Source of Truth (UDataAsset)</text>
+
+  <text x="480" y="125" fill="#e2e8f0" font-size="10">Hull: Length, Beam, Height, Mass</text>
+  <text x="480" y="140" fill="#e2e8f0" font-size="10">Layout: Compartments[], Connections[]</text>
+  <text x="480" y="155" fill="#e2e8f0" font-size="10">Flood: FCompiledFloodGraph</text>
+  <text x="480" y="170" fill="#e2e8f0" font-size="10">Sockets: StationSlots[], SpawnPoints[]</text>
+  <text x="480" y="185" fill="#e2e8f0" font-size="10">Mesh: ExteriorHull, Interiors, Bulkheads</text>
+  <text x="480" y="200" fill="#e2e8f0" font-size="10">Defaults: MaxInflow, PumpRate</text>
+  <text x="480" y="218" fill="#fbbf24" font-size="10">Queries: FindCompartment(Id)</text>
+  <text x="480" y="233" fill="#fbbf24" font-size="10">         FindCompartmentAtLocalLocation()</text>
+
+  <!-- Arrow: Generator → Definition -->
+  <line x1="232" y1="320" x2="458" y2="180" stroke="#22c55e" stroke-width="1.5" marker-end="url(#arrow-green)"/>
+  <!-- Arrow: MeshBuilder → Definition -->
+  <line x1="432" y1="310" x2="458" y2="200" stroke="#22c55e" stroke-width="1.5" marker-end="url(#arrow-green)"/>
+
+  <!-- ═══════════════ LAYER 4: RUNTIME SUBMARINE ═══════════════ -->
+  <rect x="30" y="420" width="1340" height="160" rx="6" fill="#1e293b" stroke="#334155" stroke-width="1.5"/>
+  <text x="700" y="440" text-anchor="middle" fill="#94a3b8" font-size="11" font-weight="bold">ASubmarineBase (Runtime Pawn — Server Authoritative)</text>
+
+  <!-- GeneratedDefinition ref -->
+  <rect x="50" y="455" width="150" height="40" rx="4" fill="#422006" stroke="#f59e0b" stroke-width="1"/>
+  <text x="125" y="473" text-anchor="middle" fill="#fcd34d" font-size="10" font-weight="bold">GeneratedDefinition</text>
+  <text x="125" y="486" text-anchor="middle" fill="#92400e" font-size="9">TObjectPtr&lt;USubDef&gt;</text>
+
+  <!-- Arrow: Definition → SubBase.GeneratedDefinition -->
+  <line x1="560" y1="242" x2="150" y2="453" stroke="#f59e0b" stroke-width="1.5" stroke-dasharray="6,3" marker-end="url(#arrow-orange)"/>
+
+  <!-- SubFlood -->
+  <rect x="220" y="455" width="160" height="55" rx="4" fill="#450a0a" stroke="#ef4444" stroke-width="1.5"/>
+  <text x="300" y="472" text-anchor="middle" fill="#fca5a5" font-size="11" font-weight="bold">USubFloodComponent</text>
+  <text x="300" y="486" text-anchor="middle" fill="#7f1d1d" font-size="9">Compartment water sim</text>
+  <text x="300" y="498" text-anchor="middle" fill="#7f1d1d" font-size="9">Breach/Door/Pump state</text>
+
+  <!-- SubHull -->
+  <rect x="400" y="455" width="160" height="55" rx="4" fill="#451a03" stroke="#f97316" stroke-width="1.5"/>
+  <text x="480" y="472" text-anchor="middle" fill="#fdba74" font-size="11" font-weight="bold">USubHullComponent</text>
+  <text x="480" y="486" text-anchor="middle" fill="#7c2d12" font-size="9">Structural sheets/cells</text>
+  <text x="480" y="498" text-anchor="middle" fill="#7c2d12" font-size="9">Breach clusters</text>
+
+  <!-- Systems -->
+  <rect x="580" y="455" width="155" height="55" rx="4" fill="#3b0764" stroke="#a855f7" stroke-width="1.5"/>
+  <text x="657" y="472" text-anchor="middle" fill="#d8b4fe" font-size="11" font-weight="bold">USubSystemsComp</text>
+  <text x="657" y="486" text-anchor="middle" fill="#581c87" font-size="9">Helm/Pump/Ballast cmds</text>
+  <text x="657" y="498" text-anchor="middle" fill="#581c87" font-size="9">Stabilization dampeners</text>
+
+  <!-- Compartments -->
+  <rect x="755" y="455" width="155" height="55" rx="4" fill="#1a2e05" stroke="#84cc16" stroke-width="1.5"/>
+  <text x="832" y="472" text-anchor="middle" fill="#bef264" font-size="11" font-weight="bold">UCompartmentComp</text>
+  <text x="832" y="486" text-anchor="middle" fill="#365314" font-size="9">Door registry</text>
+  <text x="832" y="498" text-anchor="middle" fill="#365314" font-size="9">Compartment state cache</text>
+
+  <!-- SubMovement -->
+  <rect x="930" y="455" width="140" height="55" rx="4" fill="#083344" stroke="#06b6d4" stroke-width="1.5"/>
+  <text x="1000" y="472" text-anchor="middle" fill="#67e8f9" font-size="11" font-weight="bold">USubMovementComp</text>
+  <text x="1000" y="486" text-anchor="middle" fill="#155e75" font-size="9">Math-based physics</text>
+  <text x="1000" y="498" text-anchor="middle" fill="#155e75" font-size="9">Ballast + buoyancy</text>
+
+  <!-- Misc runtime -->
+  <rect x="1090" y="455" width="140" height="55" rx="4" fill="#1e293b" stroke="#475569" stroke-width="1"/>
+  <text x="1160" y="472" text-anchor="middle" fill="#94a3b8" font-size="10" font-weight="bold">Feedback/VFX</text>
+  <text x="1160" y="486" text-anchor="middle" fill="#475569" font-size="9">BreachVfx, FloodWater</text>
+  <text x="1160" y="498" text-anchor="middle" fill="#475569" font-size="9">HullVisualDamage</text>
+
+  <!-- ═══════════════ LAYER 5: ACTORS / CREW ═══════════════ -->
+  <rect x="30" y="610" width="700" height="130" rx="6" fill="#1e293b" stroke="#334155" stroke-width="1.5"/>
+  <text x="380" y="630" text-anchor="middle" fill="#94a3b8" font-size="11" font-weight="bold">GAMEPLAY ACTORS</text>
+
+  <!-- SubDoorActor -->
+  <rect x="50" y="645" width="150" height="50" rx="4" fill="#4a1d96" stroke="#8b5cf6" stroke-width="1.5"/>
+  <text x="125" y="665" text-anchor="middle" fill="#c4b5fd" font-size="11" font-weight="bold">ASubDoorActor</text>
+  <text x="125" y="680" text-anchor="middle" fill="#5b21b6" font-size="9">Toggle → SetDoorState</text>
+
+  <!-- SubCrewCharacter -->
+  <rect x="220" y="645" width="170" height="50" rx="4" fill="#4a1d96" stroke="#8b5cf6" stroke-width="1.5"/>
+  <text x="305" y="665" text-anchor="middle" fill="#c4b5fd" font-size="11" font-weight="bold">ASubCrewCharacter</text>
+  <text x="305" y="680" text-anchor="middle" fill="#5b21b6" font-size="9">Spatial query → Definition</text>
+
+  <!-- Turret -->
+  <rect x="410" y="645" width="130" height="50" rx="4" fill="#1e293b" stroke="#475569" stroke-width="1"/>
+  <text x="475" y="665" text-anchor="middle" fill="#94a3b8" font-size="10" font-weight="bold">ATurretActor</text>
+  <text x="475" y="680" text-anchor="middle" fill="#475569" font-size="9">Exterior weapon</text>
+
+  <!-- StationManager -->
+  <rect x="560" y="645" width="150" height="50" rx="4" fill="#1e293b" stroke="#475569" stroke-width="1"/>
+  <text x="635" y="665" text-anchor="middle" fill="#94a3b8" font-size="10" font-weight="bold">StationManager</text>
+  <text x="635" y="680" text-anchor="middle" fill="#475569" font-size="9">Snap station discovery</text>
+
+  <!-- ═══════════════ PHASE 5C BRIDGES (highlighted) ═══════════════ -->
+
+  <!-- 5C.1: SubDoorActor → SubFlood::SetDoorState -->
+  <line x1="125" y1="645" x2="280" y2="512" stroke="#ef4444" stroke-width="2" marker-end="url(#arrow-red)"/>
+  <rect x="145" y="575" width="85" height="16" rx="3" fill="#7f1d1d"/>
+  <text x="187" y="586" text-anchor="middle" fill="#fca5a5" font-size="9" font-weight="bold">5C.1 Door</text>
+
+  <!-- 5C.1 also goes to Compartments -->
+  <line x1="140" y1="645" x2="810" y2="512" stroke="#84cc16" stroke-width="1" stroke-dasharray="4,2" marker-end="url(#arrow-green)"/>
+
+  <!-- 5C.2: SubHull breach → SubFlood (via SubmarineBase handler) -->
+  <path d="M480,512 C480,545 350,545 300,512" fill="none" stroke="#ef4444" stroke-width="2" marker-end="url(#arrow-red)"/>
+  <rect x="355" y="530" width="105" height="16" rx="3" fill="#7f1d1d"/>
+  <text x="407" y="541" text-anchor="middle" fill="#fca5a5" font-size="9" font-weight="bold">5C.2 Breach→</text>
+
+  <!-- 5C.3: SubCrewCharacter spatial query fallback -->
+  <line x1="305" y1="645" x2="125" y2="498" stroke="#f59e0b" stroke-width="2" stroke-dasharray="6,3" marker-end="url(#arrow-orange)"/>
+  <rect x="175" y="560" width="125" height="16" rx="3" fill="#92400e"/>
+  <text x="237" y="571" text-anchor="middle" fill="#fcd34d" font-size="9" font-weight="bold">5C.3 Spatial Query</text>
+
+  <!-- 5C.4: SpawnPoints fallback -->
+  <rect x="790" y="345" width="170" height="45" rx="4" fill="#422006" stroke="#f59e0b" stroke-width="1.5" stroke-dasharray="4,2"/>
+  <text x="875" y="362" text-anchor="middle" fill="#fcd34d" font-size="10" font-weight="bold">GetPrimaryCrewSpawn</text>
+  <text x="875" y="377" text-anchor="middle" fill="#92400e" font-size="9">Socket → Def.SpawnPoints[0]</text>
+  <rect x="795" y="385" width="70" height="14" rx="3" fill="#92400e"/>
+  <text x="830" y="395" text-anchor="middle" fill="#fcd34d" font-size="8" font-weight="bold">5C.4</text>
+
+  <!-- Arrow: Definition → GetPrimaryCrewSpawn -->
+  <line x1="700" y1="200" x2="788" y2="360" stroke="#f59e0b" stroke-width="1" stroke-dasharray="4,2" marker-end="url(#arrow-orange)"/>
+
+  <!-- 5C.5: Pump compartment resolution -->
+  <path d="M657,512 Q657,540 620,540 Q560,540 560,200" fill="none" stroke="#a855f7" stroke-width="2" stroke-dasharray="6,3" marker-end="url(#arrow)"/>
+  <rect x="545" y="545" width="115" height="16" rx="3" fill="#581c87"/>
+  <text x="602" y="556" text-anchor="middle" fill="#d8b4fe" font-size="9" font-weight="bold">5C.5 PumpComp</text>
+
+  <!-- ═══════════════ FLOOD GRAPH DETAIL ═══════════════ -->
+  <rect x="800" y="610" width="560" height="200" rx="6" fill="#1e293b" stroke="#334155" stroke-width="1.5"/>
+  <text x="1080" y="630" text-anchor="middle" fill="#94a3b8" font-size="11" font-weight="bold">COMPILED FLOOD GRAPH (inside USubmarineDefinition)</text>
+
+  <rect x="820" y="645" width="120" height="40" rx="4" fill="#450a0a" stroke="#ef4444" stroke-width="1"/>
+  <text x="880" y="663" text-anchor="middle" fill="#fca5a5" font-size="10">Volume: Helm</text>
+  <text x="880" y="676" text-anchor="middle" fill="#7f1d1d" font-size="9">Cap = 45000L</text>
+
+  <rect x="960" y="645" width="120" height="40" rx="4" fill="#450a0a" stroke="#ef4444" stroke-width="1"/>
+  <text x="1020" y="663" text-anchor="middle" fill="#fca5a5" font-size="10">Volume: Crew</text>
+  <text x="1020" y="676" text-anchor="middle" fill="#7f1d1d" font-size="9">Cap = 38000L</text>
+
+  <rect x="1100" y="645" width="120" height="40" rx="4" fill="#450a0a" stroke="#ef4444" stroke-width="1"/>
+  <text x="1160" y="663" text-anchor="middle" fill="#fca5a5" font-size="10">Volume: Engine</text>
+  <text x="1160" y="676" text-anchor="middle" fill="#7f1d1d" font-size="9">Cap = 30000L</text>
+
+  <!-- Edges between volumes -->
+  <line x1="940" y1="665" x2="958" y2="665" stroke="#ef4444" stroke-width="2"/>
+  <line x1="1080" y1="665" x2="1098" y2="665" stroke="#ef4444" stroke-width="2"/>
+
+  <!-- Edge labels -->
+  <rect x="820" y="700" width="250" height="45" rx="4" fill="#1a1a2e" stroke="#475569" stroke-width="1"/>
+  <text x="945" y="716" text-anchor="middle" fill="#e2e8f0" font-size="10">Edges: Volume↔Volume (internal)</text>
+  <text x="945" y="730" text-anchor="middle" fill="#e2e8f0" font-size="10">       Volume→Exterior (hull breach)</text>
+  <text x="945" y="744" text-anchor="middle" fill="#94a3b8" font-size="9">ClosureId → ConnectionId (door/hatch)</text>
+
+  <!-- Exterior edge -->
+  <rect x="1100" y="700" width="120" height="40" rx="4" fill="#1a1a2e" stroke="#f97316" stroke-width="1" stroke-dasharray="4,2"/>
+  <text x="1160" y="718" text-anchor="middle" fill="#fdba74" font-size="10">EXTERIOR</text>
+  <text x="1160" y="732" text-anchor="middle" fill="#7c2d12" font-size="9">Ocean water source</text>
+
+  <!-- Connection to exterior -->
+  <line x1="1160" y1="687" x2="1160" y2="698" stroke="#f97316" stroke-width="1.5" stroke-dasharray="3,2"/>
+
+  <!-- ═══════════════ LEGEND ═══════════════ -->
+  <rect x="30" y="840" width="1340" height="190" rx="6" fill="#0f172a" stroke="#334155" stroke-width="1"/>
+  <text x="700" y="865" text-anchor="middle" fill="#94a3b8" font-size="12" font-weight="bold">PHASE SUMMARY &amp; DATA FLOW LEGEND</text>
+
+  <!-- Phase boxes -->
+  <rect x="50" y="885" width="180" height="55" rx="4" fill="#1e3a5f" stroke="#3b82f6" stroke-width="1"/>
+  <text x="140" y="902" text-anchor="middle" fill="#93c5fd" font-size="10" font-weight="bold">Phase 1: Spec + Envelope</text>
+  <text x="140" y="916" text-anchor="middle" fill="#64748b" font-size="9">Editor data assets</text>
+  <text x="140" y="930" text-anchor="middle" fill="#64748b" font-size="9">Hull profile parameters</text>
+
+  <rect x="250" y="885" width="180" height="55" rx="4" fill="#14532d" stroke="#22c55e" stroke-width="1"/>
+  <text x="340" y="902" text-anchor="middle" fill="#86efac" font-size="10" font-weight="bold">Phase 2-4: Generator</text>
+  <text x="340" y="916" text-anchor="middle" fill="#64748b" font-size="9">Layout, connections, flood</text>
+  <text x="340" y="930" text-anchor="middle" fill="#64748b" font-size="9">graph, stations, spawns</text>
+
+  <rect x="450" y="885" width="180" height="55" rx="4" fill="#14532d" stroke="#22c55e" stroke-width="1"/>
+  <text x="540" y="902" text-anchor="middle" fill="#86efac" font-size="10" font-weight="bold">Phase 5A: Validation</text>
+  <text x="540" y="916" text-anchor="middle" fill="#64748b" font-size="9">USubDef::IsValid()</text>
+  <text x="540" y="930" text-anchor="middle" fill="#64748b" font-size="9">Structural integrity checks</text>
+
+  <rect x="650" y="885" width="180" height="55" rx="4" fill="#422006" stroke="#f59e0b" stroke-width="1"/>
+  <text x="740" y="902" text-anchor="middle" fill="#fcd34d" font-size="10" font-weight="bold">Phase 5B: Mesh Builder</text>
+  <text x="740" y="916" text-anchor="middle" fill="#64748b" font-size="9">Superellipse hull geometry</text>
+  <text x="740" y="930" text-anchor="middle" fill="#64748b" font-size="9">Interior walls + bulkheads</text>
+
+  <rect x="850" y="885" width="180" height="55" rx="4" fill="#7f1d1d" stroke="#ef4444" stroke-width="1"/>
+  <text x="940" y="902" text-anchor="middle" fill="#fca5a5" font-size="10" font-weight="bold">Phase 5C: Integration</text>
+  <text x="940" y="916" text-anchor="middle" fill="#64748b" font-size="9">5 runtime bridges wired</text>
+  <text x="940" y="930" text-anchor="middle" fill="#64748b" font-size="9">Door/Breach/Crew/Spawn/Pump</text>
+
+  <rect x="1050" y="885" width="180" height="55" rx="4" fill="#1e293b" stroke="#475569" stroke-width="1" stroke-dasharray="4,2"/>
+  <text x="1140" y="902" text-anchor="middle" fill="#94a3b8" font-size="10" font-weight="bold">Phase 6: (Next)</text>
+  <text x="1140" y="916" text-anchor="middle" fill="#475569" font-size="9">Runtime actor creation</text>
+  <text x="1140" y="930" text-anchor="middle" fill="#475569" font-size="9">ProceduralMesh wiring</text>
+
+  <!-- Arrow legend -->
+  <line x1="60" y1="960" x2="100" y2="960" stroke="#3b82f6" stroke-width="2" marker-end="url(#arrow-blue)"/>
+  <text x="110" y="964" fill="#93c5fd" font-size="10">Editor → Generator</text>
+
+  <line x1="260" y1="960" x2="300" y2="960" stroke="#22c55e" stroke-width="2" marker-end="url(#arrow-green)"/>
+  <text x="310" y="964" fill="#86efac" font-size="10">Generator → Definition</text>
+
+  <line x1="490" y1="960" x2="530" y2="960" stroke="#f59e0b" stroke-width="2" marker-end="url(#arrow-orange)"/>
+  <text x="540" y="964" fill="#fcd34d" font-size="10">Definition read (runtime)</text>
+
+  <line x1="710" y1="960" x2="750" y2="960" stroke="#ef4444" stroke-width="2" marker-end="url(#arrow-red)"/>
+  <text x="760" y="964" fill="#fca5a5" font-size="10">Phase 5C bridge</text>
+
+  <line x1="920" y1="960" x2="960" y2="960" stroke="#a855f7" stroke-width="2" stroke-dasharray="6,3"/>
+  <text x="970" y="964" fill="#d8b4fe" font-size="10">Pump resolution</text>
+
+  <!-- 5C integration annotations -->
+  <rect x="50" y="980" width="1280" height="45" rx="4" fill="#1a1a2e" stroke="#475569" stroke-width="1"/>
+  <text x="60" y="996" fill="#e2e8f0" font-size="10" font-weight="bold">Phase 5C Integration Points:</text>
+  <text x="60" y="1012" fill="#94a3b8" font-size="9">5C.1 SubDoorActor.RegisterWithCompartments → SubFlood::SetDoorState  |  5C.2 SubHull.OnBreachesUpdated → SubFlood::CreateBreach (via SubmarineBase handler)  |  5C.3 SubCrewCharacter fallback: Definition::FindCompartmentAtLocalLocation</text>
+  <text x="60" y="1024" fill="#94a3b8" font-size="9">5C.4 SubmarineBase::GetPrimaryCrewSpawnTransform fallback → Definition.SpawnPoints[0]  |  5C.5 SubSystemsComponent::BeginPlay resolves DefaultPumpCompartmentId from Definition.Compartments[0]</text>
+</svg>

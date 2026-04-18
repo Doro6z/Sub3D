@@ -1,0 +1,3 @@
+Name,display_name,kind,flood_stops,breakable,default_open
+---,string,string (enum),bool,bool,bool
+ROW_EXAMPLE,,,true,false,false

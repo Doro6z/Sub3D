@@ -1,0 +1,3 @@
+Name,biome_id,visibility_m,current_speed,ambient_pressure,danger_level,sonar_noise
+---,string,float,float,float,int32,float
+ROW_EXAMPLE,,,,,1,

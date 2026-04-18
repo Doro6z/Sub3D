@@ -1,0 +1,3 @@
+Name,display_name,category_id,weight_kg,stack_size,consumable,base_value,mission_item
+---,string,string,float,int32,bool,float,bool
+ROW_EXAMPLE,,,,1,false,,false

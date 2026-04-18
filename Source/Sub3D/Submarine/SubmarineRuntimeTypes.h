@@ -8,45 +8,78 @@ struct FSubmarineCommandState
 {
 	GENERATED_BODY()
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Command")
+	// ── Helm inputs ─────────────────────────────────────────────────────
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Command|Helm")
 	float HelmThrottleCmd = 0.f;
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Command")
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Command|Helm")
 	float HelmYawCmd = 0.f;
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Command")
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Command|Helm")
 	float HelmTrimCmd = 0.f;
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Command")
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Command|Helm")
+	bool bRudderHoldEnabled = false;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Command|Helm")
+	bool bPlaneHoldEnabled = false;
+
+	// ── Stabilization / Dampeners ───────────────────────────────────────
+	// Master toggle: acts as a kill switch — when off, all auto-systems are
+	// disabled regardless of their individual flag. Default true so each
+	// per-axis toggle (AutoSpeed/AutoDepth/AutoPitch) works on its own
+	// without the player having to enable the master first.
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Command|Stabilization")
+	bool bStabilizationMasterEnabled = true;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Command|Stabilization")
+	bool bAutoSpeedEnabled = false;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Command|Stabilization")
 	bool bAutoDepthEnabled = false;
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Command")
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Command|Stabilization")
+	bool bAutoPitchEnabled = false;
+
+	// Target values for each auto-system.
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Command|Stabilization")
+	float TargetSpeedCmS = 0.f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Command|Stabilization")
 	float TargetDepthMeters = 0.f;
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Command")
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Command|Stabilization")
+	float TargetPitchDeg = 0.f;
+
+	// ── Ballasts ────────────────────────────────────────────────────────
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Command|Ballast")
 	float GlobalBallastTarget01 = 0.5f;
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Command")
-	float MainTrimBiasCmd = 0.f;
-
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Command")
-	bool bPumpActive = false;
-
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Command")
-	float PumpPower01 = 1.f;
-
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Command")
-	float EngineBoostCmd = 0.f;
-
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Command")
-	FRotator TurretAimCmd = FRotator::ZeroRotator;
-
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Command")
-	bool bTurretFireHeld = false;
-
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Command")
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Command|Ballast")
 	bool bBallastsActive = true;
 
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Command|Helm")
+	float MainTrimBiasCmd = 0.f;
+
+	// ── Pumps ───────────────────────────────────────────────────────────
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Command|Pump")
+	bool bPumpActive = false;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Command|Pump")
+	float PumpPower01 = 1.f;
+
+	// ── Engine ──────────────────────────────────────────────────────────
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Command|Engine")
+	float EngineBoostCmd = 0.f;
+
+	// ── Turret ──────────────────────────────────────────────────────────
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Command|Turret")
+	FRotator TurretAimCmd = FRotator::ZeroRotator;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Command|Turret")
+	bool bTurretFireHeld = false;
+
+	// ── Sync ────────────────────────────────────────────────────────────
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Command")
 	int32 LastProcessedFrame = 0;
 };
@@ -118,6 +151,9 @@ struct FCompartmentState
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Compartment")
 	float PressureDeltaKPa = 0.f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Compartment")
+	float FloodRateIn = 0.f;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Compartment")
 	bool bCritical = false;

@@ -1,0 +1,562 @@
+﻿<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Sub3D - Authoring Studio | THE ULTIMATE ARCHITECT</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;800;900&family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/cytoscape/3.28.1/cytoscape.min.js"></script>
+<script src="https://unpkg.com/layout-base/layout-base.js"></script>
+<script src="https://unpkg.com/cose-base/cose-base.js"></script>
+<script src="https://unpkg.com/cytoscape-fcose/cytoscape-fcose.js"></script>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  :root {
+    --bg-black: #020408; --bg-surface: #0a0e16; --bg-glass: rgba(15, 23, 42, 0.7);
+    --border: rgba(56, 189, 248, 0.15); --border-focus: rgba(56, 189, 248, 0.4);
+    --text-p: #f8fafc; --text-s: #94a3b8; --text-d: #475569;
+    --cyan: #06b6d4; --cyan-l: #22d3ee; --ruby: #ef4444; --emerald: #10b981; --amber: #f59e0b;
+    --sidebar-w: 300px; --panel-w: 500px; --top-h: 64px;
+  }
+  html, body { height: 100%; overflow: hidden; font-family: 'Outfit', sans-serif; background: var(--bg-black); color: var(--text-p); }
+  .mono { font-family: 'JetBrains Mono', monospace; font-size: 11px; }
+  .glass { background: var(--bg-glass); backdrop-filter: blur(20px); border-left: 1px solid var(--border); }
+  
+  /* UI BUTTONS */
+  .btn {
+    font-size: 10px; font-weight: 800; padding: 10px 18px; border: 1px solid var(--border);
+    background: rgba(30, 41, 59, 0.4); color: var(--text-s); cursor: pointer;
+    text-transform: uppercase; letter-spacing: 0.15em; border-radius: 4px; transition: 0.15s;
+    display: inline-flex; align-items: center; gap: 8px;
+  }
+  .btn:hover { border-color: var(--cyan); color: var(--text-p); background: rgba(56, 189, 248, 0.1); }
+  .btn.active { background: var(--cyan); color: #000; border-color: var(--cyan); }
+  .btn.primary { background: var(--cyan); color: #000; border-color: var(--cyan); }
+  .btn.danger { color: var(--ruby); border-color: rgba(239, 68, 68, 0.2); }
+  .btn.danger:hover { background: rgba(239, 68, 68, 0.1); border-color: var(--ruby); }
+
+  /* NAVIGATION */
+  #topbar {
+    position: fixed; top: 0; left: 0; right: 0; height: var(--top-h);
+    background: var(--bg-surface); border-bottom: 1px solid var(--border);
+    display: flex; align-items: center; padding: 0 24px; z-index: 1000;
+  }
+  .logo { font-size: 18px; font-weight: 900; color: var(--cyan); letter-spacing: 0.35em; text-transform: uppercase; }
+  
+  #app-root { position: fixed; top: var(--top-h); left: 0; right: 0; bottom: 0; display: flex; }
+
+  /* SIDEBAR 2.0 */
+  #sidebar { width: var(--sidebar-w); flex-shrink: 0; background: var(--bg-surface); border-right: 1px solid var(--border); display: flex; flex-direction: column; }
+  #sb-search { padding: 20px; border-bottom: 1px solid var(--border); }
+  #sb-search input { width: 100%; padding: 12px 14px; background: #000; border: 1px solid var(--border); color: var(--text-p); border-radius: 4px; outline: none; font-size: 12px; }
+  #sidebar-scroll { flex: 1; overflow-y: auto; padding: 15px 0; }
+  .sb-group { margin-bottom: 24px; }
+  .sb-hdr { padding: 8px 24px; font-size: 10px; font-weight: 900; color: var(--text-d); text-transform: uppercase; letter-spacing: 0.25em; display: flex; justify-content: space-between; align-items: center; }
+  .sb-item { padding: 9px 24px 9px 42px; font-size: 12px; font-weight: 500; color: var(--text-s); cursor: pointer; display: flex; align-items: center; gap: 12px; border-left: 3px solid transparent; }
+  .sb-item:hover { color: var(--text-p); background: rgba(255,255,255,0.02); }
+  .sb-item.selected { background: rgba(56, 189, 248, 0.08); color: var(--cyan); font-weight: 800; border-left-color: var(--cyan); }
+  .led { width: 6px; height: 6px; border-radius: 50%; box-shadow: 0 0 8px currentColor; }
+  .sb-count { margin-left: auto; font-size: 10px; color: var(--text-d); letter-spacing: 0.1em; }
+
+  /* VIEWPORT */
+  #viewport { position: relative; flex: 1; background: var(--bg-black); overflow: hidden; }
+  #cy { 
+    width: 100%; height: 100%; outline: none;
+    background-image: 
+      linear-gradient(rgba(56, 189, 248, 0.03) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(56, 189, 248, 0.03) 1px, transparent 1px);
+    background-size: 80px 80px;
+  }
+  #hud { position: absolute; bottom: 30px; left: 30px; pointer-events: none; }
+  .hud-line { font-size: 10px; font-weight: 900; color: var(--cyan); opacity: 0.4; letter-spacing: 0.15em; margin-bottom: 4px; }
+
+  /* DETAIL PANEL */
+  #panel { width: var(--panel-w); flex-shrink: 0; display: flex; flex-direction: column; overflow: hidden; }
+  .panel-hdr { padding: 40px 40px 30px; border-bottom: 1px solid var(--border); }
+  .panel-tabs { display: flex; gap: 8px; padding: 0 40px; margin-top: -20px; z-index: 10; cursor: default; }
+  .tab { padding: 12px 24px; font-size: 10px; font-weight: 900; color: var(--text-d); text-transform: uppercase; cursor: pointer; border-bottom: 2px solid transparent; transition: 0.2s; }
+  .tab.active { color: var(--cyan); border-bottom-color: var(--cyan); }
+  .panel-main { flex: 1; overflow-y: auto; padding: 40px; }
+
+  /* DATA CARDS & FORMS */
+  .card { background: rgba(15, 23, 42, 0.3); border: 1px solid var(--border); border-radius: 6px; padding: 20px; margin-bottom: 16px; }
+  .card-hdr { font-size: 10px; font-weight: 900; color: var(--cyan); margin-bottom: 15px; text-transform: uppercase; letter-spacing: 0.2em; display: flex; justify-content: space-between; }
+  .pill { font-size: 9px; font-weight: 900; padding: 4px 10px; border-radius: 999px; border: 1px solid var(--border); letter-spacing: 0.2em; text-transform: uppercase; }
+  .pill.high { color: var(--ruby); border-color: rgba(239, 68, 68, 0.4); }
+  .pill.medium { color: var(--amber); border-color: rgba(245, 158, 11, 0.4); }
+  .pill.low { color: var(--emerald); border-color: rgba(16, 185, 129, 0.4); }
+  .meta-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; margin-top: 14px; }
+  .meta-item { background: rgba(0,0,0,0.35); border: 1px solid var(--border); border-radius: 6px; padding: 10px 12px; }
+  .meta-item label { display: block; font-size: 9px; font-weight: 900; color: var(--text-d); letter-spacing: 0.2em; text-transform: uppercase; margin-bottom: 6px; }
+  .chip { display: inline-flex; align-items: center; gap: 6px; padding: 2px 8px; font-size: 9px; font-weight: 900; border-radius: 999px; border: 1px solid var(--border); color: var(--text-d); letter-spacing: 0.12em; text-transform: uppercase; margin-right: 6px; margin-top: 6px; }
+  .chip.strong { color: var(--text-p); border-color: var(--border-focus); }
+  .empty-state { font-size: 12px; color: var(--text-d); padding: 14px 0; }
+  .field { margin-bottom: 24px; }
+  .field label { display: block; font-size: 10px; font-weight: 900; color: var(--text-d); text-transform: uppercase; margin-bottom: 10px; letter-spacing: 0.15em; }
+  .field input, .field select { width: 100%; background: #000; border: 1px solid var(--border); color: var(--text-p); padding: 14px; border-radius: 4px; outline: none; font-size: 13px; }
+  .field input:focus { border-color: var(--cyan); }
+
+  /* EXCEL */
+  #excel { position: absolute; inset: 0; background: var(--bg-black); z-index: 500; display: none; overflow-y: auto; padding: 80px; }
+  .sheet { width: 100%; border-collapse: collapse; font-size: 12px; }
+  .sheet th { background: #000; color: var(--text-d); padding: 14px; text-align: left; border-bottom: 2px solid var(--border); font-size: 10px; font-weight: 900; text-transform: uppercase; }
+  .sheet td { border-bottom: 1px solid var(--border); }
+  .sheet input { width: 100%; height: 44px; background: transparent; border: none; color: #fff; padding: 0 14px; outline: none; }
+
+  ::-webkit-scrollbar { width: 4px; height: 4px; }
+  ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 10px; }
+</style>
+</head>
+<body oncontextmenu="return false;">
+<div id="topbar">
+  <div class="logo">Sub3D <span style="font-weight:300; opacity:0.5">Studio</span></div>
+  <div style="display:flex; gap: 12px; margin-left:60px">
+    <button class="btn active" id="btn-graph" onclick="setView('graph')">Graph Monitor</button>
+    <button class="btn" id="btn-excel" onclick="setView('excel')">Master Registry</button>
+  </div>
+  <div style="margin-left:auto; display:flex; gap: 16px;">
+    <button class="btn" style="border-radius:20px" onclick="applyLogicalLayout()">Reset Layout</button>
+    <button class="btn" style="border-radius:20px" onclick="exportSchema()">Download Archive</button>
+    <button class="btn primary" style="border-radius:20px" onclick="openNewTableModal()">+ New Data Table</button>
+  </div>
+</div>
+<div id="app-root">
+  <div id="sidebar">
+    <div id="sb-search"><input type="text" placeholder="FILTER SCHEMA..." oninput="filterSidebar(this.value)"></div>
+    <div id="sidebar-scroll"></div>
+  </div>
+  <div id="viewport">
+    <div id="cy"></div>
+    <div id="excel"></div>
+    <div id="hud">
+      <div class="hud-line" id="hud-tables">NODES: 0</div>
+      <div class="hud-line" id="hud-links">LINKS: 0</div>
+      <div class="hud-line" id="hud-rows">ROWS: 0</div>
+      <div class="hud-line">STATUS: STEADY</div>
+    </div>
+  </div>
+  <div id="panel" class="glass">
+    <div id="panel-hdr-area"></div>
+    <div id="panel-tabs-area" class="panel-tabs">
+        <div class="tab active" id="tab-schema" onclick="setPanelTab('schema')">Structure</div>
+        <div class="tab" id="tab-links" onclick="setPanelTab('links')">Relations</div>
+        <div class="tab" id="tab-data" onclick="setPanelTab('data')">Raw Data</div>
+    </div>
+    <div id="panel-content-area" class="panel-main"></div>
+  </div>
+</div>
+<div id="modal-mask"><div id="modal" class="glass" style="width:500px; padding:40px; border-radius:8px"></div></div>
+
+<script>
+// ------------------------------------------------------------
+// STATE ENGINE
+// ------------------------------------------------------------
+const RAW_SCHEMA = JSON.parse([
+  '{"meta":{"seed":"schema/*.json + manual brainstorm 2026-04-04","sources":["reports/plans/20260325-proto03-pack-illustre-assets/07-architecture-precise-plan-profile.svg","reports/plans/2026-04-02_sub3d_hull_and_decks_first_architecture_spec.md","reports/plans/2026-04-01_sub3d_hull_breach_editor_handoff_current_state.md","reports/plans/2026-03-29_sub3d_first_playable_run_spec.md","reports/plans/2026-03-29_sub3d_helm_and_sonar_v1_spec.md"],"brainstorm_notes":["Planche7: outer length 15.2m, usable length 12.4m, passage clear 2.2-2.3m, door clear 1.2m x 2.1m.","Planche7: trunk footprint 1.1m x 1.4m, ladder width 0.7m-0.8m, volumes A-D (fore ballast, helm+radar, engine+pump+aft ballast, aft service + dorsal trunk).","Hull/Decks spec: hull + decks + vertical openings are primary; partitions and compartments derive later.","First playable run: single deterministic breach during traverse, run \u003c= 15 minutes, docking alignment 300cm / 20deg.","Breach handoff: logical loop exists (damage -\u003e breach -\u003e flood -\u003e repair -\u003e pump), exterior hole visuals still missing.","Sonar V1: ping cooldown 1.5s, max range 15000cm, forward half-angle 85deg."]},"domains":[{"id":1,"name":"Hull \u0026 Authoring","color":"#4E9AF1"},{"id":2,"name":"Modules \u0026 Stations","color":"#A855F7"},{"id":3,"name":"Catalog \u0026 Product","color":"#06B6D4"},{"id":4,"name":"Enemies \u0026 Fauna","color":"#EF4444"},{"id":5,"name":"Items \u0026 Loot","color":"#F59E0B"},{"id":6,"name":"World \u0026 Spawning","color":"#10B981"},{"id":7,"name":"Breach \u0026 Flood","color":"#F97316"},{"id":8,"name":"Mission \u0026 Rewards","color":"#8B5CF6"},{"id":9,"name":"Difficulty \u0026 Economy","color":"#6B7280"}],"tables":[{"id":"Submarine_Archetypes","domain":1,"priority":"high","description":"Defines the available submarine classes â€” size envelope, style, capacity constraints.","columns":[{"name":"archetype_id","type":"string","pk":true},{"name":"display_name","type":"string","nullable":false},{"n',
+  'ame":"length_m","type":"float","nullable":false},{"name":"max_diameter_m","type":"float","nullable":false},{"name":"max_deck_count","type":"int","nullable":false},{"name":"section_family_id","type":"string","fk":"Hull_Section_Families.section_family_id"},{"name":"style_tag","type":"string","nullable":true},{"name":"notes","type":"string","nullable":true}],"relations":[{"target":"Hull_Section_Families","type":"N:1","label":"uses section family"},{"target":"Structural_Bay_Configs","type":"1:N","label":"has bays"},{"target":"Station_Definitions","type":"N:N","label":"supports stations"},{"target":"Submarine_Catalog","type":"1:N","label":"catalogued as"}],"rows":[{"archetype_id":"proto03_core","display_name":"Proto03 Core","length_m":15.2,"max_diameter_m":4.2,"max_deck_count":1,"section_family_id":"sec_circular_std","style_tag":"proto03","notes":"Planche7: outer length 15.2m, usable 12.4m, passage clear 2.2-2.3m, door clear 1.2m x 2.1m, trunk 1.1m x 1.4m, single deck baseline."},{"archetype_id":"fp01_standard","display_name":"FP01 Standard","length_m":18,"max_diameter_m":4.6,"max_deck_count":2,"section_family_id":"sec_oval_wide","style_tag":"fp01","notes":"First playable baseline after proto03; expanded bays for helm, engine, service."},{"archetype_id":"proto04d_long","display_name":"Proto04D Long","length_m":21,"max_diameter_m":4.8,"max_deck_count":2,"section_family_id":"sec_oval_wide","style_tag":"proto04d","notes":"Long hull staging for proto04D spec."}]},{"id":"Hull_Section_Families","domain":1,"priority":"high","description":"Hull cross-section profiles available to archetypes (circular, oval, rectangular, etc.).","columns":[{"name":"section_family_id","type":"string","pk":true},{"name":"display_name","type":"string","nullable":false},{"name":"roundness_range","type":"string","nullable":true},{"name":"aspect_ratio_hint","type":"float","nullable":true},{"name":"notes","type":"string","nullable":true}],"relations":[{"target":"Submarine_Archetypes","type":"1:N","label',
+  '":"used by archetypes"},{"target":"Control_Ring_Presets","type":"1:N","label":"constrains ring presets"}],"rows":[{"section_family_id":"sec_circular_std","display_name":"Circular Standard","roundness_range":"0.9-1.0","aspect_ratio_hint":1,"notes":"Reference family for proto03 plan."},{"section_family_id":"sec_oval_wide","display_name":"Oval Wide","roundness_range":"0.6-0.8","aspect_ratio_hint":1.35,"notes":"Wider profile for multi-deck layouts."},{"section_family_id":"sec_rect_soft","display_name":"Rounded Rect","roundness_range":"0.4-0.6","aspect_ratio_hint":1.6,"notes":"Soft-rect envelope for modules."}]},{"id":"Control_Ring_Presets","domain":1,"priority":"high","description":"Reusable Control Ring configurations for hull shape authoring.","columns":[{"name":"preset_id","type":"string","pk":true},{"name":"display_name","type":"string","nullable":false},{"name":"section_family_id","type":"string","fk":"Hull_Section_Families.section_family_id"},{"name":"diameter_m","type":"float","nullable":false},{"name":"width_height_ratio","type":"float","nullable":true},{"name":"roundness","type":"float","nullable":true},{"name":"thickness_m","type":"float","nullable":true},{"name":"locked","type":"bool","nullable":false,"default":"false"}],"relations":[{"target":"Hull_Section_Families","type":"N:1","label":"belongs to section family"}],"rows":[{"preset_id":"ring_proto03_main","display_name":"Proto03 Main Ring","section_family_id":"sec_circular_std","diameter_m":4.2,"width_height_ratio":1,"roundness":0.95,"thickness_m":0.18,"locked":true},{"preset_id":"ring_oval_wide_46","display_name":"Oval Wide 4.6","section_family_id":"sec_oval_wide","diameter_m":4.6,"width_height_ratio":1.35,"roundness":0.7,"thickness_m":0.2,"locked":false},{"preset_id":"ring_rect_soft_48","display_name":"Soft Rect 4.8","section_family_id":"sec_rect_soft","diameter_m":4.8,"width_height_ratio":1.6,"roundness":0.55,"thickness_m":0.22,"locked":false}]},{"id":"Structural_Bay_Configs","domain":1,"priority":"high"',
+  ',"description":"Structural bay configurations within a submarine archetype â€” spatial envelope and floor capacity.","columns":[{"name":"bay_config_id","type":"string","pk":true},{"name":"archetype_id","type":"string","fk":"Submarine_Archetypes.archetype_id"},{"name":"display_name","type":"string","nullable":false},{"name":"length_m","type":"float","nullable":false},{"name":"usable_height_m","type":"float","nullable":false},{"name":"usable_width_m","type":"float","nullable":false},{"name":"max_floor_count","type":"int","nullable":false},{"name":"order_index","type":"int","nullable":false}],"relations":[{"target":"Submarine_Archetypes","type":"N:1","label":"belongs to archetype"},{"target":"Floor_Region_Types","type":"1:N","label":"contains floor regions"}],"rows":[{"bay_config_id":"proto03_bay_a_fore","archetype_id":"proto03_core","display_name":"Volume A - Fore Ballast","length_m":3,"usable_height_m":2.3,"usable_width_m":2.3,"max_floor_count":1,"order_index":1},{"bay_config_id":"proto03_bay_b_helm","archetype_id":"proto03_core","display_name":"Volume B - Helm","length_m":3.2,"usable_height_m":2.3,"usable_width_m":2.3,"max_floor_count":1,"order_index":2},{"bay_config_id":"proto03_bay_c_engine","archetype_id":"proto03_core","display_name":"Volume C - Engine","length_m":3.6,"usable_height_m":2.3,"usable_width_m":2.3,"max_floor_count":1,"order_index":3},{"bay_config_id":"proto03_bay_d_aft","archetype_id":"proto03_core","display_name":"Volume D - Aft Service","length_m":2.6,"usable_height_m":2.3,"usable_width_m":2.3,"max_floor_count":1,"order_index":4}]},{"id":"Floor_Region_Types","domain":1,"priority":"high","description":"Types of walkable floor regions within a structural bay.","columns":[{"name":"region_type_id","type":"string","pk":true},{"name":"display_name","type":"string","nullable":false},{"name":"kind","type":"enum","values":["main_band","side_corridor","mezzanine","platform","half_level","technical"]},{"name":"min_width_m","type":"float","nullable":true},{"n',
+  'ame":"min_headroom_m","type":"float","nullable":true},{"name":"walkable","type":"bool","nullable":false,"default":"true"}],"relations":[{"target":"Structural_Bay_Configs","type":"N:1","label":"scoped by bay config"}],"rows":[{"region_type_id":"region_main_band","display_name":"Main Band","kind":"main_band","min_width_m":2.2,"min_headroom_m":2.1,"walkable":true},{"region_type_id":"region_side_corridor","display_name":"Side Corridor","kind":"side_corridor","min_width_m":1.2,"min_headroom_m":2,"walkable":true},{"region_type_id":"region_platform","display_name":"Platform","kind":"platform","min_width_m":1,"min_headroom_m":2,"walkable":true}]},{"id":"Opening_Definitions","domain":1,"priority":"high","description":"Geometric opening types (doorway, hatch, shaft, deck cutout).","columns":[{"name":"opening_id","type":"string","pk":true},{"name":"display_name","type":"string","nullable":false},{"name":"kind","type":"enum","values":["doorway","hatch_opening","shaft","deck_cutout","airlock"]},{"name":"min_width_m","type":"float","nullable":true},{"name":"min_height_m","type":"float","nullable":true},{"name":"vertical","type":"bool","nullable":false,"default":"false"}],"relations":[{"target":"Connector_Definitions","type":"N:N","label":"used by connectors"},{"target":"Closure_Definitions","type":"N:N","label":"closable by"}],"rows":[{"opening_id":"opening_door_std","display_name":"Doorway Standard","kind":"doorway","min_width_m":1.2,"min_height_m":2.1,"vertical":false},{"opening_id":"opening_hatch_top","display_name":"Hatch Opening","kind":"hatch_opening","min_width_m":1.1,"min_height_m":1.4,"vertical":true},{"opening_id":"opening_trunk","display_name":"Trunk Cutout","kind":"shaft","min_width_m":1.1,"min_height_m":1.4,"vertical":true},{"opening_id":"opening_airlock","display_name":"Airlock Gate","kind":"airlock","min_width_m":1.2,"min_height_m":2.1,"vertical":false}]},{"id":"Connector_Definitions","domain":1,"priority":"high","description":"Circulation element types (ramp, ladd',
+  'er, passage, trunk).","columns":[{"name":"connector_id","type":"string","pk":true},{"name":"display_name","type":"string","nullable":false},{"name":"kind","type":"enum","values":["ramp","ladder","passage","trunk","hatch_connector"]},{"name":"traversal_cost","type":"float","nullable":true},{"name":"vertical","type":"bool","nullable":false,"default":"false"}],"relations":[{"target":"Opening_Definitions","type":"N:N","label":"uses openings"}],"rows":[{"connector_id":"connector_passage","display_name":"Passage","kind":"passage","traversal_cost":1,"vertical":false},{"connector_id":"connector_ladder","display_name":"Ladder","kind":"ladder","traversal_cost":1.8,"vertical":true},{"connector_id":"connector_trunk","display_name":"Trunk","kind":"trunk","traversal_cost":1.4,"vertical":true},{"connector_id":"connector_ramp","display_name":"Ramp","kind":"ramp","traversal_cost":1.2,"vertical":false}]},{"id":"Closure_Definitions","domain":1,"priority":"high","description":"Closable elements (door, hatch, valve) â€” controls flood propagation.","columns":[{"name":"closure_id","type":"string","pk":true},{"name":"display_name","type":"string","nullable":false},{"name":"kind","type":"enum","values":["door","hatch","valve","blast_door"]},{"name":"flood_stops","type":"bool","nullable":false,"default":"true"},{"name":"breakable","type":"bool","nullable":false,"default":"false"},{"name":"default_open","type":"bool","nullable":false,"default":"false"}],"relations":[{"target":"Opening_Definitions","type":"N:N","label":"closes openings"}],"rows":[{"closure_id":"closure_door_std","display_name":"Door Standard","kind":"door","flood_stops":true,"breakable":false,"default_open":false},{"closure_id":"closure_hatch_std","display_name":"Hatch Standard","kind":"hatch","flood_stops":true,"breakable":false,"default_open":false},{"closure_id":"closure_valve_std","display_name":"Valve Standard","kind":"valve","flood_stops":true,"breakable":true,"default_open":false},{"closure_id":"closure_blast","display',
+  '_name":"Blast Door","kind":"blast_door","flood_stops":true,"breakable":false,"default_open":false}]},{"id":"Partition_Definitions","domain":1,"priority":"high","description":"Interior partition types â€” pressure bulkheads and internal walls.","columns":[{"name":"partition_id","type":"string","pk":true},{"name":"display_name","type":"string","nullable":false},{"name":"kind","type":"enum","values":["pressure_bulkhead","internal_wall"]},{"name":"flood_barrier","type":"bool","nullable":false,"default":"true"},{"name":"destructible","type":"bool","nullable":false,"default":"false"},{"name":"base_resistance","type":"float","nullable":true}],"relations":[],"rows":[{"partition_id":"partition_bulkhead_std","display_name":"Pressure Bulkhead","kind":"pressure_bulkhead","flood_barrier":true,"destructible":false,"base_resistance":1},{"partition_id":"partition_internal_std","display_name":"Internal Wall","kind":"internal_wall","flood_barrier":false,"destructible":true,"base_resistance":0.4}]},{"id":"Outer_Envelope_Presets","domain":1,"priority":"medium","description":"Secondary envelope presets â€” Kiosk/Sail and similar integrated superstructures.","columns":[{"name":"envelope_id","type":"string","pk":true},{"name":"display_name","type":"string","nullable":false},{"name":"kind","type":"enum","values":["kiosk","sail","pod","sponson"]},{"name":"has_trunk","type":"bool","nullable":false,"default":"false"},{"name":"modifies_silhouette","type":"bool","nullable":false,"default":"true"}],"relations":[],"rows":[{"envelope_id":"envelope_kiosk","display_name":"Kiosk","kind":"kiosk","has_trunk":true,"modifies_silhouette":true},{"envelope_id":"envelope_sail","display_name":"Sail","kind":"sail","has_trunk":true,"modifies_silhouette":true},{"envelope_id":"envelope_pod","display_name":"Pod","kind":"pod","has_trunk":false,"modifies_silhouette":true}]},{"id":"Station_Definitions","domain":2,"priority":"high","description":"Interior crew stations â€” Helm, Engine, Pump, Repair, Storage, etc.","c',
+  'olumns":[{"name":"station_id","type":"string","pk":true},{"name":"display_name","type":"string","nullable":false},{"name":"kind","type":"enum","values":["helm","engine","pump","repair","sonar","storage","airlock_ctrl","generic"]},{"name":"room_tag_id","type":"string","fk":"Room_Tag_Catalog.room_tag_id","nullable":true},{"name":"interact_range","type":"float","nullable":true},{"name":"requires_power","type":"bool","nullable":false,"default":"true"}],"relations":[{"target":"Room_Tag_Catalog","type":"N:1","label":"tagged as"},{"target":"Submarine_Archetypes","type":"N:N","label":"compatible with archetypes"}],"rows":[{"station_id":"station_helm","display_name":"Helm","kind":"helm","room_tag_id":"room_nav","interact_range":1.5,"requires_power":true},{"station_id":"station_sonar","display_name":"Sonar","kind":"sonar","room_tag_id":"room_nav","interact_range":1.6,"requires_power":true},{"station_id":"station_engine","display_name":"Engine","kind":"engine","room_tag_id":"room_machinery","interact_range":1.6,"requires_power":true},{"station_id":"station_pump","display_name":"Pump Control","kind":"pump","room_tag_id":"room_ballast","interact_range":1.4,"requires_power":true},{"station_id":"station_repair","display_name":"Repair Console","kind":"repair","room_tag_id":"room_technical","interact_range":1.3,"requires_power":true},{"station_id":"station_storage","display_name":"Storage Rack","kind":"storage","room_tag_id":"room_storage","interact_range":1,"requires_power":false},{"station_id":"station_airlock_ctrl","display_name":"Airlock Control","kind":"airlock_ctrl","room_tag_id":"room_access","interact_range":1.2,"requires_power":true}]},{"id":"Room_Tag_Catalog","domain":2,"priority":"high","description":"Functional room role tags â€” Navigation, Machine, Habitat, Ballast, Storage, etc.","columns":[{"name":"room_tag_id","type":"string","pk":true},{"name":"display_name","type":"string","nullable":false},{"name":"category","type":"enum","values":["navigation","machinery","habit',
+  'at","ballast","storage","mission","access","technical"]},{"name":"flood_priority","type":"int","nullable":true},{"name":"notes","type":"string","nullable":true}],"relations":[{"target":"Station_Definitions","type":"1:N","label":"associated stations"}],"rows":[{"room_tag_id":"room_nav","display_name":"Navigation","category":"navigation","flood_priority":3,"notes":"Helm, sonar, command."},{"room_tag_id":"room_machinery","display_name":"Machinery","category":"machinery","flood_priority":5,"notes":"Engine and pump volume."},{"room_tag_id":"room_ballast","display_name":"Ballast","category":"ballast","flood_priority":6,"notes":"Flooded mass control."},{"room_tag_id":"room_storage","display_name":"Storage","category":"storage","flood_priority":2,"notes":"Supplies and spare parts."},{"room_tag_id":"room_access","display_name":"Access","category":"access","flood_priority":2,"notes":"Hatches, trunks, doors."},{"room_tag_id":"room_technical","display_name":"Technical","category":"technical","flood_priority":4,"notes":"Repair frontage and utilities."},{"room_tag_id":"room_habitat","display_name":"Habitat","category":"habitat","flood_priority":1,"notes":"Crew space."},{"room_tag_id":"room_mission","display_name":"Mission Bay","category":"mission","flood_priority":3,"notes":"Mission equipment."}]},{"id":"External_Module_Definitions","domain":2,"priority":"medium","description":"External modules â€” propulsion, hydroplanes, rudders, stern pods.","columns":[{"name":"module_id","type":"string","pk":true},{"name":"display_name","type":"string","nullable":false},{"name":"kind","type":"enum","values":["propulsion","hydroplane","rudder","stern_pod","airlock","sonar_array"]},{"name":"mass_kg","type":"float","nullable":true},{"name":"drag_modifier","type":"float","nullable":true},{"name":"destructible","type":"bool","nullable":false,"default":"true"}],"relations":[],"rows":[{"module_id":"ext_prop_standard","display_name":"Propulsion Standard","kind":"propulsion","mass_kg":3200,"drag_modif',
+  'ier":1,"destructible":true},{"module_id":"ext_hydroplane_pair","display_name":"Hydroplane Pair","kind":"hydroplane","mass_kg":450,"drag_modifier":0.85,"destructible":true},{"module_id":"ext_rudder_x","display_name":"Rudder X","kind":"rudder","mass_kg":520,"drag_modifier":0.9,"destructible":true},{"module_id":"ext_airlock_dorsal","display_name":"Dorsal Airlock","kind":"airlock","mass_kg":800,"drag_modifier":1.1,"destructible":true},{"module_id":"ext_sonar_array_front","display_name":"Front Sonar Array","kind":"sonar_array","mass_kg":300,"drag_modifier":1.05,"destructible":true}]},{"id":"Equipment_Module_Definitions","domain":2,"priority":"medium","description":"Internal equipment modules â€” ballast systems, pumps, machinery.","columns":[{"name":"equip_id","type":"string","pk":true},{"name":"display_name","type":"string","nullable":false},{"name":"kind","type":"enum","values":["ballast","pump","generator","o2_scrubber","reactor","misc"]},{"name":"power_draw_kw","type":"float","nullable":true},{"name":"repairable","type":"bool","nullable":false,"default":"true"}],"relations":[],"rows":[{"equip_id":"equip_ballast_front","display_name":"Ballast Tank Front","kind":"ballast","power_draw_kw":5,"repairable":true},{"equip_id":"equip_ballast_rear","display_name":"Ballast Tank Rear","kind":"ballast","power_draw_kw":5,"repairable":true},{"equip_id":"equip_pump_main","display_name":"Main Pump","kind":"pump","power_draw_kw":8,"repairable":true},{"equip_id":"equip_generator_basic","display_name":"Generator Basic","kind":"generator","power_draw_kw":0,"repairable":true},{"equip_id":"equip_o2_scrubber","display_name":"O2 Scrubber","kind":"o2_scrubber","power_draw_kw":2,"repairable":true}]},{"id":"Mission_Module_Definitions","domain":2,"priority":"low","description":"Mission-specific modules installed before or during gameplay.","columns":[{"name":"mission_module_id","type":"string","pk":true},{"name":"display_name","type":"string","nullable":false},{"name":"mission_type_tag","type":"',
+  'string","nullable":true},{"name":"one_time_use","type":"bool","nullable":false,"default":"false"}],"relations":[{"target":"Mission_Templates","type":"N:N","label":"required by missions"}],"rows":[{"mission_module_id":"mission_scan_rig","display_name":"Scan Rig","mission_type_tag":"scan","one_time_use":false},{"mission_module_id":"mission_salvage_crate","display_name":"Salvage Crate","mission_type_tag":"salvage","one_time_use":true},{"mission_module_id":"mission_relay_beacon","display_name":"Relay Beacon","mission_type_tag":"relay","one_time_use":true}]},{"id":"Submarine_Catalog","domain":3,"priority":"medium","description":"Submarine offers available for unlock or purchase â€” links archetype to product layer.","columns":[{"name":"catalog_id","type":"string","pk":true},{"name":"archetype_id","type":"string","fk":"Submarine_Archetypes.archetype_id"},{"name":"display_name","type":"string","nullable":false},{"name":"base_cost","type":"float","nullable":true},{"name":"currency_type","type":"string","nullable":true},{"name":"available_at","type":"enum","values":["lobby","shipyard","mission_reward","unlock"]}],"relations":[{"target":"Submarine_Archetypes","type":"N:1","label":"based on archetype"},{"target":"Submarine_Unlock_Conditions","type":"1:N","label":"has unlock conditions"}],"rows":[{"catalog_id":"catalog_proto03_core","archetype_id":"proto03_core","display_name":"Proto03 Core","base_cost":0,"currency_type":"credits","available_at":"lobby"},{"catalog_id":"catalog_fp01_standard","archetype_id":"fp01_standard","display_name":"FP01 Standard","base_cost":25000,"currency_type":"credits","available_at":"unlock"},{"catalog_id":"catalog_proto04d_long","archetype_id":"proto04d_long","display_name":"Proto04D Long","base_cost":32000,"currency_type":"credits","available_at":"shipyard"}]},{"id":"Submarine_Unlock_Conditions","domain":3,"priority":"low","description":"Conditions required to unlock a submarine catalog entry.","columns":[{"name":"condition_id","type":"string","pk"',
+  ':true},{"name":"catalog_id","type":"string","fk":"Submarine_Catalog.catalog_id"},{"name":"condition_type","type":"enum","values":["mission_complete","level_reached","item_owned","purchase"]},{"name":"condition_ref","type":"string","nullable":true},{"name":"notes","type":"string","nullable":true}],"relations":[{"target":"Submarine_Catalog","type":"N:1","label":"unlocks catalog entry"}],"rows":[{"condition_id":"unlock_fp01_mission","catalog_id":"catalog_fp01_standard","condition_type":"mission_complete","condition_ref":"mission_fp01_reach_exit","notes":"Complete FP01 run."},{"condition_id":"unlock_fp01_level","catalog_id":"catalog_fp01_standard","condition_type":"level_reached","condition_ref":"level_3","notes":"Level gate for FP01."},{"condition_id":"unlock_proto04d_level","catalog_id":"catalog_proto04d_long","condition_type":"level_reached","condition_ref":"level_5","notes":"Long hull unlock later."}]},{"id":"Owned_Submarine_States","domain":3,"priority":"low","description":"Per-player submarine ownership and customisation state. Post-Proto03.","columns":[{"name":"owned_id","type":"string","pk":true},{"name":"player_id","type":"string","nullable":false},{"name":"catalog_id","type":"string","fk":"Submarine_Catalog.catalog_id"},{"name":"nickname","type":"string","nullable":true},{"name":"damage_state","type":"float","nullable":true},{"name":"last_mission_id","type":"string","nullable":true}],"relations":[{"target":"Submarine_Catalog","type":"N:1","label":"owns catalog entry"}],"rows":[{"owned_id":"owned_001","player_id":"player_001","catalog_id":"catalog_proto03_core","nickname":"Starter","damage_state":0.1,"last_mission_id":"mission_fp01_reach_exit"},{"owned_id":"owned_002","player_id":"player_002","catalog_id":"catalog_fp01_standard","nickname":"Deep Runner","damage_state":0,"last_mission_id":"mission_reef_retrieve"}]},{"id":"Enemy_Stats","domain":4,"priority":"high","description":"Base stats per enemy type â€” health, damage, speed, perception.","columns":[{"name":',
+  '"enemy_id","type":"string","pk":true},{"name":"display_name","type":"string","nullable":false},{"name":"enemy_class","type":"enum","values":["surface","submarine","creature","drone","boss"]},{"name":"base_hp","type":"float","nullable":false},{"name":"base_damage","type":"float","nullable":false},{"name":"base_speed","type":"float","nullable":false},{"name":"detect_range_m","type":"float","nullable":true},{"name":"breach_capable","type":"bool","nullable":false,"default":"false"}],"relations":[{"target":"Enemy_Variants","type":"1:N","label":"has variants"},{"target":"Enemy_Loot_Weights","type":"1:N","label":"drops loot"}],"rows":[{"enemy_id":"enemy_pressure_leech","display_name":"Pressure Leech","enemy_class":"creature","base_hp":60,"base_damage":12,"base_speed":2.2,"detect_range_m":30,"breach_capable":true},{"enemy_id":"enemy_hull_spike","display_name":"Hull Spike","enemy_class":"creature","base_hp":120,"base_damage":22,"base_speed":1.6,"detect_range_m":40,"breach_capable":true},{"enemy_id":"enemy_drone_scout","display_name":"Drone Scout","enemy_class":"drone","base_hp":40,"base_damage":8,"base_speed":3.5,"detect_range_m":50,"breach_capable":false}]},{"id":"Enemy_Variants","domain":4,"priority":"high","description":"Variants of base enemy types â€” elite, patrol, boss, ambush, etc.","columns":[{"name":"variant_id","type":"string","pk":true},{"name":"enemy_id","type":"string","fk":"Enemy_Stats.enemy_id"},{"name":"variant_tag","type":"enum","values":["standard","elite","patrol","ambush","boss","escort"]},{"name":"hp_mult","type":"float","nullable":false,"default":"1.0"},{"name":"damage_mult","type":"float","nullable":false,"default":"1.0"},{"name":"speed_mult","type":"float","nullable":false,"default":"1.0"},{"name":"xp_reward","type":"float","nullable":true}],"relations":[{"target":"Enemy_Stats","type":"N:1","label":"variant of"}],"rows":[{"variant_id":"variant_leech_standard","enemy_id":"enemy_pressure_leech","variant_tag":"standard","hp_mult":1,"damage_mult":1,"spee',
+  'd_mult":1,"xp_reward":10},{"variant_id":"variant_leech_patrol","enemy_id":"enemy_pressure_leech","variant_tag":"patrol","hp_mult":1.1,"damage_mult":1.1,"speed_mult":1,"xp_reward":12},{"variant_id":"variant_hull_spike_elite","enemy_id":"enemy_hull_spike","variant_tag":"elite","hp_mult":1.3,"damage_mult":1.4,"speed_mult":1,"xp_reward":25},{"variant_id":"variant_drone_patrol","enemy_id":"enemy_drone_scout","variant_tag":"patrol","hp_mult":1,"damage_mult":1,"speed_mult":1.2,"xp_reward":8}]},{"id":"Enemy_Loot_Weights","domain":4,"priority":"medium","description":"Loot table assignment per enemy type with weight.","columns":[{"name":"entry_id","type":"string","pk":true},{"name":"enemy_id","type":"string","fk":"Enemy_Stats.enemy_id"},{"name":"loot_table_id","type":"string","fk":"Loot_Tables.loot_table_id"},{"name":"weight","type":"float","nullable":false,"default":"1.0"}],"relations":[{"target":"Enemy_Stats","type":"N:1","label":"assigned to enemy"},{"target":"Loot_Tables","type":"N:1","label":"references loot table"}],"rows":[{"entry_id":"loot_enemy_leech_common","enemy_id":"enemy_pressure_leech","loot_table_id":"loot_enemy_common","weight":1},{"entry_id":"loot_enemy_hull_spike_rare","enemy_id":"enemy_hull_spike","loot_table_id":"loot_enemy_rare","weight":0.7},{"entry_id":"loot_enemy_drone_common","enemy_id":"enemy_drone_scout","loot_table_id":"loot_enemy_common","weight":0.8}]},{"id":"Fauna_Definitions","domain":4,"priority":"high","description":"Non-hostile fauna â€” Hunter, Follower, FishSchool, Plankton. Identity layer.","columns":[{"name":"fauna_id","type":"string","pk":true},{"name":"display_name","type":"string","nullable":false},{"name":"fauna_type","type":"enum","values":["hunter","follower","fish_school","plankton","ambient"]},{"name":"hostile","type":"bool","nullable":false,"default":"false"},{"name":"flock_size_min","type":"int","nullable":true},{"name":"flock_size_max","type":"int","nullable":true}],"relations":[{"target":"Fauna_Behavior_Params","type":"1:N",',
+  '"label":"has behavior params"}],"rows":[{"fauna_id":"fauna_school_small","display_name":"Small School","fauna_type":"fish_school","hostile":false,"flock_size_min":6,"flock_size_max":12},{"fauna_id":"fauna_plankton","display_name":"Plankton Drift","fauna_type":"plankton","hostile":false,"flock_size_min":12,"flock_size_max":30},{"fauna_id":"fauna_glider","display_name":"Glider","fauna_type":"ambient","hostile":false,"flock_size_min":1,"flock_size_max":2}]},{"id":"Fauna_Behavior_Params","domain":4,"priority":"high","description":"Movement and behavior tuning per fauna type.","columns":[{"name":"param_id","type":"string","pk":true},{"name":"fauna_id","type":"string","fk":"Fauna_Definitions.fauna_id"},{"name":"cruise_speed","type":"float","nullable":false},{"name":"flee_speed","type":"float","nullable":true},{"name":"detection_range_m","type":"float","nullable":true},{"name":"flee_threshold","type":"float","nullable":true},{"name":"depth_min_m","type":"float","nullable":true},{"name":"depth_max_m","type":"float","nullable":true}],"relations":[{"target":"Fauna_Definitions","type":"N:1","label":"params for fauna"}],"rows":[{"param_id":"param_school_small","fauna_id":"fauna_school_small","cruise_speed":1.2,"flee_speed":2.2,"detection_range_m":12,"flee_threshold":0.4,"depth_min_m":20,"depth_max_m":80},{"param_id":"param_plankton","fauna_id":"fauna_plankton","cruise_speed":0.4,"flee_speed":0.8,"detection_range_m":6,"flee_threshold":0.2,"depth_min_m":10,"depth_max_m":40},{"param_id":"param_glider","fauna_id":"fauna_glider","cruise_speed":1.8,"flee_speed":2.6,"detection_range_m":18,"flee_threshold":0.5,"depth_min_m":80,"depth_max_m":220}]},{"id":"Items_Stats","domain":5,"priority":"high","description":"All game items â€” stats, category, weight, stack size.","columns":[{"name":"item_id","type":"string","pk":true},{"name":"display_name","type":"string","nullable":false},{"name":"category_id","type":"string","fk":"Item_Categories.category_id"},{"name":"weight_kg","type":"float","',
+  'nullable":true},{"name":"stack_size","type":"int","nullable":false,"default":"1"},{"name":"consumable","type":"bool","nullable":false,"default":"false"},{"name":"base_value","type":"float","nullable":true},{"name":"mission_item","type":"bool","nullable":false,"default":"false"}],"relations":[{"target":"Item_Categories","type":"N:1","label":"belongs to category"},{"target":"Loot_Table_Entries","type":"1:N","label":"appears in loot"}],"rows":[{"item_id":"item_seal_kit","display_name":"Seal Kit","category_id":"cat_repair","weight_kg":1.2,"stack_size":3,"consumable":true,"base_value":120,"mission_item":false},{"item_id":"item_weld_patch","display_name":"Weld Patch","category_id":"cat_repair","weight_kg":2,"stack_size":2,"consumable":true,"base_value":180,"mission_item":false},{"item_id":"item_pump_hose","display_name":"Pump Hose","category_id":"cat_repair","weight_kg":1.5,"stack_size":2,"consumable":true,"base_value":150,"mission_item":false},{"item_id":"item_scrap_metal","display_name":"Scrap Metal","category_id":"cat_resource","weight_kg":1,"stack_size":5,"consumable":false,"base_value":40,"mission_item":false},{"item_id":"item_blackbox","display_name":"Blackbox","category_id":"cat_mission","weight_kg":3,"stack_size":1,"consumable":false,"base_value":0,"mission_item":true},{"item_id":"item_sonar_upgrade_mk1","display_name":"Sonar Upgrade Mk1","category_id":"cat_upgrade","weight_kg":0.8,"stack_size":1,"consumable":false,"base_value":600,"mission_item":false},{"item_id":"item_med_kit","display_name":"Med Kit","category_id":"cat_consumable","weight_kg":0.6,"stack_size":4,"consumable":true,"base_value":90,"mission_item":false}]},{"id":"Item_Categories","domain":5,"priority":"high","description":"Item category definitions â€” Repair, Ammo, Consumable, Mission, Upgrade.","columns":[{"name":"category_id","type":"string","pk":true},{"name":"display_name","type":"string","nullable":false},{"name":"kind","type":"enum","values":["repair","ammo","consumable","mission","upgrade","',
+  'resource","key"]},{"name":"stackable","type":"bool","nullable":false,"default":"true"}],"relations":[{"target":"Items_Stats","type":"1:N","label":"categorizes items"}],"rows":[{"category_id":"cat_repair","display_name":"Repair","kind":"repair","stackable":true},{"category_id":"cat_mission","display_name":"Mission","kind":"mission","stackable":false},{"category_id":"cat_upgrade","display_name":"Upgrade","kind":"upgrade","stackable":false},{"category_id":"cat_resource","display_name":"Resource","kind":"resource","stackable":true},{"category_id":"cat_consumable","display_name":"Consumable","kind":"consumable","stackable":true}]},{"id":"Loot_Tables","domain":5,"priority":"high","description":"Named loot tables â€” referenced by enemies, containers, wrecks.","columns":[{"name":"loot_table_id","type":"string","pk":true},{"name":"display_name","type":"string","nullable":false},{"name":"context","type":"enum","values":["enemy_drop","container","wreck","mission_reward","biome_ambient"]},{"name":"rolls_min","type":"int","nullable":false,"default":"1"},{"name":"rolls_max","type":"int","nullable":false,"default":"3"}],"relations":[{"target":"Loot_Table_Entries","type":"1:N","label":"contains entries"},{"target":"Enemy_Loot_Weights","type":"1:N","label":"assigned to enemies"}],"rows":[{"loot_table_id":"loot_enemy_common","display_name":"Enemy Common","context":"enemy_drop","rolls_min":1,"rolls_max":2},{"loot_table_id":"loot_enemy_rare","display_name":"Enemy Rare","context":"enemy_drop","rolls_min":1,"rolls_max":1},{"loot_table_id":"loot_wreck_basic","display_name":"Wreck Basic","context":"wreck","rolls_min":1,"rolls_max":3},{"loot_table_id":"loot_mission_reward","display_name":"Mission Reward","context":"mission_reward","rolls_min":1,"rolls_max":1}]},{"id":"Loot_Table_Entries","domain":5,"priority":"high","description":"Individual entries in a loot table â€” item, weight, quantity range.","columns":[{"name":"entry_id","type":"string","pk":true},{"name":"loot_table_id","type":"st',
+  'ring","fk":"Loot_Tables.loot_table_id"},{"name":"item_id","type":"string","fk":"Items_Stats.item_id"},{"name":"weight","type":"float","nullable":false,"default":"1.0"},{"name":"qty_min","type":"int","nullable":false,"default":"1"},{"name":"qty_max","type":"int","nullable":false,"default":"1"},{"name":"conditional","type":"string","nullable":true}],"relations":[{"target":"Loot_Tables","type":"N:1","label":"part of loot table"},{"target":"Items_Stats","type":"N:1","label":"references item"}],"rows":[{"entry_id":"entry_enemy_common_scrap","loot_table_id":"loot_enemy_common","item_id":"item_scrap_metal","weight":1,"qty_min":1,"qty_max":3,"conditional":null},{"entry_id":"entry_enemy_common_seal","loot_table_id":"loot_enemy_common","item_id":"item_seal_kit","weight":0.7,"qty_min":1,"qty_max":2,"conditional":null},{"entry_id":"entry_enemy_rare_upgrade","loot_table_id":"loot_enemy_rare","item_id":"item_sonar_upgrade_mk1","weight":0.3,"qty_min":1,"qty_max":1,"conditional":null},{"entry_id":"entry_wreck_patch","loot_table_id":"loot_wreck_basic","item_id":"item_weld_patch","weight":0.8,"qty_min":1,"qty_max":2,"conditional":null},{"entry_id":"entry_wreck_hose","loot_table_id":"loot_wreck_basic","item_id":"item_pump_hose","weight":0.6,"qty_min":1,"qty_max":1,"conditional":null},{"entry_id":"entry_wreck_med","loot_table_id":"loot_wreck_basic","item_id":"item_med_kit","weight":0.5,"qty_min":1,"qty_max":1,"conditional":null},{"entry_id":"entry_mission_blackbox","loot_table_id":"loot_mission_reward","item_id":"item_blackbox","weight":1,"qty_min":1,"qty_max":1,"conditional":"completion"},{"entry_id":"entry_mission_upgrade","loot_table_id":"loot_mission_reward","item_id":"item_sonar_upgrade_mk1","weight":1,"qty_min":1,"qty_max":1,"conditional":"first_time"}]},{"id":"Biome_Definitions","domain":6,"priority":"high","description":"World biome types â€” abyssal, thermocline, reef, trench, etc.","columns":[{"name":"biome_id","type":"string","pk":true},{"name":"display_name","type":"string"',
+  ',"nullable":false},{"name":"kind","type":"enum","values":["abyssal","thermocline","reef","trench","open_ocean","coastal","tunnel"]},{"name":"depth_min_m","type":"float","nullable":true},{"name":"depth_max_m","type":"float","nullable":true}],"relations":[{"target":"Biome_Parameters","type":"1:N","label":"has parameters"},{"target":"Spawn_Tables","type":"1:N","label":"has spawn tables"},{"target":"Mission_Templates","type":"1:N","label":"hosts missions"}],"rows":[{"biome_id":"biome_coastal","display_name":"Coastal Shelf","kind":"coastal","depth_min_m":0,"depth_max_m":80},{"biome_id":"biome_reef","display_name":"Reef Belt","kind":"reef","depth_min_m":60,"depth_max_m":140},{"biome_id":"biome_trench","display_name":"Trench","kind":"trench","depth_min_m":200,"depth_max_m":420},{"biome_id":"biome_tunnel","display_name":"Tunnel Run","kind":"tunnel","depth_min_m":40,"depth_max_m":120}]},{"id":"Biome_Parameters","domain":6,"priority":"high","description":"Per-biome environmental parameters â€” visibility, currents, ambient danger.","columns":[{"name":"param_id","type":"string","pk":true},{"name":"biome_id","type":"string","fk":"Biome_Definitions.biome_id"},{"name":"visibility_m","type":"float","nullable":false},{"name":"current_speed","type":"float","nullable":true},{"name":"ambient_pressure","type":"float","nullable":true},{"name":"danger_level","type":"int","nullable":false,"default":"1"},{"name":"sonar_noise","type":"float","nullable":true}],"relations":[{"target":"Biome_Definitions","type":"N:1","label":"parameters of biome"}],"rows":[{"param_id":"param_coastal","biome_id":"biome_coastal","visibility_m":35,"current_speed":0.2,"ambient_pressure":1,"danger_level":1,"sonar_noise":0.2},{"param_id":"param_reef","biome_id":"biome_reef","visibility_m":30,"current_speed":0.4,"ambient_pressure":1.8,"danger_level":2,"sonar_noise":0.35},{"param_id":"param_trench","biome_id":"biome_trench","visibility_m":20,"current_speed":0.5,"ambient_pressure":3.5,"danger_level":4,"sonar_noise":0.6',
+  '},{"param_id":"param_tunnel","biome_id":"biome_tunnel","visibility_m":25,"current_speed":0.1,"ambient_pressure":2.2,"danger_level":3,"sonar_noise":0.5}]},{"id":"Spawn_Tables","domain":6,"priority":"high","description":"Spawn tables per biome, zone, or trigger context.","columns":[{"name":"spawn_table_id","type":"string","pk":true},{"name":"biome_id","type":"string","fk":"Biome_Definitions.biome_id","nullable":true},{"name":"zone_id","type":"string","fk":"World_Zone_Definitions.zone_id","nullable":true},{"name":"context","type":"enum","values":["ambient","triggered","boss_room","patrol","scripted"]},{"name":"max_concurrent","type":"int","nullable":true}],"relations":[{"target":"Biome_Definitions","type":"N:1","label":"scoped to biome"},{"target":"World_Zone_Definitions","type":"N:1","label":"scoped to zone"},{"target":"Spawn_Table_Entries","type":"1:N","label":"contains entries"}],"rows":[{"spawn_table_id":"spawn_reef_ambient","biome_id":"biome_reef","zone_id":null,"context":"ambient","max_concurrent":6},{"spawn_table_id":"spawn_tunnel_patrol","biome_id":null,"zone_id":"zone_fp01_entry","context":"patrol","max_concurrent":4},{"spawn_table_id":"spawn_trench_patrol","biome_id":null,"zone_id":"zone_trench_drop","context":"patrol","max_concurrent":5},{"spawn_table_id":"spawn_coastal_ambient","biome_id":"biome_coastal","zone_id":null,"context":"ambient","max_concurrent":5}]},{"id":"Spawn_Table_Entries","domain":6,"priority":"high","description":"Individual spawn entries â€” enemy or fauna with weight and conditions.","columns":[{"name":"entry_id","type":"string","pk":true},{"name":"spawn_table_id","type":"string","fk":"Spawn_Tables.spawn_table_id"},{"name":"entity_type","type":"enum","values":["enemy","fauna"]},{"name":"entity_id","type":"string","nullable":false},{"name":"weight","type":"float","nullable":false,"default":"1.0"},{"name":"count_min","type":"int","nullable":false,"default":"1"},{"name":"count_max","type":"int","nullable":false,"default":"1"},{"name":"condit',
+  'ion","type":"string","nullable":true}],"relations":[{"target":"Spawn_Tables","type":"N:1","label":"part of spawn table"},{"target":"Enemy_Stats","type":"N:1","label":"spawns enemy"},{"target":"Fauna_Definitions","type":"N:1","label":"spawns fauna"}],"rows":[{"entry_id":"spawn_reef_ambient_1","spawn_table_id":"spawn_reef_ambient","entity_type":"fauna","entity_id":"fauna_school_small","weight":1,"count_min":6,"count_max":12,"condition":null},{"entry_id":"spawn_reef_ambient_2","spawn_table_id":"spawn_reef_ambient","entity_type":"fauna","entity_id":"fauna_plankton","weight":0.8,"count_min":12,"count_max":30,"condition":null},{"entry_id":"spawn_reef_ambient_3","spawn_table_id":"spawn_reef_ambient","entity_type":"enemy","entity_id":"enemy_pressure_leech","weight":0.6,"count_min":1,"count_max":2,"condition":null},{"entry_id":"spawn_tunnel_patrol_1","spawn_table_id":"spawn_tunnel_patrol","entity_type":"enemy","entity_id":"enemy_drone_scout","weight":1,"count_min":1,"count_max":2,"condition":null},{"entry_id":"spawn_tunnel_patrol_2","spawn_table_id":"spawn_tunnel_patrol","entity_type":"enemy","entity_id":"enemy_pressure_leech","weight":0.8,"count_min":1,"count_max":2,"condition":null},{"entry_id":"spawn_trench_patrol_1","spawn_table_id":"spawn_trench_patrol","entity_type":"enemy","entity_id":"enemy_hull_spike","weight":1,"count_min":1,"count_max":1,"condition":null},{"entry_id":"spawn_trench_patrol_2","spawn_table_id":"spawn_trench_patrol","entity_type":"fauna","entity_id":"fauna_glider","weight":0.7,"count_min":1,"count_max":2,"condition":null},{"entry_id":"spawn_coastal_ambient_1","spawn_table_id":"spawn_coastal_ambient","entity_type":"fauna","entity_id":"fauna_plankton","weight":1,"count_min":10,"count_max":25,"condition":null},{"entry_id":"spawn_coastal_ambient_2","spawn_table_id":"spawn_coastal_ambient","entity_type":"fauna","entity_id":"fauna_school_small","weight":0.9,"count_min":4,"count_max":10,"condition":null}]},{"id":"World_Zone_Definitions","domain":6,"priority"',
+  ':"medium","description":"World zones â€” named segments of the game world or tunnel network.","columns":[{"name":"zone_id","type":"string","pk":true},{"name":"display_name","type":"string","nullable":false},{"name":"biome_id","type":"string","fk":"Biome_Definitions.biome_id","nullable":true},{"name":"depth_m","type":"float","nullable":true},{"name":"danger_rating","type":"int","nullable":true}],"relations":[{"target":"Biome_Definitions","type":"N:1","label":"located in biome"},{"target":"Spawn_Tables","type":"1:N","label":"has spawn tables"}],"rows":[{"zone_id":"zone_fp01_entry","display_name":"FP01 Entry Tunnel","biome_id":"biome_tunnel","depth_m":60,"danger_rating":2},{"zone_id":"zone_reef_edge","display_name":"Reef Edge","biome_id":"biome_reef","depth_m":90,"danger_rating":2},{"zone_id":"zone_trench_drop","display_name":"Trench Drop","biome_id":"biome_trench","depth_m":320,"danger_rating":4}]},{"id":"Breach_Definitions","domain":7,"priority":"high","description":"Breach types â€” cause, geometry, and initial severity.","columns":[{"name":"breach_id","type":"string","pk":true},{"name":"display_name","type":"string","nullable":false},{"name":"cause","type":"enum","values":["impact","explosion","structural_failure","torpedo","creature","corrosion"]},{"name":"default_severity","type":"string","fk":"Breach_Severity_Levels.severity_id"},{"name":"size_class","type":"enum","values":["pinhole","small","medium","large","critical"]},{"name":"repairable","type":"bool","nullable":false,"default":"true"}],"relations":[{"target":"Breach_Severity_Levels","type":"N:1","label":"default severity"},{"target":"Repair_Action_Definitions","type":"N:N","label":"repaired by"}],"rows":[{"breach_id":"breach_impact_pinhole","display_name":"Impact Pinhole","cause":"impact","default_severity":"sev_minor","size_class":"pinhole","repairable":true},{"breach_id":"breach_torpedo_medium","display_name":"Torpedo Medium","cause":"torpedo","default_severity":"sev_major","size_class":"medium","repairab',
+  'le":true},{"breach_id":"breach_creature_rend","display_name":"Creature Rend","cause":"creature","default_severity":"sev_critical","size_class":"large","repairable":true},{"breach_id":"breach_structural_failure","display_name":"Structural Failure","cause":"structural_failure","default_severity":"sev_major","size_class":"large","repairable":true}]},{"id":"Breach_Severity_Levels","domain":7,"priority":"high","description":"Severity levels for breaches â€” defines flood rate and repair difficulty.","columns":[{"name":"severity_id","type":"string","pk":true},{"name":"display_name","type":"string","nullable":false},{"name":"flood_rate_mult","type":"float","nullable":false},{"name":"repair_time_mult","type":"float","nullable":false},{"name":"auto_worsen","type":"bool","nullable":false,"default":"false"},{"name":"fatal_threshold","type":"bool","nullable":false,"default":"false"}],"relations":[{"target":"Breach_Definitions","type":"1:N","label":"applied to breaches"},{"target":"Repair_Action_Definitions","type":"N:N","label":"determines repair actions"}],"rows":[{"severity_id":"sev_minor","display_name":"Minor","flood_rate_mult":0.6,"repair_time_mult":0.7,"auto_worsen":false,"fatal_threshold":false},{"severity_id":"sev_major","display_name":"Major","flood_rate_mult":1,"repair_time_mult":1,"auto_worsen":false,"fatal_threshold":false},{"severity_id":"sev_critical","display_name":"Critical","flood_rate_mult":1.6,"repair_time_mult":1.4,"auto_worsen":true,"fatal_threshold":true}]},{"id":"Flood_Compartment_Config","domain":7,"priority":"high","description":"Flood propagation config per compartment type â€” capacity and propagation resistance.","columns":[{"name":"config_id","type":"string","pk":true},{"name":"room_tag_id","type":"string","fk":"Room_Tag_Catalog.room_tag_id","nullable":true},{"name":"volume_m3","type":"float","nullable":true},{"name":"flood_rate_base","type":"float","nullable":false},{"name":"propagation_resistance","type":"float","nullable":true},{"name":"critical_',
+  'level_pct","type":"float","nullable":false,"default":"0.8"}],"relations":[{"target":"Room_Tag_Catalog","type":"N:1","label":"config for room type"}],"rows":[{"config_id":"flood_nav","room_tag_id":"room_nav","volume_m3":40,"flood_rate_base":0.8,"propagation_resistance":0.6,"critical_level_pct":0.75},{"config_id":"flood_machinery","room_tag_id":"room_machinery","volume_m3":55,"flood_rate_base":1.1,"propagation_resistance":0.5,"critical_level_pct":0.7},{"config_id":"flood_ballast","room_tag_id":"room_ballast","volume_m3":70,"flood_rate_base":1.4,"propagation_resistance":0.4,"critical_level_pct":0.8},{"config_id":"flood_access","room_tag_id":"room_access","volume_m3":30,"flood_rate_base":0.7,"propagation_resistance":0.6,"critical_level_pct":0.7}]},{"id":"Repair_Action_Definitions","domain":7,"priority":"high","description":"Repair action types â€” seal, patch, weld, pump.","columns":[{"name":"repair_id","type":"string","pk":true},{"name":"display_name","type":"string","nullable":false},{"name":"kind","type":"enum","values":["seal","patch","weld","pump","reinforce"]},{"name":"base_duration_s","type":"float","nullable":false},{"name":"required_item","type":"string","fk":"Items_Stats.item_id","nullable":true},{"name":"perm_fix","type":"bool","nullable":false,"default":"false"}],"relations":[{"target":"Items_Stats","type":"N:1","label":"consumes item"},{"target":"Breach_Definitions","type":"N:N","label":"repairs breaches"},{"target":"Breach_Severity_Levels","type":"N:N","label":"applicable to severities"}],"rows":[{"repair_id":"repair_seal","display_name":"Seal Leak","kind":"seal","base_duration_s":8,"required_item":"item_seal_kit","perm_fix":false},{"repair_id":"repair_patch","display_name":"Patch Plate","kind":"patch","base_duration_s":14,"required_item":"item_weld_patch","perm_fix":false},{"repair_id":"repair_weld","display_name":"Weld Bulkhead","kind":"weld","base_duration_s":20,"required_item":"item_weld_patch","perm_fix":true},{"repair_id":"repair_pump","display_name"',
+  ':"Pump Out","kind":"pump","base_duration_s":6,"required_item":"item_pump_hose","perm_fix":false},{"repair_id":"repair_reinforce","display_name":"Reinforce","kind":"reinforce","base_duration_s":24,"required_item":"item_scrap_metal","perm_fix":true}]},{"id":"Mission_Templates","domain":8,"priority":"medium","description":"Mission definitions â€” objective type, biome, constraints.","columns":[{"name":"mission_id","type":"string","pk":true},{"name":"display_name","type":"string","nullable":false},{"name":"biome_id","type":"string","fk":"Biome_Definitions.biome_id","nullable":true},{"name":"objective_id","type":"string","fk":"Objective_Definitions.objective_id"},{"name":"difficulty_id","type":"string","fk":"Difficulty_Presets.preset_id","nullable":true},{"name":"time_limit_s","type":"float","nullable":true},{"name":"coop_max","type":"int","nullable":true,"default":"4"}],"relations":[{"target":"Biome_Definitions","type":"N:1","label":"takes place in biome"},{"target":"Objective_Definitions","type":"N:1","label":"has objective type"},{"target":"Mission_Rewards","type":"1:N","label":"grants rewards"},{"target":"Mission_Module_Definitions","type":"N:N","label":"requires modules"}],"rows":[{"mission_id":"mission_fp01_reach_exit","display_name":"FP01 - Reach Exit","biome_id":"biome_tunnel","objective_id":"obj_reach_exit","difficulty_id":"easy","time_limit_s":900,"coop_max":2},{"mission_id":"mission_reef_retrieve","display_name":"Reef Retrieve","biome_id":"biome_reef","objective_id":"obj_retrieve_blackbox","difficulty_id":"normal","time_limit_s":1200,"coop_max":4},{"mission_id":"mission_trench_hunt","display_name":"Trench Hunt","biome_id":"biome_trench","objective_id":"obj_destroy_nest","difficulty_id":"hard","time_limit_s":1500,"coop_max":4},{"mission_id":"mission_coastal_survive","display_name":"Coastal Survive","biome_id":"biome_coastal","objective_id":"obj_survive_timer","difficulty_id":"easy","time_limit_s":600,"coop_max":2}]},{"id":"Mission_Rewards","domain":8,"priority"',
+  ':"medium","description":"Rewards granted on mission completion â€” items, XP, unlocks.","columns":[{"name":"reward_id","type":"string","pk":true},{"name":"mission_id","type":"string","fk":"Mission_Templates.mission_id"},{"name":"reward_type","type":"enum","values":["item","xp","credits","unlock","catalog_entry"]},{"name":"ref_id","type":"string","nullable":true},{"name":"qty","type":"int","nullable":false,"default":"1"},{"name":"on_condition","type":"enum","values":["completion","perfect","bonus","first_time"],"nullable":true}],"relations":[{"target":"Mission_Templates","type":"N:1","label":"reward for mission"},{"target":"Items_Stats","type":"N:1","label":"item reward"}],"rows":[{"reward_id":"reward_fp01_credits","mission_id":"mission_fp01_reach_exit","reward_type":"credits","ref_id":"credits","qty":1200,"on_condition":"completion"},{"reward_id":"reward_reef_blackbox","mission_id":"mission_reef_retrieve","reward_type":"item","ref_id":"item_blackbox","qty":1,"on_condition":"completion"},{"reward_id":"reward_trench_upgrade","mission_id":"mission_trench_hunt","reward_type":"item","ref_id":"item_sonar_upgrade_mk1","qty":1,"on_condition":"completion"},{"reward_id":"reward_coastal_credits","mission_id":"mission_coastal_survive","reward_type":"credits","ref_id":"credits","qty":800,"on_condition":"completion"}]},{"id":"Objective_Definitions","domain":8,"priority":"medium","description":"Mission objective type definitions â€” destroy, retrieve, escort, survive.","columns":[{"name":"objective_id","type":"string","pk":true},{"name":"display_name","type":"string","nullable":false},{"name":"kind","type":"enum","values":["destroy","retrieve","escort","survive","investigate","defend","reach"]},{"name":"timed","type":"bool","nullable":false,"default":"false"},{"name":"notes","type":"string","nullable":true}],"relations":[{"target":"Mission_Templates","type":"1:N","label":"used by missions"}],"rows":[{"objective_id":"obj_reach_exit","display_name":"Reach Exit","kind":"reach","timed',
+  '":false,"notes":"FP01 exit run."},{"objective_id":"obj_retrieve_blackbox","display_name":"Retrieve Blackbox","kind":"retrieve","timed":false,"notes":"Recover mission payload."},{"objective_id":"obj_destroy_nest","display_name":"Destroy Nest","kind":"destroy","timed":false,"notes":"Targeted creature nest."},{"objective_id":"obj_survive_timer","display_name":"Survive","kind":"survive","timed":true,"notes":"Hold position until timer ends."}]},{"id":"Difficulty_Curves","domain":9,"priority":"medium","description":"Per-parameter difficulty scaling curves â€” enemy HP, flood speed, repair time, etc.","columns":[{"name":"curve_id","type":"string","pk":true},{"name":"preset_id","type":"string","fk":"Difficulty_Presets.preset_id"},{"name":"parameter","type":"enum","values":["enemy_hp","enemy_damage","flood_rate","repair_time","spawn_rate","item_scarcity"]},{"name":"multiplier","type":"float","nullable":false,"default":"1.0"},{"name":"curve_type","type":"enum","values":["flat","linear","exponential"]}],"relations":[{"target":"Difficulty_Presets","type":"N:1","label":"belongs to preset"}],"rows":[{"curve_id":"easy_enemy_hp","preset_id":"easy","parameter":"enemy_hp","multiplier":0.8,"curve_type":"flat"},{"curve_id":"easy_enemy_damage","preset_id":"easy","parameter":"enemy_damage","multiplier":0.8,"curve_type":"flat"},{"curve_id":"easy_flood_rate","preset_id":"easy","parameter":"flood_rate","multiplier":0.8,"curve_type":"flat"},{"curve_id":"normal_enemy_hp","preset_id":"normal","parameter":"enemy_hp","multiplier":1,"curve_type":"flat"},{"curve_id":"normal_enemy_damage","preset_id":"normal","parameter":"enemy_damage","multiplier":1,"curve_type":"flat"},{"curve_id":"normal_flood_rate","preset_id":"normal","parameter":"flood_rate","multiplier":1,"curve_type":"flat"},{"curve_id":"hard_enemy_hp","preset_id":"hard","parameter":"enemy_hp","multiplier":1.3,"curve_type":"linear"},{"curve_id":"hard_enemy_damage","preset_id":"hard","parameter":"enemy_damage","multiplier":1.3,"curve_type":"',
+  'linear"},{"curve_id":"hard_flood_rate","preset_id":"hard","parameter":"flood_rate","multiplier":1.4,"curve_type":"linear"}]},{"id":"Difficulty_Presets","domain":9,"priority":"medium","description":"Global difficulty presets â€” Normal, Hard, Extreme.","columns":[{"name":"preset_id","type":"string","pk":true},{"name":"display_name","type":"string","nullable":false},{"name":"order_index","type":"int","nullable":false},{"name":"unlocked","type":"bool","nullable":false,"default":"true"}],"relations":[{"target":"Difficulty_Curves","type":"1:N","label":"has curves"},{"target":"Mission_Templates","type":"1:N","label":"applied to missions"}],"rows":[{"preset_id":"easy","display_name":"Easy","order_index":1,"unlocked":true},{"preset_id":"normal","display_name":"Normal","order_index":2,"unlocked":true},{"preset_id":"hard","display_name":"Hard","order_index":3,"unlocked":true}]},{"id":"Economy_Config","domain":9,"priority":"low","description":"Global economy parameters â€” base prices, inflation, credit sources.","columns":[{"name":"config_key","type":"string","pk":true},{"name":"display_name","type":"string","nullable":false},{"name":"value_float","type":"float","nullable":true},{"name":"value_string","type":"string","nullable":true},{"name":"notes","type":"string","nullable":true}],"relations":[],"rows":[{"config_key":"econ_base_reward","display_name":"Base Mission Credits","value_float":1000,"value_string":null,"notes":"Baseline credit reward."},{"config_key":"econ_repair_cost_mult","display_name":"Repair Cost Mult","value_float":1,"value_string":null,"notes":"Cost multiplier for repairs."},{"config_key":"econ_sell_ratio","display_name":"Sell Ratio","value_float":0.5,"value_string":null,"notes":"Percent of base value on sell."}]},{"id":"Progression_Unlocks","domain":9,"priority":"low","description":"XP-gated or progression-based unlock tree â€” submarines, modules, missions.","columns":[{"name":"unlock_id","type":"string","pk":true},{"name":"display_name","type":"string","n',
+  'ullable":false},{"name":"unlock_type","type":"enum","values":["submarine","module","mission","item","cosmetic"]},{"name":"ref_id","type":"string","nullable":false},{"name":"xp_required","type":"float","nullable":true},{"name":"prereq_unlock_id","type":"string","fk":"Progression_Unlocks.unlock_id","nullable":true}],"relations":[{"target":"Progression_Unlocks","type":"N:1","label":"requires unlock"}],"rows":[{"unlock_id":"unlock_sonar_upgrade_mk1","display_name":"Unlock Sonar Upgrade Mk1","unlock_type":"item","ref_id":"item_sonar_upgrade_mk1","xp_required":250,"prereq_unlock_id":null},{"unlock_id":"unlock_fp01_standard","display_name":"Unlock FP01 Standard","unlock_type":"submarine","ref_id":"catalog_fp01_standard","xp_required":600,"prereq_unlock_id":"unlock_sonar_upgrade_mk1"},{"unlock_id":"unlock_mission_trench_hunt","display_name":"Unlock Trench Hunt Mission","unlock_type":"mission","ref_id":"mission_trench_hunt","xp_required":900,"prereq_unlock_id":"unlock_fp01_standard"}]}]}'
+].join(''));
+let SCHEMA = JSON.parse(JSON.stringify(RAW_SCHEMA));
+if(!SCHEMA.domains.find(d=>d.id===0)) SCHEMA.domains.unshift({id:0, name:'Unassigned', color:'#64748b'});
+
+let cy, activeTab = 'schema', selectedId = null, selectedDomainId = null, currentView = 'graph';
+let sidebarFilter = '';
+const STORAGE_KEY = 'sub3d_studio_ultimate_v9';
+let positions = JSON.parse(localStorage.getItem(STORAGE_KEY) || '{}');
+
+window.onload = () => { renderSidebar(); initGraph(); renderGlobalManager(); refreshStats(); };
+
+function initGraph() {
+  cy = cytoscape({
+    container: document.getElementById('cy'),
+    elements: buildElements(),
+    wheelSensitivity: 0.1, minZoom: 0.04, maxZoom: 4,
+    style: [
+      { selector: 'node', style: { 
+        'background-color': 'data(color)', 'background-opacity': 0.12, 'border-color': 'data(color)', 'border-width': 2,
+        'label': 'data(label)', 'color': '#fff', 'font-size': '12px', 'font-family': 'Outfit, sans-serif', 'font-weight': 'bold',
+        'text-valign': 'center', 'text-halign': 'center', 'width': '290px', 'height': '85px',
+        'shape': 'roundrectangle', 'text-wrap': 'wrap', 'text-max-width': '230px', 'text-justification': 'center',
+        'text-events': 'yes'
+      } },
+      { selector: 'node[?isParent]', style: { 'background-opacity': 0.04, 'border-width': 1.5, 'border-color': 'data(color)', 'label': 'data(label)', 'text-valign': 'top', 'padding': 80, 'text-margin-y': -30, 'font-weight': '900', 'color': 'data(color)', 'font-size': '15px', 'letter-spacing': '0.2em' } },
+      { selector: 'node:selected, node.highlighted', style: { 'background-opacity': 0.45, 'border-width': 5, 'z-index': 100 } },
+      { selector: 'node.dimmed', style: { 'opacity': 0.12, 'text-opacity': 0.08 } },
+      { selector: 'edge', style: { 'width': 2, 'line-color': '#1e293b', 'target-arrow-shape': 'triangle', 'target-arrow-color': '#1e293b', 'curve-style': 'bezier', 'label': 'data(label)', 'font-size': '10px', 'color': '#475569', 'text-background-opacity': 1, 'text-background-color': '#020408' } },
+      { selector: 'edge.dimmed', style: { 'opacity': 0.1, 'text-opacity': 0.08 } }
+    ]
+  });
+
+  if (Object.keys(positions).length === 0) {
+    applyLogicalLayout();
+  } else {
+    cy.nodes().forEach(n => { if (positions[n.id()]) n.position(positions[n.id()]); });
+    cy.fit(null, 100);
+  }
+
+  let panning = false, lastX, lastY;
+  cy.on('mousedown', e => { if (e.originalEvent.button === 1) { panning=true; lastX=e.clientX; lastY=e.clientY; } });
+  window.addEventListener('mousemove', e => { if(panning){ cy.panBy({ x: e.clientX-lastX, y: e.clientY-lastY }); lastX=e.clientX; lastY=e.clientY; } });
+  window.addEventListener('mouseup', e => { if(e.button===1) panning=false; });
+
+  cy.on('tap', 'node', e => { if(e.target.data('isParent')) selectDomain(parseInt(e.target.id().replace('domain_',''))); else select(e.target.id()); });
+  cy.on('tap', e => { if(e.target === cy) renderGlobalManager(); });
+  cy.on('dragfree', 'node', e => { positions[e.target.id()] = e.target.position(); localStorage.setItem(STORAGE_KEY, JSON.stringify(positions)); });
+
+  setTimeout(() => { cy.style().update(); }, 600);
+}
+
+function buildElements() {
+  const els = [];
+  SCHEMA.domains.forEach(d => els.push({ data: { id: `domain_${d.id}`, label: d.name.toUpperCase(), color: d.color, isParent: true } }));
+  SCHEMA.tables.forEach(t => { 
+    const d = SCHEMA.domains.find(x => x.id === t.domain); 
+    els.push({ data: { id: t.id, label: t.id.replace(/_/g, ' '), parent: t.domain === 0 ? null : `domain_${t.domain}`, color: d?.color || '#333', domainId: t.domain } }); 
+  });
+  SCHEMA.tables.forEach(t => (t.relations || []).forEach(r => els.push({ data: { id: `${t.id}_${r.target}`, source: t.id, target: r.target, label: r.type } })));
+  return els;
+}
+
+function refreshStats() {
+  document.getElementById('hud-tables').textContent = `NODES: ${SCHEMA.tables.length}`;
+  document.getElementById('hud-links').textContent = `LINKS: ${SCHEMA.tables.reduce((a,b)=>a+(b.relations?b.relations.length:0),0)}`;
+  document.getElementById('hud-rows').textContent = `ROWS: ${SCHEMA.tables.reduce((a,b)=>a+(b.rows?b.rows.length:0),0)}`;
+}
+
+// ------------------------------------------------------------
+// SIDEBAR 2.0
+// ------------------------------------------------------------
+function renderSidebar(filter = '') {
+  let h = ''; 
+  SCHEMA.domains.forEach(d => {
+    const tables = SCHEMA.tables.filter(t => t.domain === d.id && t.id.toLowerCase().includes(filter.toLowerCase()));
+    if(tables.length > 0 || filter === '') {
+      h += `<div class="sb-group"><div class="sb-hdr"><span>${d.name}</span><span style="opacity:0.3">${tables.length}</span></div>`;
+      tables.forEach(t => {
+        const rowCount = (t.rows || []).length;
+        h += `<div class="sb-item ${t.id===selectedId?'selected':''}" onclick="select('${t.id}')"><div class="led" style="color:${d.color}; background:currentColor"></div><span>${t.id}</span><span class="sb-count">${rowCount}</span></div>`;
+      });
+      h += `</div>`;
+    }
+  });
+  document.getElementById('sidebar-scroll').innerHTML = h;
+}
+function filterSidebar(v) { sidebarFilter = v; renderSidebar(v); applyGraphFilter(v); }
+function applyGraphFilter(filter) {
+  if (!cy) return;
+  const f = (filter || '').trim().toLowerCase();
+  cy.nodes().removeClass('dimmed');
+  cy.edges().removeClass('dimmed');
+  if (!f) return;
+  const matchIds = new Set(SCHEMA.tables.filter(t => t.id.toLowerCase().includes(f)).map(t => t.id));
+  cy.nodes().forEach(n => {
+    if (n.data('isParent')) return;
+    if (!matchIds.has(n.id())) n.addClass('dimmed');
+  });
+  cy.edges().forEach(e => {
+    const src = e.data('source');
+    const tgt = e.data('target');
+    if (!matchIds.has(src) && !matchIds.has(tgt)) e.addClass('dimmed');
+  });
+}
+
+// ------------------------------------------------------------
+// UI CONTENT
+// ------------------------------------------------------------
+function tableSummaryHTML(t) {
+  const d = SCHEMA.domains.find(x => x.id === t.domain) || { name: 'Unassigned', color: '#64748b' };
+  const rows = (t.rows || []).length;
+  const cols = (t.columns || []).length;
+  const rels = (t.relations || []).length;
+  const pk = (t.columns || []).find(c => c.pk)?.name || 'none';
+  const priority = (t.priority || 'medium').toLowerCase();
+  const desc = t.description || 'No description provided.';
+  return `
+    <div class="card">
+      <div class="card-hdr">
+        <span>TABLE SUMMARY</span>
+        <span class="pill ${priority}">${priority}</span>
+      </div>
+      <div style="font-size:12px; color:var(--text-s); line-height:1.5">${desc}</div>
+      <div class="meta-grid">
+        <div class="meta-item"><label>Domain</label><div style="font-weight:700; color:${d.color}">${d.name}</div></div>
+        <div class="meta-item"><label>Primary Key</label><div style="font-weight:700">${pk}</div></div>
+        <div class="meta-item"><label>Columns</label><div style="font-weight:700">${cols}</div></div>
+        <div class="meta-item"><label>Rows</label><div style="font-weight:700">${rows}</div></div>
+        <div class="meta-item"><label>Relations</label><div style="font-weight:700">${rels}</div></div>
+        <div class="meta-item"><label>Table Id</label><div style="font-weight:700">${t.id}</div></div>
+      </div>
+    </div>
+  `;
+}
+
+function getInboundRelations(targetId) {
+  const inbound = [];
+  SCHEMA.tables.forEach(src => {
+    (src.relations || []).forEach(r => {
+      if (r.target === targetId) inbound.push({ source: src.id, type: r.type, label: r.label });
+    });
+  });
+  return inbound;
+}
+function renderGlobalManager() {
+  selectedId = null; selectedDomainId = null;
+  document.getElementById('panel-hdr-area').innerHTML = `<div class="panel-hdr"><div style="font-size:10px; font-weight:900; color:var(--cyan); letter-spacing:0.3em; margin-bottom:12px">MASTER COMMAND</div><div style="font-size:32px; font-weight:900">SCHEMA ARCHITECT</div></div>`;
+  document.getElementById('panel-tabs-area').style.display = 'none';
+  const totalRows = SCHEMA.tables.reduce((a,b)=>a+(b.rows?b.rows.length:0),0);
+  const totalCols = SCHEMA.tables.reduce((a,b)=>a+(b.columns?b.columns.length:0),0);
+  const totalRelations = SCHEMA.tables.reduce((a,b)=>a+(b.relations?b.relations.length:0),0);
+  let h = `
+    <div class="card">
+      <div class="card-hdr">SCHEMA SUMMARY</div>
+      <div class="meta-grid">
+        <div class="meta-item"><label>Domains</label><div style="font-weight:700">${SCHEMA.domains.length}</div></div>
+        <div class="meta-item"><label>Tables</label><div style="font-weight:700">${SCHEMA.tables.length}</div></div>
+        <div class="meta-item"><label>Columns</label><div style="font-weight:700">${totalCols}</div></div>
+        <div class="meta-item"><label>Rows</label><div style="font-weight:700">${totalRows}</div></div>
+        <div class="meta-item"><label>Relations</label><div style="font-weight:700">${totalRelations}</div></div>
+        <div class="meta-item"><label>Seed</label><div style="font-weight:700">${SCHEMA.meta?.seed || 'manual'}</div></div>
+      </div>
+    </div>
+  `;
+  if (SCHEMA.meta?.brainstorm_notes?.length) {
+    h += `<div class="card"><div class="card-hdr">BRAINSTORM SEEDS</div>` +
+      SCHEMA.meta.brainstorm_notes.map(n => `<div style="font-size:12px; color:var(--text-s); margin-bottom:8px">${n}</div>`).join('') +
+      `</div>`;
+  }
+  h += `<div class="card-hdr">ACTIVE DOMAINS</div>`;
+  SCHEMA.domains.forEach(d => h += `<div class="card hover-glow" onclick="selectDomain(${d.id})" style="cursor:pointer; display:flex; align-items:center; gap:20px"><div class="led" style="color:${d.color}; background:currentColor; width:10px; height:10px"></div><div><div style="font-weight:700">${d.name}</div><div style="font-size:10px; opacity:0.5; margin-top:2px">${SCHEMA.tables.filter(t=>t.domain===d.id).length} Tables</div></div></div>`);
+  h += `<button class="btn primary" style="width:100%; margin-top:20px" onclick="addDomain()">+ PROVISION NEW DOMAIN</button>`;
+  document.getElementById('panel-content-area').innerHTML = h;
+  renderSidebar();
+}
+
+function selectDomain(id) {
+  selectedId = null; selectedDomainId = id; const d = SCHEMA.domains.find(x => x.id === id);
+  const tableCount = SCHEMA.tables.filter(t=>t.domain===id).length;
+  const rowCount = SCHEMA.tables.filter(t=>t.domain===id).reduce((a,b)=>a+(b.rows?b.rows.length:0),0);
+  document.getElementById('panel-hdr-area').innerHTML = `<div class="panel-hdr"><div style="font-size:10px; font-weight:900; color:${d.color}; letter-spacing:0.2em">CLUSTER OVERRIDE</div><div style="font-size:32px; font-weight:900; color:${d.color}">${d.name.toUpperCase()}</div></div>`;
+  document.getElementById('panel-tabs-area').style.display = 'none';
+  document.getElementById('panel-content-area').innerHTML = `
+    <div class="card">
+      <div class="card-hdr">DOMAIN SUMMARY</div>
+      <div class="meta-grid">
+        <div class="meta-item"><label>Tables</label><div style="font-weight:700">${tableCount}</div></div>
+        <div class="meta-item"><label>Rows</label><div style="font-weight:700">${rowCount}</div></div>
+        <div class="meta-item"><label>Color</label><div style="font-weight:700">${d.color}</div></div>
+        <div class="meta-item"><label>Domain Id</label><div style="font-weight:700">${d.id}</div></div>
+      </div>
+    </div>
+    <div class="field"><label>Namespace</label><input value="${d.name}" onchange="updateDomInfo(${id}, 'name', this.value)"></div>
+    <div class="field"><label>Hex Signature</label><input type="color" value="${d.color}" onchange="updateDomInfo(${id}, 'color', this.value)" style="height:50px; padding:4px"></div>
+    <button class="btn primary" style="width:100%; margin-bottom:30px" onclick="openNewTableModal(${id})">+ ADD NEW TABLE TO THIS CLUSTER</button>
+    <div class="card-hdr">TABLES INVENTORY</div>
+    ` + SCHEMA.tables.filter(t=>t.domain===id).map(t=>`<div class="card mono" style="display:flex; justify-content:space-between; align-items:center">${t.id}<button class="btn" style="padding:4px 8px" onclick="moveTable('${t.id}', 0)">EJECT</button></div>`).join('') + `
+    <button class="btn danger" style="width:100%; margin-top:40px" onclick="delDomain(${id})">PURGE DOMAIN</button>
+  `;
+}
+
+function select(id) {
+  selectedId = id; selectedDomainId = null; const t = SCHEMA.tables.find(x => x.id === id); const d = SCHEMA.domains.find(x => x.id === t.domain);
+  document.getElementById('panel-hdr-area').innerHTML = `
+    <div class="panel-hdr">
+      <div style="font-size:10px; font-weight:900; color:${d.color}; letter-spacing:0.15em">${d.name.toUpperCase()}</div>
+      <div style="font-size:26px; font-weight:900; margin-top:8px">${t.id}</div>
+      <div style="display:flex; gap:12px; margin-top:24px">
+        <button class="btn" onclick="renameTable('${t.id}')">Rename</button>
+        <button class="btn danger" onclick="deleteTable('${t.id}')">Purge</button>
+      </div>
+    </div>`;
+  document.getElementById('panel-tabs-area').style.display = 'flex';
+  setPanelTab(activeTab); renderSidebar();
+  cy.nodes().removeClass('highlighted'); cy.getElementById(id).addClass('highlighted');
+}
+
+function setPanelTab(tab) {
+  activeTab = tab; document.querySelectorAll('.tab').forEach(b => b.classList.toggle('active', b.id.includes(tab)));
+  const t = SCHEMA.tables.find(x => x.id === selectedId); let html = '';
+  if (!t) return;
+  if (tab === 'schema') {
+    html = tableSummaryHTML(t);
+    html += `<div class="card-hdr">COLUMNS DEFINITION <button class="btn" onclick="addCol()">+ ADD</button></div>`;
+    t.columns.forEach(c => {
+      const meta = [];
+      if (c.pk) meta.push('<span class="chip strong">PK</span>');
+      if (c.fk) meta.push(`<span class="chip">FK ${c.fk}</span>`);
+      if (c.nullable === false) meta.push('<span class="chip">NOT NULL</span>');
+      if (c.default !== undefined) meta.push(`<span class="chip">DEFAULT ${c.default}</span>`);
+      if (c.values) meta.push(`<span class="chip">ENUM ${c.values.join(' | ')}</span>`);
+      html += `
+        <div class="card mono">
+          <div style="display:flex; justify-content:space-between; align-items:center">
+            <span><b style="color:${c.pk?'var(--amber)':''}">${c.name}</b> <small style="opacity:0.4">${c.type}</small></span>
+            <button class="btn" style="padding:0 8px" onclick="delCol('${c.name}')">X</button>
+          </div>
+          ${meta.length ? `<div>${meta.join('')}</div>` : ''}
+        </div>`;
+    });
+  } else if (tab === 'links') {
+    html = tableSummaryHTML(t);
+    html += `<div class="card-hdr">OUTBOUND RELATIONS <button class="btn" onclick="openRelModal()">+ NEW</button></div>`;
+    if (!t.relations?.length) {
+      html += `<div class="empty-state">No outbound relations defined.</div>`;
+    } else {
+      t.relations.forEach((r,i) => html += `<div class="card" onclick="select('${r.target}')" style="cursor:pointer; display:flex; justify-content:space-between"><span><b>${r.target}</b> <small style="color:var(--cyan)">${r.type}</small></span><button class="btn" style="padding:0 8px" onclick="delRel(${i}); event.stopPropagation()">X</button></div>`);
+    }
+    const inbound = getInboundRelations(t.id);
+    html += `<div class="card-hdr">INBOUND RELATIONS</div>`;
+    if (!inbound.length) {
+      html += `<div class="empty-state">No inbound relations found.</div>`;
+    } else {
+      inbound.forEach(r => html += `<div class="card" onclick="select('${r.source}')" style="cursor:pointer; display:flex; justify-content:space-between"><span><b>${r.source}</b> <small style="color:var(--emerald)">${r.type}</small></span><span style="font-size:10px; color:var(--text-d)">${r.label || ''}</span></div>`);
+    }
+  } else if (tab === 'data') {
+    html = tableSummaryHTML(t);
+    html += `<div class="card-hdr">RAW DATA ROWS (${(t.rows||[]).length}) <button class="btn" onclick="addRow('${t.id}')">+ ROW</button></div>`;
+    html += `<div style="overflow-x:auto"><table class="sheet"><tr>${t.columns.map(c=>`<th>${c.name}</th>`).join('')}</tr>`;
+    if ((t.rows||[]).length === 0) {
+      html += `</table><div class="empty-state">No rows yet. Add the first row to seed this table.</div></div>`;
+    } else {
+      (t.rows||[]).forEach((row, idx) => { html += `<tr>${t.columns.map(c => `<td><input value="${row[c.name]||''}" onchange="updRow('${t.id}',${idx},'${c.name}',this.value)"></td>`).join('')}</tr>`; });
+      html += '</table></div>';
+    }
+  }
+  document.getElementById('panel-content-area').innerHTML = html;
+}
+
+// ------------------------------------------------------------
+// DATA ENGINE
+// ------------------------------------------------------------
+function renameTable(tid) { 
+  const n = prompt("NEW IDENTIFIER:", tid); 
+  if(n && n !== tid) {
+    SCHEMA.tables.find(x=>x.id===tid).id = n;
+    SCHEMA.tables.forEach(t => (t.relations||[]).forEach(r => { if(r.target === tid) r.target = n; }));
+    if(positions[tid]) { positions[n] = positions[tid]; delete positions[tid]; }
+    refresh(); select(n);
+  }
+}
+function deleteTable(tid) { if(confirm(`PURGE ${tid} PERMANENTLY?`)) { SCHEMA.tables = SCHEMA.tables.filter(x=>x.id!==tid); refresh(); renderGlobalManager(); } }
+function addDomain() { const nid = Math.max(...SCHEMA.domains.map(d=>d.id)) + 1; SCHEMA.domains.push({id:nid, name:'New Cluster', color:'#38bdf8'}); refresh(); renderGlobalManager(); }
+function delDomain(id) { if(SCHEMA.tables.find(t=>t.domain===id)) return alert("DOMAIN NOT EMPTY."); SCHEMA.domains = SCHEMA.domains.filter(d=>d.id!==id); refresh(); renderGlobalManager(); }
+function addCol() { const n = prompt("Column Name:"); if(n) { SCHEMA.tables.find(x=>x.id===selectedId).columns.push({name:n, type:'string'}); setPanelTab('schema'); } }
+function delCol(n) { const t = SCHEMA.tables.find(x=>x.id===selectedId); t.columns = t.columns.filter(c=>c.name!==n); setPanelTab('schema'); }
+function addRow(tid) { const t = SCHEMA.tables.find(x=>x.id===tid); if(!t.rows) t.rows=[]; t.rows.push({}); if(currentView==='excel') renderExcel(); else setPanelTab('data'); }
+function updRow(tid, i, c, v) { SCHEMA.tables.find(x=>x.id===tid).rows[i][c] = v; }
+function delRel(i) { SCHEMA.tables.find(x=>x.id===selectedId).relations.splice(i,1); refresh(); setPanelTab('links'); }
+function moveTable(tid, dm) { SCHEMA.tables.find(x=>x.id===tid).domain = dm; refresh(); if(selectedId===tid) select(tid); else if(selectedDomainId) selectDomain(selectedDomainId); }
+
+function setView(v) {
+  currentView = v; document.getElementById('btn-graph').classList.toggle('active', v==='graph'); document.getElementById('btn-excel').classList.toggle('active', v==='excel');
+  document.getElementById('cy').style.display = v==='graph'?'block':'none'; document.getElementById('excel').style.display = v==='excel'?'block':'none';
+  if(v==='excel') renderExcel();
+}
+
+function renderExcel() {
+  const v = document.getElementById('excel'); v.innerHTML = '<h1 style="color:var(--cyan); margin-bottom:60px; font-weight:900; letter-spacing:0.2em">MASTER REGISTRY</h1>';
+  SCHEMA.domains.forEach(d => {
+    let dh = `<div style="margin-bottom:80px"><div class="card-hdr" style="font-size:16px">${d.name}</div>`;
+    SCHEMA.tables.filter(t=>t.domain===d.id).forEach(t => {
+      dh += `<div style="margin-bottom:40px"><div style="font-weight:800; margin-bottom:12px; display:flex; gap:20px">${t.id} <span style="font-size:10px; opacity:0.5">${(t.rows||[]).length} rows</span> <button class="btn" style="font-size:8px" onclick="addRow('${t.id}')">+ ROW</button></div>`;
+      dh += `<table class="sheet"><tr>${t.columns.map(c=>`<th>${c.name}</th>`).join('')}</tr>`;
+      (t.rows||[]).forEach((row,i) => dh += `<tr>${t.columns.map(c=>`<td><input value="${row[c.name]||''}" onchange="updRow('${t.id}',${i},'${c.name}',this.value)"></td>`).join('')}</tr>`);
+      dh += '</table></div>';
+    });
+    v.innerHTML += dh + '</div>';
+  });
+}
+
+function openRelModal() { const target = prompt("Target Table ID:"); if(target) { SCHEMA.tables.find(x=>x.id===selectedId).relations.push({ target, type: '1:N', label: 'owns' }); refresh(); setPanelTab('links'); } }
+function openNewTableModal(domId = 0) { const n = prompt("Table ID:"); if(n) { SCHEMA.tables.push({ id: n, domain: domId, columns:[{name:'id',type:'string',pk:true}], relations:[], rows:[] }); refresh(); select(n); } }
+function updateDomInfo(id, k, v) { SCHEMA.domains.find(d=>d.id===id)[k] = v; refresh(); if(selectedDomainId) selectDomain(id); }
+function exportSchema() { const b = new Blob([JSON.stringify(SCHEMA, null, 2)], { type:'application/json' }); const a = document.createElement('a'); a.href = URL.createObjectURL(b); a.download = 'sub3d_modded_schema.json'; a.click(); }
+function applyLogicalLayout() {
+  const centers = {
+    1: { x: 0, y: 0 },       // Hull & Authoring (CORE)
+    2: { x: 1200, y: 0 },    // Modules & Stations (EAST)
+    3: { x: -1200, y: 0 },   // Catalog & Product (WEST)
+    7: { x: 0, y: 1200 },    // Breach & Flood (SOUTH)
+    4: { x: 2400, y: 0 },    // Enemies & Fauna (FAR EAST)
+    5: { x: 1200, y: 1200 }, // Items & Loot (SOUTH EAST)
+    6: { x: 0, y: -1200 },   // World & Spawning (NORTH)
+    8: { x: 1200, y: -1200 },// Mission & Rewards (NORTH EAST)
+    9: { x: -1200, y: -1200 },// Difficulty & Economy (NORTH WEST)
+    0: { x: -1200, y: 1200 } // Unassigned (SOUTH WEST)
+  };
+
+  const newPositions = {};
+  SCHEMA.domains.forEach(d => {
+    const center = centers[d.id] || { x: 0, y: 2400 };
+    const tables = SCHEMA.tables.filter(t => t.domain === d.id);
+    const cols = Math.ceil(Math.sqrt(tables.length));
+    tables.forEach((t, i) => {
+      const r = Math.floor(i / cols);
+      const c = i % cols;
+      newPositions[t.id] = { 
+        x: center.x + (c - (cols-1)/2) * 450, 
+        y: center.y + (r - (Math.ceil(tables.length/cols)-1)/2) * 200 
+      };
+    });
+  });
+
+  positions = newPositions;
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(positions));
+  
+  if (cy) {
+    cy.nodes().forEach(n => {
+      if (positions[n.id()]) {
+        n.animate({ position: positions[n.id()] }, { duration: 800 });
+      }
+    });
+    setTimeout(() => cy.fit(null, 150), 900);
+  }
+}
+
+function refresh() { 
+  cy.json({ elements: buildElements() }); 
+  cy.nodes().forEach(n => { if (positions[n.id()]) n.position(positions[n.id()]); });
+  renderSidebar(); 
+  applyGraphFilter(sidebarFilter);
+  refreshStats();
+}
+</script>
+</body>
+</html>
+
+
+
+
+
+
+
+
+
+
+

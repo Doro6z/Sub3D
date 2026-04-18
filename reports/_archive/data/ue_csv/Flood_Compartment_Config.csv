@@ -1,0 +1,3 @@
+Name,room_tag_id,volume_m3,flood_rate_base,propagation_resistance,critical_level_pct
+---,string,float,float,float,float
+ROW_EXAMPLE,,,,,0.8

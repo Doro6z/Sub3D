@@ -1,0 +1,3 @@
+Name,display_name,flood_rate_mult,repair_time_mult,auto_worsen,fatal_threshold
+---,string,float,float,bool,bool
+ROW_EXAMPLE,,,,false,false

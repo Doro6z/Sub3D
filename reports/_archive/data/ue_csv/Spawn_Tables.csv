@@ -1,0 +1,3 @@
+Name,biome_id,zone_id,context,max_concurrent
+---,string,string,string (enum),int32
+ROW_EXAMPLE,,,,

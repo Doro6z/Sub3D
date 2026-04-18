@@ -169,13 +169,12 @@ COMPARTMENT_NAMES = {
 }
 
 
-# FP station placement. Values are declarative, easy to edit.
-# Each slot: compartment id pattern (deck + semantic name), offsets and yaw.
-STATION_SLOTS = [
-    {"type": "Helm",    "deck": "main",  "compartment": "Fwd",        "y_offset_cm": 0.0,   "yaw_deg":   0.0},
-    {"type": "Engine",  "deck": "main",  "compartment": "Aft",        "y_offset_cm": 0.0,   "yaw_deg": 180.0},
-    {"type": "Ballast", "deck": "lower", "compartment": "Hub",        "y_offset_cm": 0.0,   "yaw_deg":   0.0},
-]
+# Stations are NOT derived from compartments. Compartment names are references,
+# not constraints — the user places stations freely in UE (any station in any
+# compartment, multiple stations per compartment, reassignment at runtime later).
+# The bridge therefore does not emit station slots. Station authoring happens
+# entirely in BP_Submarine_Craniata as ChildActorComponents or attached actors.
+STATION_SLOTS: list = []
 
 
 def _flatten_bulkheads(ns: dict) -> dict:

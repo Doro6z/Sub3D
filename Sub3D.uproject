@@ -1,12 +1,42 @@
 {
 	"FileVersion": 3,
-	"EngineAssociation": "5.7",
+	"EngineAssociation": "{82F5EBB5-4818-365C-3AB1-D39AB62DD98B}",
 	"Category": "",
 	"Description": "",
 	"Modules": [
 		{
 			"Name": "Sub3D",
 			"Type": "Runtime",
+			"LoadingPhase": "Default"
+		},
+		{
+			"Name": "Sub3DCore",
+			"Type": "Runtime",
+			"LoadingPhase": "Default"
+		},
+		{
+			"Name": "Sub3DBake",
+			"Type": "Editor",
+			"LoadingPhase": "Default"
+		},
+		{
+			"Name": "Sub3DEditor",
+			"Type": "Editor",
+			"LoadingPhase": "Default"
+		},
+		{
+			"Name": "Sub3DRuntime",
+			"Type": "Runtime",
+			"LoadingPhase": "Default"
+		},
+		{
+			"Name": "Sub3DBuilder",
+			"Type": "Editor",
+			"LoadingPhase": "Default"
+		},
+		{
+			"Name": "Sub3DTests",
+			"Type": "Editor",
 			"LoadingPhase": "Default"
 		}
 	],
@@ -32,8 +62,7 @@
 			"Enabled": true,
 			"SupportedTargetPlatforms": [
 				"Win64"
-			],
-			"MarketplaceURL": "com.epicgames.launcher://ue/marketplace/product/362651520df94e4fa65492dbcba44ae2"
+			]
 		},
 		{
 			"Name": "RuntimeSyncDiagnostics",
@@ -44,8 +73,12 @@
 			"Enabled": true
 		},
 		{
-			"Name": "UnrealMCP",
+			"Name": "UnrealClaude",
 			"Enabled": true
 		}
-	]
+	],
+	"TargetPlatforms": [],
+	"AdditionalRootDirectories": [],
+	"AdditionalPluginDirectories": [],
+	"EpicSampleNameHash": ""
 }

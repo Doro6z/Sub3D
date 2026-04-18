@@ -77,6 +77,11 @@ struct FStationSlotDef
 	FTransform LocalTransform = FTransform::Identity;
 };
 
+// LEGACY (Phase 7A, 2026-04-10) — Temporary proto fallback path only.
+// USubmarineLayoutAsset is not deprecated compile-time because it is still the
+// real runtime source of truth until the SubmarineGenerator path (Phase 5D)
+// becomes the default. Do not add new consumers. Remove once generator path is
+// the only init route, then promote to UE_DEPRECATED in Phase 7B.
 UCLASS(BlueprintType)
 class SUB3D_API USubmarineLayoutAsset : public UDataAsset
 {
@@ -88,6 +93,9 @@ public:
 
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Layout")
 	TArray<FStructuralSheetDef> StructuralSheets;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Layout|Compiled")
+	TArray<FStructuralSheetCompiledBinding> CompiledSheetBindings;
 
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Layout|Doors")
 	TArray<FDoorDef> Doors;

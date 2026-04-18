@@ -7,9 +7,11 @@
 
 class ASubCrewCharacter;
 class ASubmarineBase;
+class UBoxComponent;
 class UInteractableComponent;
 class UStaticMeshComponent;
 struct FDoorDef;
+struct FGeneratedConnectionDef;
 
 UCLASS(Blueprintable)
 class SUB3D_API ASubDoorActor : public AActor
@@ -27,6 +29,9 @@ public:
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
 	UStaticMeshComponent* DoorMesh;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
+	UBoxComponent* DoorCollision;
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
 	UInteractableComponent* Interactable;
@@ -60,6 +65,17 @@ public:
 
 	UFUNCTION(BlueprintCallable, Category = "Door")
 	void InitializeFromDoorDef(const FDoorDef& DoorDef, FName InCompartmentA, FName InCompartmentB, ASubmarineBase* InOwningSubmarine);
+
+	/**
+	 * Initialize from a generator-produced connection definition. Unlike
+	 * InitializeFromDoorDef which uses the legacy FDoorDef type, this method
+	 * reads all fields directly from the generator's FGeneratedConnectionDef,
+	 * including ConnectionId, compartment endpoints, and bStartsClosed.
+	 * Intended to be called by ASubmarineBase::SpawnDoorsFromDefinition after
+	 * SpawnActor at the connection's local transform.
+	 */
+	UFUNCTION(BlueprintCallable, Category = "Door")
+	void InitializeFromConnectionDef(const FGeneratedConnectionDef& Connection, ASubmarineBase* InOwningSubmarine);
 
 	UFUNCTION(BlueprintPure, Category = "Door")
 	bool IsDoorClosed() const { return bClosed; }

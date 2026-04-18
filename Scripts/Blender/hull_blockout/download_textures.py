@@ -22,20 +22,21 @@ RESOLUTION = "2k"  # 1k, 2k, 4k
 USER_AGENT = "Sub3D-TextureDownloader/1.0"
 
 # Textures to download — (local_name, source, asset_id)
+# V2: CLEANER textures — military sub, not rusty wreck
 TEXTURE_LIST = [
-    # POLYHAVEN
-    ("hull_exterior",      "polyhaven", "metal_plate_02"),
-    ("hull_painted",       "polyhaven", "blue_metal_plate"),
-    ("metal_rusty",        "polyhaven", "rusty_metal_02"),
-    ("metal_bare",         "polyhaven", "metal_plate"),
-    ("metal_floor",        "polyhaven", "metal_floor"),
+    # POLYHAVEN — cleaner metal
+    ("hull_clean",         "polyhaven", "green_metal_rust"),     # Green military hull (subtle wear)
+    ("hull_grey",          "polyhaven", "painted_plaster"),      # Clean grey surface
+    ("metal_panel",        "polyhaven", "metal_plate"),          # Clean metal plate for decks
+    ("metal_brushed",      "polyhaven", "brushed_iron"),         # Brushed metal for details
 
-    # AMBIENTCG
-    ("painted_grey",       "ambientcg", "PaintedMetal014"),
-    ("painted_green",      "ambientcg", "PaintedMetal002"),
-    ("painted_worn",       "ambientcg", "PaintedMetal001"),
-    ("rubber_floor",       "ambientcg", "Rubber004"),
-    ("concrete_floor",     "ambientcg", "Concrete034"),
+    # AMBIENTCG — painted metal (cleaner options)
+    ("painted_dark",       "ambientcg", "PaintedMetal012"),      # Dark painted metal, minimal rust
+    ("painted_clean",      "ambientcg", "PaintedMetal009"),      # Clean painted metal
+    ("painted_grey_v2",    "ambientcg", "PaintedMetal006"),      # Grey painted, light wear
+    ("metal_diamond",      "ambientcg", "MetalPlates006"),       # Diamond plate floor
+    ("metal_corrugated",   "ambientcg", "MetalPlates003"),       # Corrugated panels
+    ("rubber_floor",       "ambientcg", "Rubber004"),            # Rubber floor (keep)
 ]
 
 # Maps to download per texture
@@ -80,7 +81,7 @@ def download_file(url, filepath):
 
 def download_polyhaven(local_name, asset_id):
     """Download PBR maps from Polyhaven API."""
-    print(f"\n[Polyhaven] {asset_id} → {local_name}")
+    print(f"\n[Polyhaven] {asset_id} -> {local_name}")
 
     out_dir = os.path.join(OUTPUT_DIR, local_name)
     os.makedirs(out_dir, exist_ok=True)
@@ -138,7 +139,7 @@ def download_polyhaven(local_name, asset_id):
 
 def download_ambientcg(local_name, asset_id):
     """Download PBR maps from ambientCG."""
-    print(f"\n[ambientCG] {asset_id} → {local_name}")
+    print(f"\n[ambientCG] {asset_id} -> {local_name}")
 
     out_dir = os.path.join(OUTPUT_DIR, local_name)
     os.makedirs(out_dir, exist_ok=True)
@@ -220,7 +221,7 @@ def rename_ambientcg_files(directory, asset_id):
                 new_path = os.path.join(directory, new_name)
                 if not os.path.exists(new_path):
                     os.rename(old_path, new_path)
-                    print(f"  Renamed: {fname} → {new_name}")
+                    print(f"  Renamed: {fname} -> {new_name}")
                 break
 
 

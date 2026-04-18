@@ -1,0 +1,27 @@
+Using bundled DotNet SDK version: 8.0.412 win-x64
+Running UnrealBuildTool: dotnet "..\..\Engine\Binaries\DotNET\UnrealBuildTool\UnrealBuildTool.dll" Sub3DEditor Win64 Development C:/Dev/Sub3D/Sub3D.uproject
+Log file: C:\Users\coren\AppData\Local\UnrealBuildTool\Log.txt
+Using 'git status' to determine working set for adaptive non-unity build (C:\Dev\Sub3D).
+Building Sub3DEditor...
+Using Visual Studio 2026 14.44.35224 toolchain (C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC\14.44.35207) and Windows 10.0.22621.0 SDK (C:\Program Files (x86)\Windows Kits\10).
+[Adaptive Build] Excluded from Sub3D unity file: ChunkAssembler.cpp, ChunkLibrary.cpp, ProceduralChunkBuilder.cpp, TraversalGenerator.cpp, TraversalGraphGenerator.cpp, TraversalValidator.cpp, SubCompilerMvpFactory.cpp, SubCompilerTests.cpp, SubmarineGeometryBuilder.cpp, AnimNode_CrewProcedural.cpp, CompartmentVolumeComponent.cpp, CrewAnimDebugWidget.cpp, DoorFloodVfxComponent.cpp, DraggableInstrumentWindowWidget.cpp, FloodWaterVisualsComponent.cpp, HelmControlPanelWidget.cpp, HelmStatusStripWidget.cpp, InteractableComponent.cpp, ReconstructionViewWidget.cpp, SubCrewAnimInstance.cpp, SubCrewCharacter.cpp, SubCrewMovementComponent.cpp, SubDoorActor.cpp, SubFloodComponent.cpp, SubHelmWidget.cpp, SubHullComponent.cpp, SubHullComponentTests.cpp, SubHullVisualDamageComponent.cpp, SubInteractionComponent.cpp, SubmarineAuthoringActors.cpp, SubmarineAuthoringBakeTests.cpp, SubmarineAuthoringPipeline.cpp, SubmarineBase.cpp, SubmarineCompartmentComponent.cpp, SubmarineFeedbackDirectorComponent.cpp, SubmarineRuntimeActor.cpp, SubmarineStationManagerComponent.cpp, SubmarineSystemsComponent.cpp, SubMovementComponent.cpp, SubPlayerController.cpp, SubPlayerHUDWidget.cpp, SubSonarComponent.cpp, SubSonarComponentTests.cpp, SubTurretWidget.cpp, TurretActor.cpp, SubmarineGeneratedGeometryComponent.cpp, SubmarineDefinition.cpp, SubmarineGenerator.cpp, SubmarineGeneratorEnvelopeDef.cpp, SubmarineGeneratorSpec.cpp, SubmarineMeshBuilder.cpp, TraversalRouteActor.cpp
+[Adaptive Build] Excluded from VisualStudioTools unity file: VisualStudioToolsCommandlet.cpp
+[Adaptive Build] Excluded from UnrealClaude unity file: AnimAssetManager.cpp, AnimAssetNodeFactory.cpp, AnimationBlueprintUtils.cpp, AnimGraphEditor.cpp, AnimGraphFinder.cpp, AnimNodePinUtils.cpp, AnimStateMachineEditor.cpp, AnimTransitionConditionFactory.cpp, BlueprintEditor.cpp, BlueprintGraphEditor.cpp, BlueprintLoader.cpp, BlueprintUtils.cpp, ClaudeCodeRunner.cpp, ClaudeEditorWidget.cpp, ClaudeSessionManager.cpp, ClaudeSubsystem.cpp, ClipboardImageUtils.cpp, JsonUtils.cpp, ProjectContext.cpp, ScriptExecutionManager.cpp, ScriptPermissionDialog.cpp, UnrealClaudeCommands.cpp, UnrealClaudeModule.cpp, MCPParamValidator.cpp, MCPTaskQueue.cpp, MCPToolBase.cpp, MCPToolRegistry.cpp, UnrealClaudeMCPServer.cpp, MCPTool_AnimBlueprintModify.cpp, MCPTool_Asset.cpp, MCPTool_AssetDependencies.cpp, MCPTool_AssetReferencers.cpp, MCPTool_AssetSearch.cpp, MCPTool_BlueprintModify.cpp, MCPTool_BlueprintQuery.cpp, MCPTool_BlueprintQueryList.cpp, MCPTool_CaptureViewport.cpp, MCPTool_Character.cpp, MCPTool_CharacterData.cpp, MCPTool_CleanupScripts.cpp, MCPTool_DeleteActors.cpp, MCPTool_EnhancedInput.cpp, MCPTool_ExecuteScript.cpp, MCPTool_GetLevelActors.cpp, MCPTool_GetOutputLog.cpp, MCPTool_GetScriptHistory.cpp, MCPTool_Material.cpp, MCPTool_MoveActor.cpp, MCPTool_OpenLevel.cpp, MCPTool_RunConsoleCommand.cpp, MCPTool_SetProperty.cpp, MCPTool_SpawnActor.cpp, CharacterToolTests.cpp, ClipboardImageTests.cpp, MaterialAssetToolTests.cpp, MCPAnimBlueprintTests.cpp, MCPAssetToolTests.cpp, MCPParamValidatorTests.cpp, MCPTaskQueueTests.cpp, MCPToolTests.cpp, SClaudeInputArea.cpp, SClaudeToolbar.cpp
+Determining max actions to execute in parallel (8 physical cores, 8 logical cores)
+  Executing up to 8 processes, one per physical core
+  Requested 1.5 GB memory per action, 10.49 GB available: limiting max parallel actions to 6
+Using Unreal Build Accelerator local executor to run 4 action(s)
+  Storage capacity 40Gb
+---- Starting trace: 260414_203225 ----
+UbaSessionServer - Disable remote execution (remote sessions will finish current processes)
+[1/4] Compile [x64] CrewAnimDebugWidget.cpp
+[2/4] Link [x64] UnrealEditor-Sub3D.lib
+   Cr‚ation de la bibliothŠque C:/Dev/Sub3D/Intermediate/Build/Win64/x64/UnrealEditor/Development/Sub3D/UnrealEditor-Sub3D.lib et de l'objet C:/Dev/Sub3D/Intermediate/Build/Win64/x64/UnrealEditor/Development/Sub3D/UnrealEditor-Sub3D.exp
+[3/4] Link [x64] UnrealEditor-Sub3D.dll
+[4/4] WriteMetadata Sub3DEditor.target [NoUba]
+
+Trace written to file C:/Users/coren/AppData/Local/UnrealBuildTool/Log.uba with size 3.5kb
+Total time in Unreal Build Accelerator local executor: 4.36 seconds
+
+Result: Succeeded
+Total execution time: 5.72 seconds

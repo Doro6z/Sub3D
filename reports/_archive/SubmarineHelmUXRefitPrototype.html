@@ -1,0 +1,688 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Sub3D - Helm Neo-Redoutable Prototype</title>
+    <style>
+        :root {
+            --bg: #060c15;
+            --plate: rgba(11, 20, 34, 0.94);
+            --plate-2: rgba(8, 15, 26, 0.98);
+            --line: #20324b;
+            --line-soft: rgba(78, 110, 151, 0.14);
+            --chalk: #dce8f7;
+            --chalk-dim: #7f97b6;
+            --verdigris: #19d8e6;
+            --brass: #f0b04d;
+            --rust: #f45f63;
+            --safe: #72d694;
+            --font-ui: "Segoe UI", "Trebuchet MS", sans-serif;
+            --font-display: "Bahnschrift", "Segoe UI", sans-serif;
+            --font-mono: "Courier New", Consolas, monospace;
+        }
+
+        * { box-sizing: border-box; }
+
+        body {
+            margin: 0;
+            min-height: 100vh;
+            color: var(--chalk);
+            font-family: var(--font-ui);
+            background:
+                radial-gradient(circle at 18% 14%, rgba(36, 78, 126, 0.22), transparent 24%),
+                radial-gradient(circle at 82% 18%, rgba(25, 216, 230, 0.08), transparent 18%),
+                linear-gradient(180deg, #09111d 0%, #060c15 100%);
+        }
+
+        body::before {
+            content: "";
+            position: fixed;
+            inset: 0;
+            pointer-events: none;
+            opacity: 0.24;
+            background:
+                radial-gradient(circle at 50% 50%, rgba(25, 216, 230, 0.04), transparent 52%),
+                linear-gradient(var(--line-soft) 1px, transparent 1px),
+                linear-gradient(90deg, var(--line-soft) 1px, transparent 1px);
+            background-size: auto, 40px 40px, 40px 40px;
+        }
+
+        .app {
+            position: relative;
+            z-index: 1;
+            display: grid;
+            grid-template-rows: auto auto 1fr auto;
+            gap: 14px;
+            min-height: 100vh;
+            padding: 16px;
+        }
+
+        .bar, .panel, .footer {
+            background: var(--plate);
+            border: 1px solid var(--line);
+            box-shadow: 0 18px 48px rgba(0, 0, 0, 0.28);
+        }
+
+        .bar, .footer {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 16px;
+            padding: 12px 16px;
+            clip-path: polygon(14px 0, calc(100% - 14px) 0, 100% 14px, 100% calc(100% - 14px), calc(100% - 14px) 100%, 14px 100%, 0 calc(100% - 14px), 0 14px);
+        }
+
+        .title {
+            font-family: var(--font-display);
+            font-size: 1.5rem;
+            letter-spacing: 0.07em;
+            text-transform: uppercase;
+        }
+
+        .mono {
+            font-family: var(--font-mono);
+            font-size: 0.76rem;
+            letter-spacing: 0.05em;
+            color: var(--chalk-dim);
+        }
+
+        .toolbar {
+            display: flex;
+            gap: 10px;
+            flex-wrap: wrap;
+            justify-content: flex-end;
+        }
+
+        button {
+            border: 1px solid var(--line);
+            background: var(--plate-2);
+            color: var(--chalk);
+            padding: 8px 12px;
+            font-family: var(--font-mono);
+            font-size: 0.77rem;
+            cursor: pointer;
+            clip-path: polygon(10px 0, calc(100% - 10px) 0, 100% 10px, 100% 100%, 0 100%, 0 10px);
+        }
+
+        button.active {
+            border-color: var(--brass);
+            background: linear-gradient(180deg, rgba(38, 57, 82, 0.94), rgba(15, 24, 38, 0.98));
+        }
+
+        .metrics {
+            display: grid;
+            grid-template-columns: repeat(6, minmax(0, 1fr));
+            gap: 10px;
+            width: 100%;
+        }
+
+        .metric {
+            padding-left: 10px;
+            border-left: 1px solid rgba(184, 176, 151, 0.16);
+        }
+
+        .metric:first-child { border-left: 0; }
+
+        .metric .label {
+            font-family: var(--font-mono);
+            font-size: 0.72rem;
+            color: var(--chalk-dim);
+            text-transform: uppercase;
+        }
+
+        .metric .value {
+            margin-top: 4px;
+            font-family: var(--font-display);
+            font-size: 1.28rem;
+        }
+
+        .layout {
+            display: grid;
+            grid-template-columns: 270px minmax(620px, 1fr) 320px;
+            gap: 14px;
+        }
+
+        .column {
+            display: grid;
+            gap: 14px;
+        }
+
+        .left { grid-template-rows: 1fr 1fr; }
+        .center { grid-template-rows: 1fr 0.58fr; }
+        .right { grid-template-rows: 1fr 0.9fr; }
+
+        .panel {
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+            clip-path: polygon(18px 0, calc(100% - 18px) 0, 100% 18px, 100% calc(100% - 18px), calc(100% - 18px) 100%, 18px 100%, 0 calc(100% - 18px), 0 18px);
+        }
+
+        .panel-head {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 12px 14px;
+            border-bottom: 1px solid var(--line);
+            background: rgba(15, 22, 21, 0.88);
+        }
+
+        .panel-title {
+            font-family: var(--font-display);
+            font-size: 0.96rem;
+            letter-spacing: 0.08em;
+            text-transform: uppercase;
+        }
+
+        .panel-meta {
+            display: flex;
+            gap: 8px;
+            align-items: center;
+            flex-wrap: wrap;
+            justify-content: flex-end;
+        }
+
+        .tag {
+            padding: 3px 7px;
+            border: 1px solid rgba(127, 151, 182, 0.26);
+            background: rgba(6, 12, 21, 0.76);
+            color: var(--chalk-dim);
+            font-family: var(--font-mono);
+            font-size: 0.66rem;
+            letter-spacing: 0.04em;
+            text-transform: uppercase;
+        }
+
+        .panel-body {
+            flex: 1;
+            padding: 14px;
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+
+        .viz {
+            width: 100%;
+            height: 100%;
+            min-height: 220px;
+            border: 1px solid rgba(127, 151, 182, 0.16);
+            background: linear-gradient(180deg, rgba(11, 20, 34, 0.98), rgba(7, 13, 23, 0.98));
+        }
+
+        .caption {
+            display: flex;
+            justify-content: space-between;
+            gap: 8px;
+            font-family: var(--font-mono);
+            font-size: 0.77rem;
+            color: var(--chalk-dim);
+        }
+
+        .control {
+            padding-bottom: 14px;
+            border-bottom: 1px solid rgba(184, 176, 151, 0.12);
+        }
+
+        .control-head {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 8px;
+            gap: 10px;
+        }
+
+        .control-name {
+            font-family: var(--font-display);
+            font-size: 0.96rem;
+            text-transform: uppercase;
+        }
+
+        .control-value {
+            font-family: var(--font-mono);
+            font-size: 0.82rem;
+            text-transform: uppercase;
+        }
+
+        .lever {
+            position: relative;
+            height: 18px;
+            border: 1px solid rgba(184, 176, 151, 0.18);
+            background: linear-gradient(180deg, rgba(10, 14, 14, 0.98), rgba(26, 34, 34, 0.92));
+        }
+
+        .lever::before {
+            content: "";
+            position: absolute;
+            left: 50%;
+            top: 0;
+            bottom: 0;
+            width: 1px;
+            background: rgba(236, 226, 203, 0.12);
+        }
+
+        .lever::after {
+            content: "";
+            position: absolute;
+            top: 2px;
+            bottom: 2px;
+            left: calc(var(--pos, 50%) - 10px);
+            width: 20px;
+            background: linear-gradient(180deg, var(--brass), #9a6b23);
+            box-shadow: 0 0 16px rgba(240, 176, 77, 0.18);
+        }
+
+        .lever.green::after {
+            background: linear-gradient(180deg, var(--verdigris), #157d9b);
+            box-shadow: 0 0 16px rgba(25, 216, 230, 0.18);
+        }
+
+        .stamp-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 10px;
+        }
+
+        .stamp {
+            padding: 12px 10px;
+            min-height: 84px;
+            border: 1px dashed rgba(184, 176, 151, 0.20);
+            background: rgba(10, 16, 16, 0.72);
+        }
+
+        .stamp-title {
+            font-family: var(--font-mono);
+            font-size: 0.72rem;
+            color: var(--chalk-dim);
+            text-transform: uppercase;
+        }
+
+        .stamp-value {
+            margin-top: 8px;
+            font-family: var(--font-display);
+            font-size: 1.12rem;
+        }
+
+        .good .stamp-value { color: var(--safe); }
+        .warn .stamp-value { color: var(--brass); }
+        .bad .stamp-value { color: var(--rust); }
+
+        .warning {
+            border: 1px solid rgba(203, 97, 68, 0.30);
+            background: rgba(70, 23, 17, 0.42);
+            color: #f1c6ba;
+            padding: 12px;
+            font-family: var(--font-mono);
+            font-size: 0.8rem;
+        }
+
+        .mode-pilot .pilot-emphasis,
+        .mode-precision .precision-emphasis,
+        .mode-systems .systems-emphasis {
+            box-shadow: 0 0 0 1px rgba(25, 216, 230, 0.18) inset, 0 0 42px rgba(25, 216, 230, 0.08);
+        }
+
+        .mode-systems .guidance-panel,
+        .mode-systems .clearance-panel,
+        .state-degraded .guidance-panel,
+        .state-degraded .clearance-panel {
+            opacity: 0.58;
+        }
+
+        @media (max-width: 1380px) {
+            .layout { grid-template-columns: 1fr; }
+            .metrics { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+        }
+    </style>
+</head>
+<body class="mode-pilot state-nominal">
+    <div class="app">
+        <section class="bar">
+            <div>
+                <div class="title">Helm / Neo Redoutable</div>
+                <div class="mono">2-second hierarchy: sonar center, nav left, machine right.</div>
+            </div>
+            <div class="toolbar">
+                <button class="mode-btn active" data-mode="pilot">Pilot Table</button>
+                <button class="mode-btn" data-mode="precision">Needle Passage</button>
+                <button class="mode-btn" data-mode="systems">Machinery Watch</button>
+            </div>
+        </section>
+
+        <section class="bar">
+            <div class="metrics">
+                <div class="metric"><div class="label">heading</div><div class="value" id="heading">047 deg</div></div>
+                <div class="metric"><div class="label">speed</div><div class="value" id="speed">12.4 kn</div></div>
+                <div class="metric"><div class="label">depth</div><div class="value" id="depth">168 m</div></div>
+                <div class="metric"><div class="label">attitude</div><div class="value" id="attitude">-4.5 / 1.2</div></div>
+                <div class="metric"><div class="label">commitment</div><div class="value" id="commitment">stable</div></div>
+                <div class="metric"><div class="label">alert band</div><div class="value" id="alertBand">none</div></div>
+            </div>
+            <div class="toolbar">
+                <button class="state-btn active" data-state="nominal">Nominal</button>
+                <button class="state-btn" data-state="tight">Tight Passage</button>
+                <button class="state-btn" data-state="degraded">Degraded</button>
+            </div>
+        </section>
+
+        <section class="layout">
+            <div class="column left">
+                <section class="panel guidance-panel precision-emphasis">
+                    <div class="panel-head">
+                        <div class="panel-title">Panel B / Tactical Graph</div>
+                        <div class="panel-meta">
+                            <span class="tag">WBP_TacticalGraph</span>
+                            <span class="tag">Contract: FHelmGuidanceData</span>
+                        </div>
+                    </div>
+                    <div class="panel-body">
+                        <svg class="viz" viewBox="0 0 320 280" aria-label="Steering arc">
+                            <defs>
+                                <pattern id="grid-nav" width="26" height="26" patternUnits="userSpaceOnUse">
+                                    <path d="M 26 0 L 0 0 0 26" fill="none" stroke="#17304a" stroke-width="1"/>
+                                </pattern>
+                            </defs>
+                            <rect width="320" height="280" fill="url(#grid-nav)"/>
+                            <path d="M54,236 C72,176 118,130 170,102 C218,76 256,64 294,58" fill="none" stroke="#18d8e6" stroke-width="2.4"/>
+                            <path d="M42,246 C60,178 110,122 168,88 C222,56 266,44 304,40" fill="none" stroke="#6de8f0" stroke-width="7" opacity="0.16"/>
+                            <circle cx="72" cy="226" r="8" fill="#18d8e6"/>
+                            <line x1="72" y1="226" x2="122" y2="178" stroke="#dce8f7" stroke-width="2"/>
+                            <line x1="160" y1="18" x2="160" y2="262" stroke="#20324b" stroke-width="1"/>
+                            <line x1="18" y1="140" x2="302" y2="140" stroke="#20324b" stroke-width="1"/>
+                            <text x="18" y="30" fill="#7f97b6" font-family="Courier New" font-size="12">local tunnel trend / computer-perfect geometry</text>
+                            <text x="18" y="258" fill="#f0b04d" font-family="Courier New" font-size="12">offset: port 1.2 m / curvature rising</text>
+                        </svg>
+                        <div class="caption">
+                            <span>Calculated tunnel shape and steering trend only.</span>
+                            <span id="guidanceHint">Trend panel, not a full graph.</span>
+                        </div>
+                    </div>
+                </section>
+
+                <section class="panel systems-emphasis">
+                    <div class="panel-head">
+                        <div class="panel-title">Panel C / Clearance Plot</div>
+                        <div class="panel-meta">
+                            <span class="tag">WBP_ClearancePlot</span>
+                            <span class="tag">Contract: FHelmClearanceData</span>
+                        </div>
+                    </div>
+                    <div class="panel-body">
+                        <svg class="viz" viewBox="0 0 320 340" aria-label="Depth ladder">
+                            <defs>
+                                <pattern id="grid-clear" width="22" height="22" patternUnits="userSpaceOnUse">
+                                    <path d="M 22 0 L 0 0 0 22" fill="none" stroke="#14273d" stroke-width="1"/>
+                                </pattern>
+                            </defs>
+                            <rect width="320" height="340" fill="url(#grid-clear)"/>
+                            <path d="M26,238 C76,96 246,88 294,238" fill="none" stroke="#6de8f0" stroke-width="2" stroke-dasharray="6 6"/>
+                            <line x1="20" y1="238" x2="300" y2="238" stroke="#40546f" stroke-width="6"/>
+                            <rect x="126" y="182" width="68" height="36" rx="17" fill="rgba(24,216,230,0.12)" stroke="#18d8e6" stroke-width="2"/>
+                            <line x1="160" y1="182" x2="160" y2="218" stroke="#dce8f7" stroke-width="2"/>
+                            <line x1="112" y1="174" x2="112" y2="238" stroke="#f0b04d" stroke-width="1.4"/>
+                            <line x1="208" y1="174" x2="208" y2="238" stroke="#f0b04d" stroke-width="1.4"/>
+                            <text x="28" y="36" fill="#7f97b6" font-family="Courier New" font-size="12">clearance / passability / margin in meters</text>
+                            <text x="88" y="166" fill="#f0b04d" font-family="Courier New" font-size="12">L 0.9 m</text>
+                            <text x="204" y="166" fill="#f0b04d" font-family="Courier New" font-size="12">R 0.7 m</text>
+                            <text x="26" y="264" fill="#7f97b6" font-family="Courier New" font-size="12">floor reference</text>
+                        </svg>
+                        <div class="caption">
+                            <span>Computer clearance, not raw perception.</span>
+                            <span id="depthHint">Primary support in tight passages.</span>
+                        </div>
+                    </div>
+                </section>
+            </div>
+
+            <div class="column center">
+                <section class="panel pilot-emphasis">
+                    <div class="panel-head">
+                        <div class="panel-title">Panel A / Raw Perception</div>
+                        <div class="panel-meta">
+                            <span class="tag">WBP_RawPerception</span>
+                            <span class="tag">Contract: FHelmPerceptionData</span>
+                        </div>
+                    </div>
+                    <div class="panel-body">
+                        <svg class="viz" viewBox="0 0 920 520" aria-label="Passage theatre">
+                            <defs>
+                                <radialGradient id="echoGlow" cx="50%" cy="50%" r="50%">
+                                    <stop offset="0%" stop-color="rgba(24,216,230,0.20)"/>
+                                    <stop offset="100%" stop-color="rgba(24,216,230,0.00)"/>
+                                </radialGradient>
+                                <linearGradient id="sweep" x1="0%" y1="0%" x2="100%" y2="100%">
+                                    <stop offset="0%" stop-color="rgba(24,216,230,0.00)"/>
+                                    <stop offset="60%" stop-color="rgba(24,216,230,0.08)"/>
+                                    <stop offset="100%" stop-color="rgba(24,216,230,0.28)"/>
+                                </linearGradient>
+                                <pattern id="grid-sonar" width="40" height="40" patternUnits="userSpaceOnUse">
+                                    <path d="M 40 0 L 0 0 0 40" fill="none" stroke="#13253c" stroke-width="1"/>
+                                </pattern>
+                            </defs>
+                            <rect width="920" height="520" fill="url(#grid-sonar)"/>
+                            <circle cx="460" cy="260" r="74" fill="url(#echoGlow)"/>
+                            <circle cx="460" cy="260" r="58" fill="none" stroke="#17304a" stroke-width="2"/>
+                            <circle cx="460" cy="260" r="118" fill="none" stroke="#17304a" stroke-width="2"/>
+                            <circle cx="460" cy="260" r="182" fill="none" stroke="#17304a" stroke-width="2"/>
+                            <circle cx="460" cy="260" r="246" fill="none" stroke="#17304a" stroke-width="2"/>
+                            <path d="M460,260 L350,150 A170 170 0 0 1 428 108 Z" fill="url(#sweep)"/>
+                            <path d="M372,96 C386,182 388,346 372,430" fill="none" stroke="#19d8e6" stroke-width="5" opacity="0.62"/>
+                            <path d="M546,96 C532,182 530,346 546,430" fill="none" stroke="#19d8e6" stroke-width="5" opacity="0.62"/>
+                            <ellipse cx="404" cy="198" rx="42" ry="16" fill="rgba(25,216,230,0.20)" stroke="#19d8e6" stroke-width="1.5" transform="rotate(-38 404 198)"/>
+                            <ellipse cx="584" cy="326" rx="34" ry="12" fill="rgba(240,176,77,0.18)" stroke="#f0b04d" stroke-width="1.4" transform="rotate(12 584 326)"/>
+                            <circle cx="320" cy="274" r="5" fill="#dce8f7"/>
+                            <circle cx="612" cy="206" r="5" fill="#f45f63"/>
+                            <circle cx="650" cy="352" r="4" fill="#dce8f7"/>
+                            <polygon points="460,244 468,276 452,276" fill="#19d8e6"/>
+                            <text x="28" y="34" fill="#7f97b6" font-family="Courier New" font-size="13">raw sonar / masses and echoes only / no navigation overlays</text>
+                        </svg>
+                        <div class="caption">
+                            <span>First-read panel. Organic, central, visually dominant.</span>
+                            <span id="theatreHint">Primary in Pilot mode.</span>
+                        </div>
+                    </div>
+                </section>
+
+                <section class="panel clearance-panel precision-emphasis">
+                    <div class="panel-head">
+                        <div class="panel-title">Panel C2 / Margin Strip</div>
+                        <div class="panel-meta">
+                            <span class="tag">WBP_MarginStrip</span>
+                            <span class="tag">Contract: FHelmClearanceSummaryData</span>
+                        </div>
+                    </div>
+                    <div class="panel-body">
+                        <svg class="viz" viewBox="0 0 920 260" aria-label="Clearance ribbon">
+                            <defs>
+                                <pattern id="grid-strip" width="28" height="28" patternUnits="userSpaceOnUse">
+                                    <path d="M 28 0 L 0 0 0 28" fill="none" stroke="#14273d" stroke-width="1"/>
+                                </pattern>
+                            </defs>
+                            <rect width="920" height="260" fill="url(#grid-strip)"/>
+                            <rect x="88" y="102" width="744" height="56" fill="rgba(220,232,247,0.03)" stroke="#30455f"/>
+                            <rect x="432" y="110" width="56" height="40" fill="rgba(24,216,230,0.16)" stroke="#dce8f7" stroke-width="2"/>
+                            <line x1="460" y1="74" x2="460" y2="190" stroke="#f0b04d" stroke-width="1.5" stroke-dasharray="8 8"/>
+                            <text x="88" y="48" fill="#7f97b6" font-family="Courier New" font-size="12">summary strip / immediate numbers / no decorative ambiguity</text>
+                            <text x="530" y="126" fill="#dce8f7" font-family="Bahnschrift" font-size="20">clearance index</text>
+                            <text x="530" y="154" fill="#f0b04d" font-family="Courier New" font-size="12">left 0.9 m / right 0.7 m / ceiling 1.4 m</text>
+                        </svg>
+                        <div class="caption">
+                            <span>Secondary clearance summary for fast reading.</span>
+                            <span id="clearanceHint">Reads commitment and margin.</span>
+                        </div>
+                    </div>
+                </section>
+            </div>
+
+            <div class="column right">
+                <section class="panel systems-emphasis">
+                    <div class="panel-head">
+                        <div class="panel-title">Panel D / System Controls</div>
+                        <div class="panel-meta">
+                            <span class="tag">WBP_SystemControls</span>
+                            <span class="tag">Contract: FHelmControlData</span>
+                        </div>
+                    </div>
+                    <div class="panel-body">
+                        <div class="control">
+                            <div class="control-head"><div class="control-name">Main Power</div><div class="control-value" id="powerVal">ahead 42%</div></div>
+                            <div class="lever" id="powerLever" style="--pos: 72%;"></div>
+                            <div class="mono">Power is intention. Speed is consequence.</div>
+                        </div>
+                        <div class="control">
+                            <div class="control-head"><div class="control-name">Rudder</div><div class="control-value" id="rudderVal">port 6 deg</div></div>
+                            <div class="lever green" id="rudderLever" style="--pos: 38%;"></div>
+                        </div>
+                        <div class="control">
+                            <div class="control-head"><div class="control-name">Hydroplanes</div><div class="control-value" id="planesVal">dive 9 deg</div></div>
+                            <div class="lever green" id="planesLever" style="--pos: 32%;"></div>
+                        </div>
+                        <div class="control">
+                            <div class="control-head"><div class="control-name">Ballast Bias</div><div class="control-value" id="ballastVal">52%</div></div>
+                            <div class="lever" id="ballastLever" style="--pos: 52%;"></div>
+                        </div>
+                    </div>
+                </section>
+
+                <section class="panel systems-emphasis">
+                    <div class="panel-head">
+                        <div class="panel-title">Panel E / Engagement & Overrides</div>
+                        <div class="panel-meta">
+                            <span class="tag">WBP_EngagementOverrides</span>
+                            <span class="tag">Contract: FHelmOverrideData</span>
+                        </div>
+                    </div>
+                    <div class="panel-body">
+                        <div class="stamp-grid">
+                            <div class="stamp good"><div class="stamp-title">auto-speed</div><div class="stamp-value" id="stampSpeed">holding</div></div>
+                            <div class="stamp good"><div class="stamp-title">auto-depth</div><div class="stamp-value" id="stampDepth">holding</div></div>
+                            <div class="stamp bad"><div class="stamp-title">auto-pitch</div><div class="stamp-value" id="stampPitch">manual</div></div>
+                            <div class="stamp warn"><div class="stamp-title">master dampeners</div><div class="stamp-value" id="stampMaster">armed</div></div>
+                        </div>
+                        <div class="warning" id="warningCopy">Stable transit. Guidance, theatre, and clearance agree. Use command bank deliberately. Do not over-correct rudder at low authority.</div>
+                    </div>
+                </section>
+            </div>
+        </section>
+
+        <section class="footer">
+            <span class="mono">Direction: bathyscaphe workshop / plotting room / brass + chalk + verdigris.</span>
+            <span class="mono">Rule: sonar raw, guidance derived, controls machine-like.</span>
+        </section>
+    </div>
+
+    <script>
+        const states = {
+            nominal: {
+                heading: "047 deg",
+                speed: "12.4 kn",
+                depth: "168 m",
+                attitude: "-4.5 / 1.2",
+                commitment: "stable",
+                alertBand: "none",
+                powerVal: "ahead 42%",
+                rudderVal: "port 6 deg",
+                planesVal: "dive 9 deg",
+                ballastVal: "52%",
+                stampSpeed: "holding",
+                stampDepth: "holding",
+                stampPitch: "manual",
+                stampMaster: "armed",
+                warningCopy: "Nominal transit. Sonar center remains clean. Tactical graph and clearance agree. Machine controls are in a stable envelope.",
+                theatreHint: "Immediate focal point. Raw perception first.",
+                guidanceHint: "Computer-perfect tunnel trend only.",
+                depthHint: "Cross-check vertical posture when needed.",
+                clearanceHint: "Fast margin confirmation.",
+                powerPos: "72%",
+                rudderPos: "38%",
+                planesPos: "32%",
+                ballastPos: "52%"
+            },
+            tight: {
+                heading: "061 deg",
+                speed: "8.1 kn",
+                depth: "182 m",
+                attitude: "-8.8 / 2.0",
+                commitment: "high",
+                alertBand: "amber",
+                powerVal: "ahead 28%",
+                rudderVal: "port 13 deg",
+                planesVal: "dive 16 deg",
+                ballastVal: "58%",
+                stampSpeed: "trimmed",
+                stampDepth: "watching",
+                stampPitch: "manual",
+                stampMaster: "engaged",
+                warningCopy: "Needle passage. The left column now matters more: graph for the bend, clearance for margin, depth ladder for vertical discipline. Reduce power early.",
+                theatreHint: "Still central, but no longer sufficient on its own.",
+                guidanceHint: "Shows bend and entry bias only.",
+                depthHint: "Vertical tape becomes critical.",
+                clearanceHint: "Primary passability read.",
+                powerPos: "64%",
+                rudderPos: "24%",
+                planesPos: "20%",
+                ballastPos: "58%"
+            },
+            degraded: {
+                heading: "047 deg",
+                speed: "11.8 kn",
+                depth: "171 m",
+                attitude: "-4.8 / 1.2",
+                commitment: "uncertain",
+                alertBand: "red",
+                powerVal: "ahead 39%",
+                rudderVal: "port 6 deg",
+                planesVal: "dive 9 deg",
+                ballastVal: "52%",
+                stampSpeed: "manual",
+                stampDepth: "manual",
+                stampPitch: "manual",
+                stampMaster: "fallback",
+                warningCopy: "Derived navigation degraded. Hold raw sonar and machine posture. Graph and clearance must visibly concede uncertainty instead of faking confidence.",
+                theatreHint: "The reliable center when computer panels degrade.",
+                guidanceHint: "Derived guidance should fade, not lie.",
+                depthHint: "Fallback to machine-safe vertical discipline.",
+                clearanceHint: "Suppress stale confidence when data decays.",
+                powerPos: "70%",
+                rudderPos: "38%",
+                planesPos: "32%",
+                ballastPos: "52%"
+            }
+        };
+
+        function setText(id, value) {
+            const el = document.getElementById(id);
+            if (el) {
+                el.textContent = value;
+            }
+        }
+
+        function setState(name) {
+            const s = states[name];
+            document.body.classList.remove("state-nominal", "state-tight", "state-degraded");
+            document.body.classList.add("state-" + name);
+            Object.keys(s).forEach(key => {
+                if (!key.endsWith("Pos")) {
+                    setText(key, s[key]);
+                }
+            });
+            document.getElementById("powerLever").style.setProperty("--pos", s.powerPos);
+            document.getElementById("rudderLever").style.setProperty("--pos", s.rudderPos);
+            document.getElementById("planesLever").style.setProperty("--pos", s.planesPos);
+            document.getElementById("ballastLever").style.setProperty("--pos", s.ballastPos);
+            document.querySelectorAll(".state-btn").forEach(btn => btn.classList.toggle("active", btn.dataset.state === name));
+        }
+
+        function setMode(name) {
+            document.body.classList.remove("mode-pilot", "mode-precision", "mode-systems");
+            document.body.classList.add("mode-" + name);
+            document.querySelectorAll(".mode-btn").forEach(btn => btn.classList.toggle("active", btn.dataset.mode === name));
+        }
+
+        document.querySelectorAll(".mode-btn").forEach(btn => btn.addEventListener("click", () => setMode(btn.dataset.mode)));
+        document.querySelectorAll(".state-btn").forEach(btn => btn.addEventListener("click", () => setState(btn.dataset.state)));
+
+        setMode("pilot");
+        setState("nominal");
+    </script>
+</body>
+</html>

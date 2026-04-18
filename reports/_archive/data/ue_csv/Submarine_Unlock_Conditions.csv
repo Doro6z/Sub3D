@@ -1,0 +1,3 @@
+Name,catalog_id,condition_type,condition_ref,notes
+---,string,string (enum),string,string
+ROW_EXAMPLE,,,,

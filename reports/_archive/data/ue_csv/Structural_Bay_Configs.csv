@@ -1,0 +1,3 @@
+Name,archetype_id,display_name,length_m,usable_height_m,usable_width_m,max_floor_count,order_index
+---,string,string,float,float,float,int32,int32
+ROW_EXAMPLE,,,,,,,

@@ -1,0 +1,3 @@
+Name,display_name,kind,power_draw_kw,repairable
+---,string,string (enum),float,bool
+ROW_EXAMPLE,,,,true

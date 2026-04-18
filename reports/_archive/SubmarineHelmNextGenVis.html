@@ -1,0 +1,247 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <title>Sub3D - Helm Station Final Specs (Next-Gen Brutalist)</title>
+    <style>
+        :root {
+            --bg-base: #010308; /* Bleu-noir très sombre */
+            --bg-panel: #050a12;
+            --border-panel: #1e293b;
+            --grid-color: rgba(255,255,255,0.03);
+            
+            --teal-nominal: #0ea5e9; /* Nominal interactif */
+            --white-neutral: #f8fafc; /* Lecture neutre */
+            --amber-warn: #f59e0b; /* Engagement / Prudence */
+            --red-danger: #ef4444; /* Danger / Collision */
+            
+            --font-main: 'Segoe UI', system-ui, sans-serif;
+            --font-mono: 'Consolas', 'Courier New', monospace;
+        }
+
+        body {
+            background-color: var(--bg-base); color: var(--white-neutral); font-family: var(--font-main);
+            margin: 0; padding: 15px; height: 100vh; box-sizing: border-box; display: flex; flex-direction: column; gap: 10px;
+            overflow: hidden;
+            background-image: 
+                linear-gradient(var(--grid-color) 1px, transparent 1px),
+                linear-gradient(90deg, var(--grid-color) 1px, transparent 1px);
+            background-size: 20px 20px;
+        }
+
+        /* --- LAYOUT GRID --- */
+        .status-strip { /* PANEL F */
+            display: flex; justify-content: space-between; align-items: center;
+            background: var(--bg-panel); border: 1px solid var(--border-panel); border-radius: 4px;
+            padding: 8px 20px; height: 40px;
+        }
+
+        .main-grid {
+            flex: 1; display: grid; gap: 10px;
+            grid-template-columns: 300px 1fr 300px; /* Gauche, Centre, Droite */
+        }
+
+        .col-left { display: grid; grid-template-rows: 1fr 1fr; gap: 10px; }
+        .col-right { display: grid; grid-template-rows: 2fr 1fr; gap: 10px; }
+
+        .panel {
+            background: rgba(5, 10, 18, 0.85); border: 1px solid var(--border-panel); border-radius: 4px;
+            display: flex; flex-direction: column; overflow: hidden; position: relative;
+        }
+        
+        /* --- TYPOGRAPHY & HEADER --- */
+        .panel-header {
+            font-family: var(--font-mono); font-size: 0.65rem; color: #64748b; text-transform: uppercase;
+            padding: 6px 10px; border-bottom: 1px solid var(--border-panel); background: #080f1a;
+            letter-spacing: 1px; display: flex; justify-content: space-between;
+        }
+        .contract-tag { color: var(--teal-nominal); font-size: 0.55rem; opacity: 0.7; }
+
+        .panel-content { flex: 1; padding: 10px; display: flex; flex-direction: column; position: relative; }
+
+        /* --- PANEL F: STATUS --- */
+        .status-block { display: flex; flex-direction: column; align-items: center; justify-content: center; }
+        .status-val { font-family: var(--font-mono); font-size: 1.2rem; color: var(--white-neutral); font-weight: bold; }
+        .status-val.nominal { color: var(--teal-nominal); }
+        .status-lbl { font-size: 0.55rem; color: #64748b; text-transform: uppercase; letter-spacing: 1px; }
+
+        /* --- PANEL A: SONAR --- */
+        .sonar-container { flex: 1; position: relative; display: flex; align-items: center; justify-content: center; }
+        .sonar-arc { fill: none; stroke: var(--teal-nominal); stroke-width: 1; opacity: 0.2; }
+        .sonar-contact { fill: var(--amber-warn); }
+        
+        /* --- PANEL C: RECONSTRUCTION --- */
+        .svg-container { width: 100%; height: 100%; background: #03060a; border: 1px solid #0f172a; border-radius: 2px; }
+        .recon-tunnel { fill: none; stroke: var(--white-neutral); stroke-width: 1.5; stroke-dasharray: 4,4; opacity: 0.4; }
+        .recon-sub { fill: rgba(14, 165, 233, 0.1); stroke: var(--teal-nominal); stroke-width: 2; }
+        .clearance-line { stroke: var(--red-danger); stroke-width: 1; }
+        .clearance-text { fill: var(--red-danger); font-family: var(--font-mono); font-size: 8px; }
+
+        /* --- PANEL D: CONTROLS --- */
+        .ctrl-row { margin-bottom: 12px; }
+        .ctrl-lbl { font-family: var(--font-mono); font-size: 0.65rem; color: #94a3b8; display: flex; justify-content: space-between; margin-bottom: 4px; }
+        
+        .bar-bg { width: 100%; height: 6px; background: #1e293b; border-radius: 2px; position: relative; }
+        .bar-fill { position: absolute; top:0; left:50%; height:100%; background: var(--teal-nominal); transition: 0.2s; }
+        .bar-fill.danger { background: var(--red-danger); }
+        
+        .toggle-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 5px; margin-top: 15px; }
+        .btn-toggle { background: transparent; border: 1px solid #334155; color: #64748b; font-family: var(--font-mono); font-size: 0.65rem; padding: 6px; border-radius: 2px; text-align: left; }
+        .btn-toggle.active { background: rgba(14, 165, 233, 0.1); border-color: var(--teal-nominal); color: var(--teal-nominal); }
+
+        /* --- PANEL E: STABILITY --- */
+        .stab-row { display: flex; justify-content: space-between; font-family: var(--font-mono); font-size: 0.75rem; margin-bottom: 8px; border-bottom: 1px dashed #1e293b; padding-bottom: 4px; }
+        .stab-val { color: var(--white-neutral); }
+        .stab-warn { color: var(--amber-warn); }
+
+    </style>
+</head>
+<body>
+
+<!-- PANEL F: STATUS STRIP -->
+<div class="status-strip">
+    <div class="status-block"><div class="status-lbl">PROPULSION MODE</div><div class="status-val nominal">CRUISE / AUTO</div></div>
+    <div style="display:flex; gap: 30px;">
+        <div class="status-block"><div class="status-lbl">HDG</div><div class="status-val">045°</div></div>
+        <div class="status-block"><div class="status-lbl">SPD</div><div class="status-val">12.0 KN</div></div>
+        <div class="status-block"><div class="status-lbl">DPTH</div><div class="status-val">120 M</div></div>
+        <div class="status-block"><div class="status-lbl">PITCH</div><div class="status-val">-05°</div></div>
+        <div class="status-block"><div class="status-lbl">ROLL</div><div class="status-val">00°</div></div>
+    </div>
+    <div class="status-block" style="text-align:right;"><div class="status-lbl">SYSTEM ALARMS</div><div class="status-val" style="color:#64748b;">NONE</div></div>
+</div>
+
+<div class="main-grid">
+
+    <!-- LEFT COLUMN -->
+    <div class="col-left">
+        <!-- PANEL B: LOCAL GUIDANCE -->
+        <div class="panel">
+            <div class="panel-header"><span>LOCAL GUIDANCE</span><span class="contract-tag">FHelmGuidanceData</span></div>
+            <div class="panel-content">
+                <div style="margin-bottom: 10px; font-family: var(--font-mono); font-size:0.65rem; color:var(--white-neutral);">
+                    TREND: <span style="color:var(--amber-warn);">STEEP DESCENT PORT</span>
+                </div>
+                <svg class="svg-container" viewBox="-50 -50 100 100">
+                    <!-- Clean geometric projection -->
+                    <path d="M 0,40 Q 0,0 -30,-40" stroke="#334155" stroke-width="8" fill="none" stroke-linecap="round" />
+                    <path d="M 0,40 Q 0,0 -30,-40" stroke="var(--white-neutral)" stroke-width="2" fill="none" stroke-linecap="round" />
+                    <!-- Sub Offset -->
+                    <circle cx="5" cy="15" r="4" fill="var(--teal-nominal)" />
+                    <line x1="5" y1="15" x2="0" y2="15" stroke="var(--amber-warn)" stroke-width="1" />
+                </svg>
+            </div>
+        </div>
+
+        <!-- PANEL C: RECONSTRUCTION / CLEARANCE -->
+        <div class="panel">
+            <div class="panel-header"><span>RECONSTRUCTION</span><span class="contract-tag">FHelmReconData</span></div>
+            <div class="panel-content">
+                <svg class="svg-container" viewBox="-100 -100 200 200">
+                    <!-- Tunnel Contour -->
+                    <ellipse cx="0" cy="0" rx="80" ry="60" class="recon-tunnel" />
+                    <line x1="-100" y1="50" x2="100" y2="50" class="recon-tunnel" stroke-width="1" /> <!-- Virtual Floor -->
+                    
+                    <!-- Submarine Gabarit -->
+                    <ellipse cx="-15" cy="10" rx="25" ry="35" class="recon-sub" />
+                    <!-- Center axis -->
+                    <line x1="-100" y1="0" x2="100" y2="0" stroke="#1e293b" stroke-width="1" />
+                    <line x1="0" y1="-100" x2="0" y2="100" stroke="#1e293b" stroke-width="1" />
+                    
+                    <!-- Marge Latérale (Danger) -->
+                    <line x1="-40" y1="10" x2="-68" y2="10" class="clearance-line" />
+                    <text x="-75" y="8" class="clearance-text">2.1m</text>
+                    <line x1="-15" y1="-25" x2="-15" y2="-60" stroke="var(--teal-nominal)" stroke-width="1" stroke-dasharray="2,2" />
+                    <text x="-12" y="-45" fill="var(--teal-nominal)" font-family="var(--font-mono)" font-size="8px">8.5m</text>
+                </svg>
+            </div>
+        </div>
+    </div>
+
+    <!-- CENTER COLUMN -->
+    <div class="panel" style="border-color: #0f172a;">
+        <div class="panel-header" style="background:transparent; border:none; justify-content:center; color:var(--white-neutral);">
+            RAW PERCEPTION <span class="contract-tag" style="margin-left:10px;">FHelmPerceptionData</span>
+        </div>
+        <div class="sonar-container">
+            <svg viewBox="-500 -500 1000 1000" style="position:absolute; top:0; left:0; border:none; background:transparent;">
+                <!-- Crosshairs -->
+                <line x1="-500" y1="0" x2="500" y2="0" stroke="#0f172a" stroke-width="2" />
+                <line x1="0" y1="-500" x2="0" y2="500" stroke="#0f172a" stroke-width="2" />
+                
+                <!-- Range Rings -->
+                <circle cx="0" cy="0" r="100" class="sonar-arc" />
+                <circle cx="0" cy="0" r="200" class="sonar-arc" />
+                <circle cx="0" cy="0" r="300" class="sonar-arc" />
+                <circle cx="0" cy="0" r="400" class="sonar-arc" />
+                
+                <text x="5" y="-105" fill="#334155" font-family="var(--font-mono)" font-size="12px">100m</text>
+                <text x="5" y="-305" fill="#334155" font-family="var(--font-mono)" font-size="12px">300m</text>
+                
+                <!-- Submarine Center Blip -->
+                <polygon points="0,-15 -8,15 8,15" fill="var(--teal-nominal)" />
+                
+                <!-- Raw Echoes (Organic forms, masses) -->
+                <path d="M -80,-300 Q -150,-200 -350,-100 M 120,-320 Q 200,-150 400,0" stroke="var(--teal-nominal)" stroke-width="4" fill="none" opacity="0.6" style="filter:blur(2px);" />
+                
+                <!-- Priority Track (Threat or Obstacle) -->
+                <circle cx="-120" cy="-250" r="15" class="sonar-contact" opacity="0.8" />
+                <line x1="0" y1="0" x2="-120" y2="-250" stroke="var(--amber-warn)" stroke-width="1" stroke-dasharray="5,5" opacity="0.5" />
+                <rect x="-110" y="-270" width="40" height="15" fill="none" stroke="var(--amber-warn)" stroke-width="1" />
+                <text x="-105" y="-258" fill="var(--amber-warn)" font-family="var(--font-mono)" font-size="10px">TRK-01</text>
+            </svg>
+        </div>
+    </div>
+
+    <!-- RIGHT COLUMN -->
+    <div class="col-right">
+        <!-- PANEL D: CONTROLS -->
+        <div class="panel">
+            <div class="panel-header"><span>HELM CONTROLS</span><span class="contract-tag">FHelmControlData</span></div>
+            <div class="panel-content">
+                
+                <div class="ctrl-row">
+                    <div class="ctrl-lbl"><span>PROPULSION</span><span style="color:var(--white-neutral);">45%</span></div>
+                    <div class="bar-bg"><div class="bar-fill" style="width:45%; left:0;"></div></div>
+                </div>
+                
+                <div class="ctrl-row">
+                    <div class="ctrl-lbl"><span>RUDDER</span><span>+05° P</span></div>
+                    <div class="bar-bg"><div class="bar-fill" style="width:10%; left:50%;"></div></div>
+                </div>
+                
+                <div class="ctrl-row">
+                    <div class="ctrl-lbl"><span>HYDROPLANES</span><span style="color:var(--red-danger);">-15° DIVE</span></div>
+                    <div class="bar-bg"><div class="bar-fill danger" style="width:25%; left:25%;"></div> <!-- Dive is left (negative) --></div>
+                </div>
+                
+                <div class="ctrl-row">
+                    <div class="ctrl-lbl"><span>BALLAST FILL</span><span style="color:var(--white-neutral);">68%</span></div>
+                    <div class="bar-bg"><div class="bar-fill" style="width:68%; left:0;"></div></div>
+                </div>
+
+                <div class="toggle-grid">
+                    <div class="btn-toggle">SYS: PWR DAMP</div>
+                    <div class="btn-toggle active">SYS: AUTO SPD</div>
+                    <div class="btn-toggle active">SYS: AUTO DPTH</div>
+                    <div class="btn-toggle">SYS: AUTO PTCH</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- PANEL E: STABILITY / COMMITMENT -->
+        <div class="panel">
+            <div class="panel-header"><span>STABILITY & COMMITMENT</span></div>
+            <div class="panel-content">
+                <div class="stab-row"><span>OVERRIDE STATE</span><span class="stab-val" style="color:#64748b;">NONE</span></div>
+                <div class="stab-row"><span>EST. STOP DIST</span><span class="stab-val">125 M</span></div>
+                <div class="stab-row"><span>TURN RADIUS (CUR)</span><span class="stab-val">N/A</span></div>
+                <div class="stab-row" style="border:none;"><span>ENGAGEMENT RISK</span><span class="stab-warn">HIGH</span></div>
+            </div>
+        </div>
+    </div>
+
+</div>
+
+</body>
+</html>

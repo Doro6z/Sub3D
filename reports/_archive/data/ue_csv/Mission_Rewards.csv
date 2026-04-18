@@ -1,0 +1,3 @@
+Name,mission_id,reward_type,ref_id,qty,on_condition
+---,string,string (enum),string,int32,string (enum)
+ROW_EXAMPLE,,,,1,

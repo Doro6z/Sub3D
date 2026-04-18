@@ -1,0 +1,284 @@
+{
+  "meta": {
+    "domain": "Enemies & Fauna",
+    "parentId": "domain_4",
+    "description": "Schema definition for Enemies & Fauna."
+  },
+  "tables": [
+    {
+      "id": "Enemy_Stats",
+      "domain": 4,
+      "priority": "high",
+      "description": "Base stats per enemy type — health, damage, speed, perception.",
+      "columns": [
+        {
+          "name": "enemy_id",
+          "type": "string",
+          "pk": true
+        },
+        {
+          "name": "display_name",
+          "type": "string",
+          "nullable": false
+        },
+        {
+          "name": "enemy_class",
+          "type": "enum",
+          "values": [
+            "surface",
+            "submarine",
+            "creature",
+            "drone",
+            "boss"
+          ]
+        },
+        {
+          "name": "base_hp",
+          "type": "float",
+          "nullable": false
+        },
+        {
+          "name": "base_damage",
+          "type": "float",
+          "nullable": false
+        },
+        {
+          "name": "base_speed",
+          "type": "float",
+          "nullable": false
+        },
+        {
+          "name": "detect_range_m",
+          "type": "float",
+          "nullable": true
+        },
+        {
+          "name": "breach_capable",
+          "type": "bool",
+          "nullable": false,
+          "default": "false"
+        }
+      ],
+      "relations": [
+        {
+          "target": "Enemy_Variants",
+          "type": "1:N",
+          "label": "has variants"
+        },
+        {
+          "target": "Enemy_Loot_Weights",
+          "type": "1:N",
+          "label": "drops loot"
+        }
+      ]
+    },
+    {
+      "id": "Enemy_Variants",
+      "domain": 4,
+      "priority": "high",
+      "description": "Variants of base enemy types — elite, patrol, boss, ambush, etc.",
+      "columns": [
+        {
+          "name": "variant_id",
+          "type": "string",
+          "pk": true
+        },
+        {
+          "name": "enemy_id",
+          "type": "string",
+          "fk": "Enemy_Stats.enemy_id"
+        },
+        {
+          "name": "variant_tag",
+          "type": "enum",
+          "values": [
+            "standard",
+            "elite",
+            "patrol",
+            "ambush",
+            "boss",
+            "escort"
+          ]
+        },
+        {
+          "name": "hp_mult",
+          "type": "float",
+          "nullable": false,
+          "default": "1.0"
+        },
+        {
+          "name": "damage_mult",
+          "type": "float",
+          "nullable": false,
+          "default": "1.0"
+        },
+        {
+          "name": "speed_mult",
+          "type": "float",
+          "nullable": false,
+          "default": "1.0"
+        },
+        {
+          "name": "xp_reward",
+          "type": "float",
+          "nullable": true
+        }
+      ],
+      "relations": [
+        {
+          "target": "Enemy_Stats",
+          "type": "N:1",
+          "label": "variant of"
+        }
+      ]
+    },
+    {
+      "id": "Enemy_Loot_Weights",
+      "domain": 4,
+      "priority": "medium",
+      "description": "Loot table assignment per enemy type with weight.",
+      "columns": [
+        {
+          "name": "entry_id",
+          "type": "string",
+          "pk": true
+        },
+        {
+          "name": "enemy_id",
+          "type": "string",
+          "fk": "Enemy_Stats.enemy_id"
+        },
+        {
+          "name": "loot_table_id",
+          "type": "string",
+          "fk": "Loot_Tables.loot_table_id"
+        },
+        {
+          "name": "weight",
+          "type": "float",
+          "nullable": false,
+          "default": "1.0"
+        }
+      ],
+      "relations": [
+        {
+          "target": "Enemy_Stats",
+          "type": "N:1",
+          "label": "assigned to enemy"
+        },
+        {
+          "target": "Loot_Tables",
+          "type": "N:1",
+          "label": "references loot table"
+        }
+      ]
+    },
+    {
+      "id": "Fauna_Definitions",
+      "domain": 4,
+      "priority": "high",
+      "description": "Non-hostile fauna — Hunter, Follower, FishSchool, Plankton. Identity layer.",
+      "columns": [
+        {
+          "name": "fauna_id",
+          "type": "string",
+          "pk": true
+        },
+        {
+          "name": "display_name",
+          "type": "string",
+          "nullable": false
+        },
+        {
+          "name": "fauna_type",
+          "type": "enum",
+          "values": [
+            "hunter",
+            "follower",
+            "fish_school",
+            "plankton",
+            "ambient"
+          ]
+        },
+        {
+          "name": "hostile",
+          "type": "bool",
+          "nullable": false,
+          "default": "false"
+        },
+        {
+          "name": "flock_size_min",
+          "type": "int",
+          "nullable": true
+        },
+        {
+          "name": "flock_size_max",
+          "type": "int",
+          "nullable": true
+        }
+      ],
+      "relations": [
+        {
+          "target": "Fauna_Behavior_Params",
+          "type": "1:N",
+          "label": "has behavior params"
+        }
+      ]
+    },
+    {
+      "id": "Fauna_Behavior_Params",
+      "domain": 4,
+      "priority": "high",
+      "description": "Movement and behavior tuning per fauna type.",
+      "columns": [
+        {
+          "name": "param_id",
+          "type": "string",
+          "pk": true
+        },
+        {
+          "name": "fauna_id",
+          "type": "string",
+          "fk": "Fauna_Definitions.fauna_id"
+        },
+        {
+          "name": "cruise_speed",
+          "type": "float",
+          "nullable": false
+        },
+        {
+          "name": "flee_speed",
+          "type": "float",
+          "nullable": true
+        },
+        {
+          "name": "detection_range_m",
+          "type": "float",
+          "nullable": true
+        },
+        {
+          "name": "flee_threshold",
+          "type": "float",
+          "nullable": true
+        },
+        {
+          "name": "depth_min_m",
+          "type": "float",
+          "nullable": true
+        },
+        {
+          "name": "depth_max_m",
+          "type": "float",
+          "nullable": true
+        }
+      ],
+      "relations": [
+        {
+          "target": "Fauna_Definitions",
+          "type": "N:1",
+          "label": "params for fauna"
+        }
+      ]
+    }
+  ]
+}

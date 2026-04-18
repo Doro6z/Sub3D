@@ -1,0 +1,3 @@
+Name,display_name,kind,traversal_cost,vertical
+---,string,string (enum),float,bool
+ROW_EXAMPLE,,,,false

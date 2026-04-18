@@ -1,16 +1,30 @@
 #include "SubmarineBase.h"
 
 #include "BreachVfxManagerComponent.h"
+#include "CompartmentVolumeComponent.h"
+#include "DoorFloodVfxComponent.h"
 #include "FloodWaterVisualsComponent.h"
+#include "GeneratedGeometry/SubmarineGeneratedGeometryComponent.h"
+#include "ProceduralMeshComponent.h"
+#include "Generator/SubmarineDefinition.h"
+#include "Generator/SubmarineGenerator.h"
+#include "Generator/SubmarineGeneratorSpec.h"
+#include "Generator/SubmarineMeshBuilder.h"
+#include "SubmarineLayoutAsset.h"
 #include "HelmNavigationDisplayComponent.h"
 #include "Components/PrimitiveComponent.h"
+#include "Components/StaticMeshComponent.h"
 #include "Engine/DamageEvents.h"
+#include "Engine/StaticMesh.h"
+#include "PhysicsEngine/BodySetup.h"
 #include "Net/UnrealNetwork.h"
+#include "SubHullVisualDamageComponent.h"
 #include "SubmarineFeedbackDirectorComponent.h"
 #include "SubSonarComponent.h"
 #include "SubSonarSystemComponent.h"
 #include "TunnelNavigationRuntimeComponent.h"
 #include "SubDoorActor.h"
+#include "SubFloodComponent.h"
 #include "SubHullComponent.h"
 #include "SubMovementComponent.h"
 #include "SubmarineCompartmentComponent.h"
@@ -18,7 +32,128 @@
 #include "SubmarineStationManagerComponent.h"
 #include "SubmarineSystemsComponent.h"
 #include "SubInteriorFrameComponent.h"
+#include "SubLegacyLog.h"
 #include "TurretActor.h"
+
+DEFINE_LOG_CATEGORY(LogSubLegacy);
+
+namespace
+{
+bool HasAuthoritativeContext(const AActor* Actor)
+{
+	if (!Actor)
+	{
+		return false;
+	}
+
+	return Actor->GetLocalRole() == ROLE_Authority;
+}
+
+int32 CountUsableSimpleShapes(const UBodySetup* BodySetup)
+{
+	if (!BodySetup)
+	{
+		return 0;
+	}
+
+	const FKAggregateGeom& AggGeom = BodySetup->AggGeom;
+	return AggGeom.SphereElems.Num()
+		+ AggGeom.BoxElems.Num()
+		+ AggGeom.SphylElems.Num()
+		+ AggGeom.ConvexElems.Num()
+		+ AggGeom.TaperedCapsuleElems.Num();
+}
+
+bool HasAssignedCollisionProxyMesh(const UStaticMeshComponent* CollisionProxy)
+{
+	return IsValid(CollisionProxy) && IsValid(CollisionProxy->GetStaticMesh());
+}
+
+bool ValidateMovementCollisionComponentConfig(const UPrimitiveComponent* CollisionComp, FString& OutReason)
+{
+	if (!CollisionComp)
+	{
+		OutReason = TEXT("Movement collision component is null.");
+		return false;
+	}
+
+	if (CollisionComp->GetCollisionEnabled() == ECollisionEnabled::NoCollision)
+	{
+		OutReason = FString::Printf(
+			TEXT("Movement collision component '%s' has collision disabled."),
+			*GetNameSafe(CollisionComp));
+		return false;
+	}
+
+	const UStaticMeshComponent* StaticMeshComp = Cast<UStaticMeshComponent>(CollisionComp);
+	if (!StaticMeshComp)
+	{
+		return true;
+	}
+
+	const UStaticMesh* StaticMesh = StaticMeshComp->GetStaticMesh();
+	if (!StaticMesh)
+	{
+		OutReason = FString::Printf(
+			TEXT("Movement collision component '%s' has no static mesh assigned."),
+			*GetNameSafe(CollisionComp));
+		return false;
+	}
+
+	const UBodySetup* BodySetup = StaticMesh->GetBodySetup();
+	if (!BodySetup)
+	{
+		OutReason = FString::Printf(
+			TEXT("Movement collision component '%s' uses static mesh '%s' with no BodySetup."),
+			*GetNameSafe(CollisionComp),
+			*GetNameSafe(StaticMesh));
+		return false;
+	}
+
+	if (BodySetup->CollisionTraceFlag == CTF_UseComplexAsSimple)
+	{
+		OutReason = FString::Printf(
+			TEXT("Movement collision component '%s' uses static mesh '%s' with Collision Complexity=UseComplexAsSimple. ")
+			TEXT("The current engine sweep path for the moving submarine hull does not support triangle-mesh query shapes. ")
+			TEXT("UseSimpleAndComplex or a dedicated movement collision proxy."),
+			*GetNameSafe(CollisionComp),
+			*GetNameSafe(StaticMesh));
+		return false;
+	}
+
+	if (CountUsableSimpleShapes(BodySetup) == 0)
+	{
+		OutReason = FString::Printf(
+			TEXT("Movement collision component '%s' uses static mesh '%s' with zero usable simple collision shapes. ")
+			TEXT("Add box/capsule/convex simple collision for the moving hull sweep."),
+			*GetNameSafe(CollisionComp),
+			*GetNameSafe(StaticMesh));
+		return false;
+	}
+
+	return true;
+}
+
+void LogMovementCollisionValidationIssue(const AActor* Owner, const FString& Reason)
+{
+	static TMap<TWeakObjectPtr<const AActor>, FString> LastLoggedReasons;
+	const TWeakObjectPtr<const AActor> OwnerKey(Owner);
+	const FString* LastReason = LastLoggedReasons.Find(OwnerKey);
+	if (LastReason && *LastReason == Reason)
+	{
+		return;
+	}
+
+	UE_LOG(
+		LogTemp,
+		Warning,
+		TEXT("MovementCollision invalid | Owner=%s | Reason=%s"),
+		*GetNameSafe(Owner),
+		*Reason);
+
+	LastLoggedReasons.Add(OwnerKey, Reason);
+}
+}
 
 ASubmarineBase::ASubmarineBase()
 {
@@ -29,12 +164,20 @@ ASubmarineBase::ASubmarineBase()
 	SetNetUpdateFrequency(30.f);
 	SetMinNetUpdateFrequency(15.f);
 
+	SubmarineRoot = CreateDefaultSubobject<USceneComponent>(TEXT("SubmarineRoot"));
+	SetRootComponent(SubmarineRoot);
+
 	HullMesh = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("HullMesh"));
-	SetRootComponent(HullMesh);
+	HullMesh->SetupAttachment(SubmarineRoot);
+
+	MovementCollisionProxy = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("MovementCollisionProxy"));
+	MovementCollisionProxy->SetupAttachment(HullMesh);
+
 	ApplyHullCollisionDefaults();
 
 	SubMovement = CreateDefaultSubobject<USubMovementComponent>(TEXT("SubMovement"));
 	SubHull = CreateDefaultSubobject<USubHullComponent>(TEXT("SubHull"));
+	SubFlood = CreateDefaultSubobject<USubFloodComponent>(TEXT("SubFlood"));
 	Systems = CreateDefaultSubobject<USubmarineSystemsComponent>(TEXT("Systems"));
 	Compartments = CreateDefaultSubobject<USubmarineCompartmentComponent>(TEXT("Compartments"));
 	StationManager = CreateDefaultSubobject<USubmarineStationManagerComponent>(TEXT("StationManager"));
@@ -42,11 +185,14 @@ ASubmarineBase::ASubmarineBase()
 	InteriorFrame = CreateDefaultSubobject<USubInteriorFrameComponent>(TEXT("InteriorFrame"));
 	BreachVfxManager = CreateDefaultSubobject<UBreachVfxManagerComponent>(TEXT("BreachVfxManager"));
 	FloodWaterVisuals = CreateDefaultSubobject<UFloodWaterVisualsComponent>(TEXT("FloodWaterVisuals"));
+	HullVisualDamage = CreateDefaultSubobject<USubHullVisualDamageComponent>(TEXT("HullVisualDamage"));
+	DoorFloodVfx = CreateDefaultSubobject<UDoorFloodVfxComponent>(TEXT("DoorFloodVfx"));
 	FeedbackManager = CreateDefaultSubobject<USubmarineFeedbackDirectorComponent>(TEXT("FeedbackManager"));
 	Sonar = CreateDefaultSubobject<USubSonarComponent>(TEXT("Sonar"));
 	SonarSystem = CreateDefaultSubobject<USubSonarSystemComponent>(TEXT("SonarSystem"));
 	TunnelNavigationRuntime = CreateDefaultSubobject<UTunnelNavigationRuntimeComponent>(TEXT("TunnelNavigationRuntime"));
 	HelmNavigationDisplay = CreateDefaultSubobject<UHelmNavigationDisplayComponent>(TEXT("HelmNavigationDisplay"));
+	GeneratedGeometry = CreateDefaultSubobject<USubmarineGeneratedGeometryComponent>(TEXT("GeneratedGeometry"));
 
 	HelmSocket = CreateDefaultSubobject<USceneComponent>(TEXT("HelmSocket"));
 	HelmSocket->SetupAttachment(HullMesh);
@@ -74,48 +220,334 @@ void ASubmarineBase::BeginPlay()
 	ApplyHullCollisionDefaults();
 	RefreshMovementCollisionBinding();
 
+	// ── Step 1: Generate definition from spec if needed (all machines) ──
+	// The pipeline Spec → Generate() → MeshBuilder is pure and deterministic.
+	// Every machine produces the same Definition from the same Spec asset.
+	if (!GeneratedDefinition && GeneratorSpec)
+	{
+		USubmarineGenerator* Generator = NewObject<USubmarineGenerator>(this);
+		GeneratedDefinition = Generator->Generate(GeneratorSpec);
+
+		if (GeneratedDefinition && GeneratorSpec->Envelope)
+		{
+			USubmarineMeshBuilder* MeshBuilder = NewObject<USubmarineMeshBuilder>(this);
+			MeshBuilder->BuildMeshData(GeneratedDefinition, GeneratorSpec->Envelope);
+		}
+	}
+
+	// Apply authored performance profile (mass, Vmax, MaxThrust) onto the
+	// movement component. Handmade submarines (Craniata) and generated ones
+	// share this path: populate the Definition asset, values land here.
+	if (SubMovement && GeneratedDefinition)
+	{
+		SubMovement->ApplyPerformanceProfileFromDefinition(GeneratedDefinition);
+	}
+
+	// ── Step 2: Stations ─────────────────────────────────────────────────
 	if (StationManager)
 	{
 		StationManager->DiscoverAttachedStations();
+
+		if (HasAuthority()
+			&& StationManager->GetRegisteredStations().Num() == 0
+			&& GeneratedDefinition
+			&& GeneratedDefinition->StationSlots.Num() > 0)
+		{
+			StationManager->SpawnStationsFromDefinition(GeneratedDefinition);
+		}
 	}
 
+	// ── Step 3: Authority-only runtime systems ───────────────────────────
 	if (HasAuthority())
 	{
 		ResolveExteriorTurret();
+
+		if (SubFlood)
+		{
+			if (GeneratedDefinition)
+			{
+				SubFlood->InitializeFromDefinition(GeneratedDefinition);
+			}
+			else if (SubHull && SubHull->LayoutAsset)
+			{
+				// LEGACY (Phase 7A, 2026-04-10) — Proto fallback path.
+				// No GeneratedDefinition is assigned so we initialize SubFlood
+				// from the LayoutAsset. This path will be removed in Phase 7B.
+				UE_LOG(LogSubLegacy, Warning,
+					TEXT("[LEGACY] ASubmarineBase::BeginPlay: initializing SubFlood from LayoutAsset '%s' on %s. ")
+					TEXT("This is a Proto03/04 fallback. Assign a GeneratedDefinition to use the generator path."),
+					*SubHull->LayoutAsset->GetName(),
+					*GetName());
+				SubFlood->InitializeFromLayout(SubHull->LayoutAsset);
+			}
+		}
+
+		if (SubHull && SubFlood)
+		{
+			SubHull->OnBreachesUpdated.AddDynamic(this, &ASubmarineBase::HandleBreachesUpdatedForFlood);
+		}
+	}
+
+	// ── Step 4: Geometry (all machines that display the submarine) ───────
+	if (GeneratedDefinition && GeneratedGeometry)
+	{
+		GeneratedGeometry->BuildFromDefinition(GeneratedDefinition);
+
+		// Rebind movement collision to use generated hull PMCs instead of HullMesh.
+		RefreshMovementCollisionBinding();
+	}
+
+	// ── Step 5: Door actors (authority only) ─────────────────────────────
+	// Spawn interactable door actors from the generator's connection graph.
+	// Only the authority needs to spawn them; replication mirrors them to
+	// clients. Doors without DoorActorClass set are skipped with a warning.
+	if (HasAuthority())
+	{
+		SpawnDoorsFromDefinition();
 	}
 }
 
-void ASubmarineBase::ApplyHullCollisionDefaults()
+void ASubmarineBase::SpawnDoorsFromDefinition()
 {
-	if (!HullMesh)
+	if (!GeneratedDefinition)
 	{
 		return;
 	}
 
+	if (!GeneratorDoorActorClass)
+	{
+		UE_LOG(LogTemp, Warning,
+			TEXT("[SpawnDoorsFromDefinition] %s: GeneratorDoorActorClass not set. No doors will be spawned from %d connections."),
+			*GetName(),
+			GeneratedDefinition->Connections.Num());
+		return;
+	}
+
+	UWorld* World = GetWorld();
+	if (!World)
+	{
+		// Called without a world (e.g. from automation test via RebuildFromSpec).
+		// SpawnActor requires a valid world; return safely so the caller can
+		// still exercise the rest of the pipeline.
+		return;
+	}
+
+	int32 SpawnedCount = 0;
+	for (const FGeneratedConnectionDef& Conn : GeneratedDefinition->Connections)
+	{
+		// Only spawn actors for traversable connection types. Skip Open
+		// (no physical door needed) and any future passive connection types.
+		const bool bIsDoorLike =
+			(Conn.ConnectionType == EConnectionType::Door) ||
+			(Conn.ConnectionType == EConnectionType::Hatch) ||
+			(Conn.ConnectionType == EConnectionType::ExteriorHatch);
+		if (!bIsDoorLike)
+		{
+			continue;
+		}
+
+		// Local transform lives in submarine local space; convert to world.
+		const FTransform WorldTransform = Conn.LocalTransform * GetActorTransform();
+
+		// Spawn deferred so InitializeFromConnectionDef runs BEFORE BeginPlay.
+		// SubDoorActor::BeginPlay copies bStartsClosed into bClosed, calls
+		// RegisterWithCompartments (which reads DoorId + compartments), and
+		// pushes the state to SubFlood. Doing the init after a non-deferred
+		// SpawnActor would leave the door with DoorId=None on first tick and
+		// fail to register against the flood graph.
+		ASubDoorActor* Door = World->SpawnActorDeferred<ASubDoorActor>(
+			GeneratorDoorActorClass,
+			WorldTransform,
+			/*Owner=*/this,
+			/*Instigator=*/nullptr,
+			ESpawnActorCollisionHandlingMethod::AlwaysSpawn);
+		if (!Door)
+		{
+			continue;
+		}
+
+		Door->InitializeFromConnectionDef(Conn, this);
+		Door->FinishSpawning(WorldTransform);
+		Door->AttachToComponent(SubmarineRoot, FAttachmentTransformRules::KeepWorldTransform);
+		SpawnedGeneratorDoors.Add(Door);
+		++SpawnedCount;
+	}
+
+	UE_LOG(LogTemp, Log,
+		TEXT("[SpawnDoorsFromDefinition] %s: spawned %d doors from %d connections"),
+		*GetName(),
+		SpawnedCount,
+		GeneratedDefinition->Connections.Num());
+}
+
+void ASubmarineBase::DestroySpawnedGeneratorDoors()
+{
+	for (TObjectPtr<ASubDoorActor>& DoorPtr : SpawnedGeneratorDoors)
+	{
+		if (ASubDoorActor* Door = DoorPtr.Get())
+		{
+			Door->Destroy();
+		}
+	}
+	SpawnedGeneratorDoors.Reset();
+}
+
+void ASubmarineBase::RebuildFromSpec()
+{
+	if (!GeneratorSpec)
+	{
+		UE_LOG(LogTemp, Warning,
+			TEXT("[RebuildFromSpec] %s: no GeneratorSpec assigned. Assign one in the Details panel first."),
+			*GetName());
+		return;
+	}
+
+	// Clear existing generated state before regenerating.
+	DestroySpawnedGeneratorDoors();
+	if (GeneratedGeometry)
+	{
+		GeneratedGeometry->ClearGeometry();
+	}
+	GeneratedDefinition = nullptr;
+
+	// Run the same generation chain as BeginPlay Step 1.
+	USubmarineGenerator* Generator = NewObject<USubmarineGenerator>(this);
+	GeneratedDefinition = Generator->Generate(GeneratorSpec);
+
+	if (!GeneratedDefinition)
+	{
+		UE_LOG(LogTemp, Warning,
+			TEXT("[RebuildFromSpec] %s: Generate() returned null from spec '%s'."),
+			*GetName(),
+			*GeneratorSpec->GetName());
+		return;
+	}
+
+	if (GeneratorSpec->Envelope)
+	{
+		USubmarineMeshBuilder* MeshBuilder = NewObject<USubmarineMeshBuilder>(this);
+		MeshBuilder->BuildMeshData(GeneratedDefinition, GeneratorSpec->Envelope);
+	}
+	else
+	{
+		UE_LOG(LogTemp, Warning,
+			TEXT("[RebuildFromSpec] %s: GeneratorSpec '%s' has no Envelope. Mesh data will be empty."),
+			*GetName(),
+			*GeneratorSpec->GetName());
+	}
+
+	// Rebuild visible geometry (same as BeginPlay Step 4).
+	if (GeneratedGeometry)
+	{
+		GeneratedGeometry->BuildFromDefinition(GeneratedDefinition);
+	}
+
+	// Respawn door actors from the fresh Definition. Safe no-op if no world
+	// or no DoorActorClass; SpawnDoorsFromDefinition handles both cases.
+	SpawnDoorsFromDefinition();
+
+	UE_LOG(LogTemp, Log,
+		TEXT("[RebuildFromSpec] %s: complete. Compartments=%d Connections=%d Stations=%d Doors=%d"),
+		*GetName(),
+		GeneratedDefinition->Compartments.Num(),
+		GeneratedDefinition->Connections.Num(),
+		GeneratedDefinition->StationSlots.Num(),
+		SpawnedGeneratorDoors.Num());
+}
+
+void ASubmarineBase::ClearGeneratedState()
+{
+	DestroySpawnedGeneratorDoors();
+	if (GeneratedGeometry)
+	{
+		GeneratedGeometry->ClearGeometry();
+	}
+	GeneratedDefinition = nullptr;
+
+	UE_LOG(LogTemp, Log, TEXT("[ClearGeneratedState] %s: cleared definition, geometry, and spawned doors."), *GetName());
+}
+
+void ASubmarineBase::ApplyHullCollisionDefaults()
+{
+	if (!HullMesh || !MovementCollisionProxy)
+	{
+		return;
+	}
+
+	const bool bUseMovementProxy = HasAssignedCollisionProxyMesh(MovementCollisionProxy);
+
+	HullMesh->SetCollisionEnabled(bUseMovementProxy ? ECollisionEnabled::NoCollision : ECollisionEnabled::QueryAndPhysics);
 	HullMesh->SetCollisionProfileName(TEXT("SubmarineHull"));
-	HullMesh->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
-	HullMesh->SetNotifyRigidBodyCollision(true);
+	HullMesh->SetNotifyRigidBodyCollision(!bUseMovementProxy);
 	HullMesh->SetGenerateOverlapEvents(false);
 	HullMesh->SetCanEverAffectNavigation(false);
 	HullMesh->SetMobility(EComponentMobility::Movable);
-	HullMesh->SetCollisionResponseToChannel(ECC_Pawn, ECR_Ignore);
+	HullMesh->SetCollisionResponseToChannel(ECC_Pawn, bUseMovementProxy ? ECR_Ignore : ECR_Block);
+
+	MovementCollisionProxy->SetCollisionProfileName(TEXT("SubmarineHull"));
+	MovementCollisionProxy->SetCollisionEnabled(bUseMovementProxy ? ECollisionEnabled::QueryAndPhysics : ECollisionEnabled::NoCollision);
+	MovementCollisionProxy->SetNotifyRigidBodyCollision(bUseMovementProxy);
+	MovementCollisionProxy->SetGenerateOverlapEvents(false);
+	MovementCollisionProxy->SetCanEverAffectNavigation(false);
+	MovementCollisionProxy->SetMobility(EComponentMobility::Movable);
+	MovementCollisionProxy->SetCollisionResponseToChannel(ECC_Pawn, ECR_Ignore);
+	MovementCollisionProxy->SetCollisionResponseToChannel(ECC_Visibility, ECR_Ignore);
+	MovementCollisionProxy->SetHiddenInGame(true);
 }
 
 UPrimitiveComponent* ASubmarineBase::GetMovementCollisionComponent() const
 {
+	// Prefer generated hull collision when available.
+	if (GeneratedGeometry && GeneratedGeometry->GetExteriorHullCollisionComponents().Num() > 0)
+	{
+		return GeneratedGeometry->GetExteriorHullCollisionComponents()[0];
+	}
+
+	if (HasAssignedCollisionProxyMesh(MovementCollisionProxy)
+		&& MovementCollisionProxy->GetCollisionEnabled() != ECollisionEnabled::NoCollision)
+	{
+		return MovementCollisionProxy;
+	}
+
 	return HullMesh;
 }
 
 void ASubmarineBase::RefreshMovementCollisionBinding()
 {
+	// Unbind previous single-component binding.
 	if (BoundMovementCollisionComponent.IsValid())
 	{
 		BoundMovementCollisionComponent->OnComponentHit.RemoveDynamic(this, &ASubmarineBase::OnHullHit);
 		BoundMovementCollisionComponent.Reset();
 	}
 
-	if (UPrimitiveComponent* CollisionComponent = GetMovementCollisionComponent())
+	// Unbind any previously bound hull collision PMCs.
+	for (TWeakObjectPtr<UPrimitiveComponent>& Comp : BoundHullCollisionComponents)
 	{
+		if (Comp.IsValid())
+		{
+			Comp->OnComponentHit.RemoveDynamic(this, &ASubmarineBase::OnHullHit);
+		}
+	}
+	BoundHullCollisionComponents.Reset();
+
+	// Bind generated hull collision PMCs if available.
+	if (GeneratedGeometry && GeneratedGeometry->GetExteriorHullCollisionComponents().Num() > 0)
+	{
+		for (UProceduralMeshComponent* PMC : GeneratedGeometry->GetExteriorHullCollisionComponents())
+		{
+			if (IsValid(PMC))
+			{
+				PMC->OnComponentHit.RemoveDynamic(this, &ASubmarineBase::OnHullHit);
+				PMC->OnComponentHit.AddUniqueDynamic(this, &ASubmarineBase::OnHullHit);
+				BoundHullCollisionComponents.Add(PMC);
+			}
+		}
+		BoundMovementCollisionComponent = GeneratedGeometry->GetExteriorHullCollisionComponents()[0];
+	}
+	else if (UPrimitiveComponent* CollisionComponent = GetMovementCollisionComponent())
+	{
+		// Fallback to handmade movement collision component.
 		CollisionComponent->OnComponentHit.RemoveDynamic(this, &ASubmarineBase::OnHullHit);
 		CollisionComponent->OnComponentHit.AddUniqueDynamic(this, &ASubmarineBase::OnHullHit);
 		BoundMovementCollisionComponent = CollisionComponent;
@@ -124,10 +556,27 @@ void ASubmarineBase::RefreshMovementCollisionBinding()
 
 bool ASubmarineBase::CreateDebugBreachOnFirstExteriorSheet(float DamageAmount)
 {
-	if (!HasAuthority() || DamageAmount <= 0.f || !SubHull)
+	if (!HasAuthoritativeContext(this))
 	{
+		UE_LOG(LogTemp, Warning, TEXT("CreateDebugBreach: not authority — skipping"));
 		return false;
 	}
+
+	if (DamageAmount <= 0.f)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("CreateDebugBreach: DamageAmount=%.1f — skipping"), DamageAmount);
+		return false;
+	}
+
+	if (!SubHull)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("CreateDebugBreach: SubHull is null"));
+		return false;
+	}
+
+	UE_LOG(LogTemp, Log, TEXT("CreateDebugBreach: StructuralSheets=%d, BreachClusters=%d"),
+		SubHull->GetStructuralSheets().Num(),
+		SubHull->GetBreachClusters().Num());
 
 	const FStructuralSheetDef* TargetSheet = SubHull->GetStructuralSheets().FindByPredicate([](const FStructuralSheetDef& Sheet)
 	{
@@ -141,8 +590,15 @@ bool ASubmarineBase::CreateDebugBreachOnFirstExteriorSheet(float DamageAmount)
 
 	if (!TargetSheet)
 	{
+		UE_LOG(LogTemp, Warning, TEXT("CreateDebugBreach: no StructuralSheet found (Sheets=%d)"), SubHull->GetStructuralSheets().Num());
 		return false;
 	}
+
+	UE_LOG(LogTemp, Log, TEXT("CreateDebugBreach: targeting Sheet=%s | Compartment=%s | Exterior=%d | Origin=%s"),
+		*TargetSheet->SheetId.ToString(),
+		*TargetSheet->ParentCompartmentId.ToString(),
+		TargetSheet->bCanOpenToExterior ? 1 : 0,
+		*TargetSheet->LocalOrigin.ToCompactString());
 
 	const FVector WorldHitPoint = GetActorTransform().TransformPosition(TargetSheet->LocalOrigin);
 	FPointDamageEvent DamageEvent;
@@ -150,7 +606,193 @@ bool ASubmarineBase::CreateDebugBreachOnFirstExteriorSheet(float DamageAmount)
 	DamageEvent.HitInfo.ImpactPoint = WorldHitPoint;
 	DamageEvent.HitInfo.Location = WorldHitPoint;
 
-	return TakeDamage(DamageAmount, DamageEvent, nullptr, this) > 0.f;
+	const float AppliedDamage = TakeDamage(DamageAmount, DamageEvent, nullptr, this);
+	if (AppliedDamage <= 0.f)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("CreateDebugBreach: TakeDamage returned 0 for amount=%.1f"), DamageAmount);
+		return false;
+	}
+
+	UE_LOG(LogTemp, Log, TEXT("CreateDebugBreach: after initial damage — BreachClusters=%d, TotalWater=%.1fL"),
+		SubHull->GetBreachClusters().Num(),
+		SubFlood ? SubFlood->GetTotalWaterLiters() : 0.f);
+
+	if (SubHull && SubHull->GetBreachClusters().Num() == 0)
+	{
+		const float EscalatedDamage = FMath::Max(DamageAmount * 4.f, 1000.f);
+		UE_LOG(LogTemp, Log, TEXT("CreateDebugBreach: no breach after initial hit — escalating to %.1f"), EscalatedDamage);
+		TakeDamage(EscalatedDamage, DamageEvent, nullptr, this);
+	}
+
+	if (HullVisualDamage)
+	{
+		HullVisualDamage->RefreshFromCurrentBreaches();
+	}
+
+	const bool bSuccess = SubHull && SubHull->GetBreachClusters().Num() > 0;
+	UE_LOG(LogTemp, Log, TEXT("CreateDebugBreach: result=%s | BreachClusters=%d | TotalWater=%.1fL"),
+		bSuccess ? TEXT("SUCCESS") : TEXT("FAILED"),
+		SubHull ? SubHull->GetBreachClusters().Num() : 0,
+		SubFlood ? SubFlood->GetTotalWaterLiters() : 0.f);
+
+	return bSuccess;
+}
+
+void ASubmarineBase::BakeLayoutFromVolumes()
+{
+	// 1. Gather all CompartmentVolumeComponents on this actor.
+	TArray<UCompartmentVolumeComponent*> Volumes;
+	GetComponents<UCompartmentVolumeComponent>(Volumes);
+
+	if (Volumes.Num() == 0)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("BakeLayout: no CompartmentVolumeComponent found on %s"), *GetName());
+		return;
+	}
+
+	// 2. Group volumes by CompartmentId and compute merged bounds.
+	struct FCompartmentAccum
+	{
+		FName CompartmentId;
+		FText DisplayName;
+		float CapacityOverride;
+		float FloorZOverride;
+		FBox LocalBounds;
+		int32 VolumeCount;
+	};
+
+	TMap<FName, FCompartmentAccum> AccumMap;
+	const FTransform ActorInverse = GetActorTransform().Inverse();
+
+	for (const UCompartmentVolumeComponent* Volume : Volumes)
+	{
+		if (Volume->CompartmentId.IsNone())
+		{
+			UE_LOG(LogTemp, Warning, TEXT("BakeLayout: skipping volume '%s' with empty CompartmentId"), *Volume->GetName());
+			continue;
+		}
+
+		// Compute local-space AABB from the box component world bounds.
+		const FVector WorldCenter = Volume->GetComponentLocation();
+		const FVector WorldExtent = Volume->GetScaledBoxExtent();
+		const FVector LocalCenter = ActorInverse.TransformPosition(WorldCenter);
+
+		// Transform the 8 corners of the oriented box into local space for tight bounds.
+		const FTransform BoxWorldTransform = Volume->GetComponentTransform();
+		const FVector BoxExtent = Volume->GetScaledBoxExtent();
+		FBox LocalBox(EForceInit::ForceInit);
+		for (int32 Corner = 0; Corner < 8; ++Corner)
+		{
+			const FVector CornerLocal(
+				(Corner & 1) ? BoxExtent.X : -BoxExtent.X,
+				(Corner & 2) ? BoxExtent.Y : -BoxExtent.Y,
+				(Corner & 4) ? BoxExtent.Z : -BoxExtent.Z);
+			const FVector WorldCorner = BoxWorldTransform.TransformPosition(CornerLocal);
+			const FVector ActorLocalCorner = ActorInverse.TransformPosition(WorldCorner);
+			LocalBox += ActorLocalCorner;
+		}
+
+		FCompartmentAccum* Accum = AccumMap.Find(Volume->CompartmentId);
+		if (!Accum)
+		{
+			FCompartmentAccum New;
+			New.CompartmentId = Volume->CompartmentId;
+			New.DisplayName = Volume->DisplayName;
+			New.CapacityOverride = Volume->CapacityLitersOverride;
+			New.FloorZOverride = Volume->WalkableFloorZCmOverride;
+			New.LocalBounds = LocalBox;
+			New.VolumeCount = 1;
+			AccumMap.Add(Volume->CompartmentId, New);
+		}
+		else
+		{
+			Accum->LocalBounds += LocalBox;
+			Accum->VolumeCount++;
+			if (Volume->CapacityLitersOverride > 0.f)
+			{
+				Accum->CapacityOverride = Volume->CapacityLitersOverride;
+			}
+			if (!Volume->DisplayName.IsEmpty())
+			{
+				Accum->DisplayName = Volume->DisplayName;
+			}
+		}
+	}
+
+	if (AccumMap.Num() == 0)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("BakeLayout: no valid compartments found (all volumes had empty CompartmentId)"));
+		return;
+	}
+
+	// 3. Create or find an existing layout asset.
+	USubmarineLayoutAsset* Layout = nullptr;
+	if (SubHull && SubHull->LayoutAsset)
+	{
+		Layout = const_cast<USubmarineLayoutAsset*>(SubHull->LayoutAsset.Get());
+	}
+
+	if (!Layout)
+	{
+		const FString AssetName = FString::Printf(TEXT("DA_Layout_%s"), *GetName());
+		Layout = NewObject<USubmarineLayoutAsset>(GetOuter(), *AssetName, RF_Public | RF_Standalone);
+	}
+
+	Layout->Compartments.Reset();
+
+	// 4. Build compartment definitions from accumulated bounds.
+	for (const auto& Pair : AccumMap)
+	{
+		const FCompartmentAccum& Accum = Pair.Value;
+		const FVector Size = Accum.LocalBounds.GetSize();
+
+		FSubCompartmentDef Def;
+		Def.CompartmentId = Accum.CompartmentId;
+		Def.DisplayName = Accum.DisplayName.IsEmpty()
+			? FText::FromName(Accum.CompartmentId)
+			: Accum.DisplayName;
+		Def.HydroBoundsMin = Accum.LocalBounds.Min;
+		Def.HydroBoundsMax = Accum.LocalBounds.Max;
+		Def.WalkableFloorZCm = Accum.FloorZOverride > 0.f
+			? Accum.FloorZOverride
+			: Accum.LocalBounds.Min.Z;
+
+		if (Accum.CapacityOverride > 0.f)
+		{
+			Def.CapacityLiters = Accum.CapacityOverride;
+		}
+		else
+		{
+			// Auto-calculate: box volume in cm³ → liters (1 liter = 1000 cm³), with 70% fill factor.
+			const float VolumeCm3 = Size.X * Size.Y * Size.Z;
+			Def.CapacityLiters = FMath::Max(100.f, (VolumeCm3 / 1000.f) * 0.7f);
+		}
+
+		Layout->Compartments.Add(Def);
+
+		UE_LOG(LogTemp, Log, TEXT("BakeLayout: [%s] bounds=(%.0f,%.0f,%.0f)→(%.0f,%.0f,%.0f) capacity=%.0fL volumes=%d"),
+			*Accum.CompartmentId.ToString(),
+			Accum.LocalBounds.Min.X, Accum.LocalBounds.Min.Y, Accum.LocalBounds.Min.Z,
+			Accum.LocalBounds.Max.X, Accum.LocalBounds.Max.Y, Accum.LocalBounds.Max.Z,
+			Def.CapacityLiters,
+			Accum.VolumeCount);
+	}
+
+	// 5. Assign to SubHull.
+	if (SubHull)
+	{
+		SubHull->LayoutAsset = Layout;
+	}
+
+	UE_LOG(LogTemp, Log, TEXT("BakeLayout: created %d compartments from %d volumes on %s"),
+		Layout->Compartments.Num(), Volumes.Num(), *GetName());
+
+#if WITH_EDITOR
+	if (Layout)
+	{
+		Layout->MarkPackageDirty();
+	}
+#endif
 }
 
 void ASubmarineBase::Tick(float DeltaSeconds)
@@ -160,9 +802,12 @@ void ASubmarineBase::Tick(float DeltaSeconds)
 
 float ASubmarineBase::TakeDamage(float DamageAmount, const FDamageEvent& DamageEvent, AController* EventInstigator, AActor* DamageCauser)
 {
-	Super::TakeDamage(DamageAmount, DamageEvent, EventInstigator, DamageCauser);
+	if (GetWorld() && GetLevel())
+	{
+		Super::TakeDamage(DamageAmount, DamageEvent, EventInstigator, DamageCauser);
+	}
 
-	if (!HasAuthority() || DamageAmount <= 0.f || !SubHull)
+	if (!HasAuthoritativeContext(this) || DamageAmount <= 0.f || !SubHull)
 	{
 		return 0.f;
 	}
@@ -206,6 +851,23 @@ float ASubmarineBase::TakeDamage(float DamageAmount, const FDamageEvent& DamageE
 
 	const FVector LocalHitPosition = GetActorTransform().InverseTransformPosition(WorldHitPoint);
 	SubHull->ApplyHullImpact(LocalHitPosition, DamageAmount, HullWeaponDamageRadiusCm);
+
+	// Direct damage→SubFlood when SubHull has no structural sheets (pure generator path).
+	if (SubFlood && SubFlood->IsInitialized()
+		&& SubHull->GetStructuralSheets().Num() == 0
+		&& GeneratedDefinition)
+	{
+		const FGeneratedCompartmentDef* Comp = GeneratedDefinition->FindCompartmentAtLocalLocation(LocalHitPosition);
+		if (Comp)
+		{
+			const float Inflow = FMath::Clamp(
+				DamageAmount * DamageToBreachInflowScale,
+				0.f,
+				GeneratedDefinition->MaxExteriorInflowLitersPerSec);
+			SubFlood->CreateBreach(Comp->CompartmentId, Inflow, LocalHitPosition);
+		}
+	}
+
 	if (FeedbackManager)
 	{
 		FeedbackManager->DispatchHullImpactFeedback(WorldHitPoint, DamageAmount, HullWeaponDamageRadiusCm);
@@ -249,23 +911,98 @@ void ASubmarineBase::OnHullHit(
 		return;
 	}
 
-	const float ImpactForce = NormalImpulse.Size();
-	const float Damage = ImpactForce * HullImpactDamageScale;
+	const AActor* HitActor = Hit.GetActor();
+	if (HitActor == this
+		|| (HitActor && (HitActor->GetOwner() == this || HitActor->GetAttachParentActor() == this || HitActor->IsAttachedTo(this)))
+		|| (OtherComp && OtherComp->GetOwner() == this))
+	{
+		return;
+	}
+
+	const FVector ImpactNormal = !Hit.Normal.IsNearlyZero()
+		? Hit.Normal.GetSafeNormal()
+		: Hit.ImpactNormal.GetSafeNormal();
+	if (ImpactNormal.IsNearlyZero())
+	{
+		return;
+	}
+
+	const FVector SelfVelocity = SubMovement ? SubMovement->Velocity : GetVelocity();
+	const FVector OtherVelocity = OtherComp
+		? OtherComp->GetComponentVelocity()
+		: (OtherActor ? OtherActor->GetVelocity() : FVector::ZeroVector);
+	const FVector RelativeVelocity = SelfVelocity - OtherVelocity;
+	const float ApproachSpeedCmS = FMath::Max(0.f, FVector::DotProduct(RelativeVelocity, -ImpactNormal));
+
+	if (ApproachSpeedCmS < HullCollisionDamageMinSpeedCmS)
+	{
+		if (bDebugLogHullCollisions)
+		{
+			UE_LOG(
+				LogTemp,
+				Log,
+				TEXT("Hull collision ignored | Speed=%.1f cm/s below threshold %.1f | Other=%s"),
+				ApproachSpeedCmS,
+				HullCollisionDamageMinSpeedCmS,
+				*GetNameSafe(OtherActor));
+		}
+		return;
+	}
+
+	const float CatastrophicSpeedCmS = FMath::Max(HullCollisionDamageMinSpeedCmS + 1.f, HullCollisionCatastrophicSpeedCmS);
+	const float SpeedAlpha = FMath::Clamp(
+		(ApproachSpeedCmS - HullCollisionDamageMinSpeedCmS) / (CatastrophicSpeedCmS - HullCollisionDamageMinSpeedCmS),
+		0.f,
+		1.f);
+	const float SpeedSeverity = FMath::Pow(SpeedAlpha, HullCollisionDamageExponent);
+	const float SpeedDamage = HullCollisionDamageAtCatastrophicSpeed * SpeedSeverity;
+	const float ImpulseDamage = NormalImpulse.Size() * HullImpactDamageScale;
+	const float Damage = FMath::Max(SpeedDamage, ImpulseDamage);
 
 	if (Damage < 1.f)
 	{
 		return;
 	}
 
+	const FVector LocalHitPosition = GetActorTransform().InverseTransformPosition(Hit.ImpactPoint);
+
 	if (SubHull)
 	{
-		const FVector LocalHitPosition = GetActorTransform().InverseTransformPosition(Hit.ImpactPoint);
 		SubHull->ApplyHullImpact(LocalHitPosition, Damage, HullImpactRadiusCm);
+	}
+
+	// Direct collision→SubFlood when SubHull has no structural sheets (pure generator path).
+	if (SubFlood && SubFlood->IsInitialized()
+		&& SubHull && SubHull->GetStructuralSheets().Num() == 0
+		&& GeneratedDefinition)
+	{
+		const FGeneratedCompartmentDef* Comp = GeneratedDefinition->FindCompartmentAtLocalLocation(LocalHitPosition);
+		if (Comp)
+		{
+			const float Inflow = FMath::Clamp(
+				Damage * DamageToBreachInflowScale,
+				0.f,
+				GeneratedDefinition->MaxExteriorInflowLitersPerSec);
+			SubFlood->CreateBreach(Comp->CompartmentId, Inflow, LocalHitPosition);
+		}
 	}
 
 	if (FeedbackManager)
 	{
 		FeedbackManager->DispatchHullImpactFeedback(Hit.ImpactPoint, Damage, HullImpactRadiusCm);
+	}
+
+	if (bDebugLogHullCollisions)
+	{
+		UE_LOG(
+			LogTemp,
+			Log,
+			TEXT("Hull collision damage | Speed=%.1f cm/s | Damage=%.1f | ImpulseDamage=%.1f | Other=%s | Point=%s"),
+			ApproachSpeedCmS,
+			Damage,
+			ImpulseDamage,
+			*GetNameSafe(OtherActor),
+			*Hit.ImpactPoint.ToCompactString());
 	}
 
 	if (GEngine)
@@ -286,7 +1023,7 @@ void ASubmarineBase::RefreshRepState()
 	if (SubMovement)
 	{
 		RepState.LinearVelocity = SubMovement->Velocity;
-		RepState.AngularVelocity = FVector::ZeroVector;
+		RepState.AngularVelocity = FVector(0.f, SubMovement->GetPitchRateDegPerSec(), SubMovement->GetYawRateDegPerSec());
 		RepState.ForwardSpeed = FVector::DotProduct(SubMovement->Velocity, GetActorForwardVector());
 		RepState.VerticalSpeed = SubMovement->Velocity.Z;
 		RepState.DepthMeters = SubMovement->CurrentDepth;
@@ -319,14 +1056,20 @@ FTransform ASubmarineBase::GetPrimaryCrewSpawnTransform() const
 		return HelmSocket->GetComponentTransform();
 	}
 
+	// Fallback: use first spawn point from generated definition.
+	if (GeneratedDefinition && GeneratedDefinition->SpawnPoints.Num() > 0)
+	{
+		return GeneratedDefinition->SpawnPoints[0].LocalTransform * GetActorTransform();
+	}
+
 	return GetActorTransform();
 }
 
 float ASubmarineBase::GetTotalFloodWaterMassKg() const
 {
-	if (SubHull)
+	if (SubFlood && SubFlood->IsInitialized())
 	{
-		return SubHull->GetTotalWaterLiters();
+		return SubFlood->GetTotalWaterMassKg();
 	}
 
 	return Compartments ? Compartments->GetTotalWaterMassKg() : 0.f;
@@ -371,14 +1114,22 @@ void ASubmarineBase::SetFreezeMovementForTesting(bool bFreeze)
 bool ASubmarineBase::IsMovementCollisionReady() const
 {
 	const UPrimitiveComponent* CollisionComp = GetMovementCollisionComponent();
-	return CollisionComp && CollisionComp->GetCollisionEnabled() != ECollisionEnabled::NoCollision;
+	FString Reason;
+	const bool bReady = ValidateMovementCollisionComponentConfig(CollisionComp, Reason);
+	if (!bReady)
+	{
+		LogMovementCollisionValidationIssue(this, Reason);
+	}
+	return bReady;
 }
 
 bool ASubmarineBase::ValidateSpawnCollision() const
 {
 	const UPrimitiveComponent* CollisionComp = GetMovementCollisionComponent();
-	if (!CollisionComp || CollisionComp->GetCollisionEnabled() == ECollisionEnabled::NoCollision)
+	FString Reason;
+	if (!ValidateMovementCollisionComponentConfig(CollisionComp, Reason))
 	{
+		LogMovementCollisionValidationIssue(this, Reason);
 		return false;
 	}
 
@@ -408,7 +1159,36 @@ ASubDoorActor* ASubmarineBase::FindAttachedDoorById(FName DoorId) const
 
 TArray<UPrimitiveComponent*> ASubmarineBase::GetInteriorWalkableComponents() const
 {
-	return TArray<UPrimitiveComponent*>();
+	TArray<UPrimitiveComponent*> Result;
+
+	// Generated path: procedural interior floor collision from the generator.
+	if (GeneratedGeometry)
+	{
+		for (UProceduralMeshComponent* PMC : GeneratedGeometry->GetInteriorFloorCollisionComponents())
+		{
+			if (IsValid(PMC))
+			{
+				Result.Add(PMC);
+			}
+		}
+	}
+
+	// Manual path: any primitive component tagged with ManualWalkableTag.
+	// Used by handmade submarines (Craniata) that ship walkable surfaces as authored meshes.
+	if (!ManualWalkableTag.IsNone())
+	{
+		TArray<UPrimitiveComponent*> Tagged;
+		GetComponents<UPrimitiveComponent>(Tagged);
+		for (UPrimitiveComponent* PC : Tagged)
+		{
+			if (IsValid(PC) && PC->ComponentHasTag(ManualWalkableTag))
+			{
+				Result.AddUnique(PC);
+			}
+		}
+	}
+
+	return Result;
 }
 
 FTransform ASubmarineBase::GetCrewEmbarkTransform() const
@@ -421,5 +1201,64 @@ void ASubmarineBase::OnRep_RepState()
 	if (SubMovement)
 	{
 		SubMovement->HandleReplicatedNetState(RepState);
+	}
+}
+
+void ASubmarineBase::HandleBreachesUpdatedForFlood(const TArray<FBreachClusterState>& Breaches)
+{
+	if (!SubFlood || !SubFlood->IsInitialized() || !SubHull)
+	{
+		return;
+	}
+
+	const TArray<FStructuralSheetDef>& Sheets = SubHull->GetStructuralSheets();
+
+	// Aggregate exterior breach inflow per compartment.
+	TMap<FName, float> CompartmentInflow;
+	TMap<FName, FVector> CompartmentBreachCenter;
+	TMap<FName, int32> CompartmentBreachCount;
+
+	for (const FBreachClusterState& Cluster : Breaches)
+	{
+		if (!Cluster.bTouchesExterior)
+		{
+			continue;
+		}
+
+		const FStructuralSheetDef* Sheet = Sheets.FindByPredicate([&Cluster](const FStructuralSheetDef& S)
+		{
+			return S.SheetId == Cluster.SheetId;
+		});
+
+		if (!Sheet || Sheet->ParentCompartmentId.IsNone())
+		{
+			continue;
+		}
+
+		const FName CompId = Sheet->ParentCompartmentId;
+		const float AreaScale = FMath::Max(0.f, Cluster.OpenAreaCm2 / FMath::Max(1.f, SubHull->ExteriorFloodAreaDivisorCm2));
+		const float Inflow = FMath::Clamp(SubHull->BaseLeakFlowLitersPerSec * AreaScale, 0.f, SubHull->MaxExteriorFloodInLitersPerSec);
+
+		CompartmentInflow.FindOrAdd(CompId) += Inflow;
+		CompartmentBreachCenter.FindOrAdd(CompId) += Cluster.LocalCenter;
+		CompartmentBreachCount.FindOrAdd(CompId)++;
+	}
+
+	// Push aggregated breaches to SubFlood.
+	for (const auto& Pair : CompartmentInflow)
+	{
+		const int32 Count = CompartmentBreachCount[Pair.Key];
+		const FVector Center = CompartmentBreachCenter[Pair.Key] / FMath::Max(1, Count);
+		SubFlood->CreateBreach(Pair.Key, Pair.Value, Center);
+	}
+
+	// Remove breaches for compartments that no longer have exterior breach clusters.
+	const TArray<FCompartmentBreachState>& ExistingBreaches = SubFlood->GetBreaches();
+	for (const FCompartmentBreachState& Existing : ExistingBreaches)
+	{
+		if (Existing.bBreached && !CompartmentInflow.Contains(Existing.CompartmentId))
+		{
+			SubFlood->RemoveBreach(Existing.CompartmentId);
+		}
 	}
 }

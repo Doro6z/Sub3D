@@ -767,16 +767,12 @@ bool USubmarineGeometryBuilder::GenerateCompartmentInteriorMeshData(
 		const float T = static_cast<float>(SegmentIndex) / static_cast<float>(ArcSegments);
 		const float Theta = FMath::Lerp(StartTheta, EndTheta, T);
 		
-		FVector2D Pos, Norm;
+		FVector2D Pos;
 		{
 			const float CosA = FMath::Cos(Theta);
 			const float SinA = FMath::Sin(Theta);
 			Pos.X = HalfW * SuperellipsePow(CosA, Exp);
 			Pos.Y = HalfH * SuperellipsePow(SinA, Exp);
-			const float N_val = 2.f / Exp;
-			const float NX = -N_val * SuperellipsePow(CosA, N_val - 1.f) / FMath::Pow(HalfW, N_val);
-			const float NY = -N_val * SuperellipsePow(SinA, N_val - 1.f) / FMath::Pow(HalfH, N_val);
-			Norm = FVector2D(NX, NY).GetSafeNormal();
 		}
 
 		if (SegmentIndex > 0)
@@ -786,7 +782,7 @@ bool USubmarineGeometryBuilder::GenerateCompartmentInteriorMeshData(
 
 		FProfilePoint Point;
 		Point.Position = FVector(0.f, Pos.X, Pos.Y);
-		Point.InwardNormal = FVector(0.f, Norm.X, Norm.Y);
+		Point.InwardNormal = FVector(0.f, -Pos.X, -Pos.Y).GetSafeNormal();
 		Point.U = (TotalArcLength > KINDA_SMALL_NUMBER) ? (TraversedArcLength / TotalArcLength) : T;
 		ProfilePoints.Add(Point);
 		

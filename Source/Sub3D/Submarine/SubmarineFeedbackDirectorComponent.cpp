@@ -7,6 +7,7 @@
 #include "GameFramework/PlayerController.h"
 #include "Sound/SoundBase.h"
 #include "SubCrewCharacter.h"
+#include "SubFloodComponent.h"
 #include "SubHullComponent.h"
 #include "SubmarineAlarmBeacon.h"
 #include "SubmarineBase.h"
@@ -27,16 +28,47 @@ void USubmarineFeedbackDirectorComponent::BeginPlay()
 	RefreshAlarmBeacons();
 	RefreshSpatialAudioAnchors();
 
+	ASubmarineBase* Submarine = GetOwningSubmarine();
+
+	SubFlood = Submarine ? Submarine->SubFlood : nullptr;
+	if (SubFlood)
+	{
+		if (SubFlood->IsInitialized())
+		{
+			ActivateSubFloodPath();
+		}
+		else
+		{
+			SubFlood->OnFloodInitialized.AddDynamic(this, &USubmarineFeedbackDirectorComponent::HandleFloodInitialized);
+		}
+	}
+
+	// Breaches and flow fields always come from SubHull (SubFlood does not manage damage).
 	if (USubHullComponent* SubHull = GetOwningHull())
 	{
-		SubHull->OnCompartmentFloodUpdated.AddDynamic(this, &USubmarineFeedbackDirectorComponent::HandleCompartmentFloodUpdated);
 		SubHull->OnBreachesUpdated.AddDynamic(this, &USubmarineFeedbackDirectorComponent::HandleBreachesUpdated);
 		SubHull->OnFlowFieldsUpdated.AddDynamic(this, &USubmarineFeedbackDirectorComponent::HandleFlowFieldsUpdated);
 		LatestBreaches = SubHull->GetBreachClusters();
 		LatestFlowFields = SubHull->GetFlowFields();
 		UpdateLeakAudioRuntime();
-		UpdateFloodAlarm(SubHull->GetCompartmentStates());
 	}
+}
+
+void USubmarineFeedbackDirectorComponent::EndPlay(const EEndPlayReason::Type EndPlayReason)
+{
+	if (SubFlood)
+	{
+		SubFlood->OnFloodInitialized.RemoveDynamic(this, &USubmarineFeedbackDirectorComponent::HandleFloodInitialized);
+		SubFlood->OnFloodStateUpdated.RemoveDynamic(this, &USubmarineFeedbackDirectorComponent::HandleSubFloodUpdated);
+	}
+
+	if (USubHullComponent* SubHull = GetOwningHull())
+	{
+		SubHull->OnBreachesUpdated.RemoveDynamic(this, &USubmarineFeedbackDirectorComponent::HandleBreachesUpdated);
+		SubHull->OnFlowFieldsUpdated.RemoveDynamic(this, &USubmarineFeedbackDirectorComponent::HandleFlowFieldsUpdated);
+	}
+
+	Super::EndPlay(EndPlayReason);
 }
 
 void USubmarineFeedbackDirectorComponent::DispatchHullImpactFeedback(const FVector& WorldLocation, float Damage, float RadiusCm)
@@ -153,10 +185,31 @@ float USubmarineFeedbackDirectorComponent::ComputeDistanceAlpha(float DistanceCm
 	return 1.f - ((DistanceCm - InnerRadiusCm) / (OuterRadiusCm - InnerRadiusCm));
 }
 
-void USubmarineFeedbackDirectorComponent::HandleCompartmentFloodUpdated(const TArray<FCompartmentRuntimeState>& CompartmentStates)
+void USubmarineFeedbackDirectorComponent::HandleSubFloodUpdated(const TArray<FCompartmentState>& InStates)
 {
-	UpdateFloodAlarm(CompartmentStates);
-	UpdateFloodInteriorAudioAnchors(CompartmentStates);
+	UpdateFloodAlarmFromStates(InStates);
+	UpdateFloodInteriorAudioAnchorsFromStates(InStates);
+}
+
+void USubmarineFeedbackDirectorComponent::HandleFloodInitialized()
+{
+	if (!SubFlood || !SubFlood->IsInitialized())
+	{
+		return;
+	}
+
+	SubFlood->OnFloodInitialized.RemoveDynamic(this, &USubmarineFeedbackDirectorComponent::HandleFloodInitialized);
+	ActivateSubFloodPath();
+}
+
+void USubmarineFeedbackDirectorComponent::ActivateSubFloodPath()
+{
+	SubFlood->OnFloodStateUpdated.AddDynamic(this, &USubmarineFeedbackDirectorComponent::HandleSubFloodUpdated);
+
+	TArray<FCompartmentState> States;
+	SubFlood->ExportCompartmentStates(States);
+	UpdateFloodAlarmFromStates(States);
+	UpdateFloodInteriorAudioAnchorsFromStates(States);
 }
 
 void USubmarineFeedbackDirectorComponent::HandleBreachesUpdated(const TArray<FBreachClusterState>& Breaches)
@@ -235,87 +288,6 @@ void USubmarineFeedbackDirectorComponent::EnsureLeakAudioPoolSize(int32 DesiredC
 		LeakAudioComponent->RegisterComponent();
 		RuntimeLeakAudioComponents.Add(LeakAudioComponent);
 	}
-}
-
-void USubmarineFeedbackDirectorComponent::UpdateFloodAlarm(const TArray<FCompartmentRuntimeState>& CompartmentStates)
-{
-	const USubmarineFeedbackProfile* Profile = FeedbackProfile;
-	if (!Profile)
-	{
-		return;
-	}
-
-	float MaxWaterLevel01 = 0.f;
-	for (const FCompartmentRuntimeState& CompartmentState : CompartmentStates)
-	{
-		MaxWaterLevel01 = FMath::Max(MaxWaterLevel01, CompartmentState.WaterLevelNormalized);
-	}
-
-	const bool bShouldAlarm = Profile->AlarmSound && MaxWaterLevel01 >= Profile->AlarmFloodThreshold01;
-	const float Severity01 = bShouldAlarm
-		? FMath::Clamp(
-			(MaxWaterLevel01 - Profile->AlarmFloodThreshold01)
-			/ FMath::Max(0.01f, 1.f - Profile->AlarmFloodThreshold01),
-			0.f,
-			1.f)
-		: 0.f;
-
-	UpdateAlarmBeacons(bShouldAlarm, Severity01);
-
-	if (bUseFallbackAlarmAudioWhenNoBeacon && AlarmBeacons.Num() == 0)
-	{
-		EnsureFallbackAlarmAudio();
-	}
-
-	if (!FallbackAlarmAudio)
-	{
-		bFloodAlarmActive = bShouldAlarm;
-		return;
-	}
-
-	if (!bShouldAlarm)
-	{
-		if (FallbackAlarmAudio->IsPlaying())
-		{
-			FallbackAlarmAudio->Stop();
-		}
-		bFloodAlarmActive = false;
-		return;
-	}
-
-	if (FallbackAlarmAudio->Sound != Profile->AlarmSound)
-	{
-		FallbackAlarmAudio->SetSound(Profile->AlarmSound);
-	}
-
-	if (!Profile->AlarmTriggerPeriodParameter.IsNone())
-	{
-		FallbackAlarmAudio->SetIntParameter(Profile->AlarmTriggerPeriodParameter, FMath::Max(1, Profile->AlarmTriggerPeriodSeconds));
-	}
-
-	if (!Profile->AlarmGainParameter.IsNone())
-	{
-		FallbackAlarmAudio->SetFloatParameter(Profile->AlarmGainParameter, Profile->AlarmGain * FMath::Lerp(0.35f, 1.f, Severity01));
-	}
-
-	if (!FallbackAlarmAudio->IsPlaying())
-	{
-		FallbackAlarmAudio->Play();
-	}
-
-	if (bLogFeedbackDispatch && !bFloodAlarmActive)
-	{
-		UE_LOG(
-			LogSubmarineFeedback,
-			Log,
-			TEXT("FloodAlarmFeedback | Sub=%s | Threshold=%.2f | Severity=%.2f | Beacons=%d"),
-			*GetNameSafe(GetOwningSubmarine()),
-			Profile->AlarmFloodThreshold01,
-			Severity01,
-			AlarmBeacons.Num());
-	}
-
-	bFloodAlarmActive = true;
 }
 
 void USubmarineFeedbackDirectorComponent::UpdateAlarmBeacons(bool bAlarmActive, float Severity01)
@@ -440,7 +412,88 @@ void USubmarineFeedbackDirectorComponent::UpdateLeakAudioRuntime()
 	}
 }
 
-void USubmarineFeedbackDirectorComponent::UpdateFloodInteriorAudioAnchors(const TArray<FCompartmentRuntimeState>& CompartmentStates)
+void USubmarineFeedbackDirectorComponent::UpdateFloodAlarmFromStates(const TArray<FCompartmentState>& States)
+{
+	const USubmarineFeedbackProfile* Profile = FeedbackProfile;
+	if (!Profile)
+	{
+		return;
+	}
+
+	float MaxWaterLevel01 = 0.f;
+	for (const FCompartmentState& State : States)
+	{
+		MaxWaterLevel01 = FMath::Max(MaxWaterLevel01, State.FloodLevel01);
+	}
+
+	const bool bShouldAlarm = Profile->AlarmSound && MaxWaterLevel01 >= Profile->AlarmFloodThreshold01;
+	const float Severity01 = bShouldAlarm
+		? FMath::Clamp(
+			(MaxWaterLevel01 - Profile->AlarmFloodThreshold01)
+			/ FMath::Max(0.01f, 1.f - Profile->AlarmFloodThreshold01),
+			0.f,
+			1.f)
+		: 0.f;
+
+	UpdateAlarmBeacons(bShouldAlarm, Severity01);
+
+	if (bUseFallbackAlarmAudioWhenNoBeacon && AlarmBeacons.Num() == 0)
+	{
+		EnsureFallbackAlarmAudio();
+	}
+
+	if (!FallbackAlarmAudio)
+	{
+		bFloodAlarmActive = bShouldAlarm;
+		return;
+	}
+
+	if (!bShouldAlarm)
+	{
+		if (FallbackAlarmAudio->IsPlaying())
+		{
+			FallbackAlarmAudio->Stop();
+		}
+		bFloodAlarmActive = false;
+		return;
+	}
+
+	if (FallbackAlarmAudio->Sound != Profile->AlarmSound)
+	{
+		FallbackAlarmAudio->SetSound(Profile->AlarmSound);
+	}
+
+	if (!Profile->AlarmTriggerPeriodParameter.IsNone())
+	{
+		FallbackAlarmAudio->SetIntParameter(Profile->AlarmTriggerPeriodParameter, FMath::Max(1, Profile->AlarmTriggerPeriodSeconds));
+	}
+
+	if (!Profile->AlarmGainParameter.IsNone())
+	{
+		FallbackAlarmAudio->SetFloatParameter(Profile->AlarmGainParameter, Profile->AlarmGain * FMath::Lerp(0.35f, 1.f, Severity01));
+	}
+
+	if (!FallbackAlarmAudio->IsPlaying())
+	{
+		FallbackAlarmAudio->Play();
+	}
+
+	if (bLogFeedbackDispatch && !bFloodAlarmActive)
+	{
+		UE_LOG(
+			LogSubmarineFeedback,
+			Log,
+			TEXT("FloodAlarmFeedback(SubFlood) | Sub=%s | Threshold=%.2f | Severity=%.2f | Beacons=%d"),
+			*GetNameSafe(GetOwningSubmarine()),
+			Profile->AlarmFloodThreshold01,
+			Severity01,
+			AlarmBeacons.Num());
+	}
+
+	bFloodAlarmActive = true;
+}
+
+void USubmarineFeedbackDirectorComponent::UpdateFloodInteriorAudioAnchorsFromStates(const TArray<FCompartmentState>& States)
 {
 	const USubmarineFeedbackProfile* Profile = FeedbackProfile;
 	if (!Profile)
@@ -457,14 +510,14 @@ void USubmarineFeedbackDirectorComponent::UpdateFloodInteriorAudioAnchors(const 
 			continue;
 		}
 
-		const FCompartmentRuntimeState* CompartmentState = CompartmentStates.FindByPredicate([Anchor](const FCompartmentRuntimeState& State)
+		const FCompartmentState* State = States.FindByPredicate([Anchor](const FCompartmentState& S)
 		{
-			return Anchor->TargetCompartmentId == NAME_None || State.CompartmentId == Anchor->TargetCompartmentId;
+			return Anchor->TargetCompartmentId == NAME_None || S.CompartmentId == Anchor->TargetCompartmentId;
 		});
 
-		const float WaterLevel01 = CompartmentState ? CompartmentState->WaterLevelNormalized : 0.f;
-		const float Turbulence01 = CompartmentState
-			? FMath::Clamp(CompartmentState->FloodRateIn / 150.f, 0.f, 1.f)
+		const float WaterLevel01 = State ? State->FloodLevel01 : 0.f;
+		const float Turbulence01 = State
+			? FMath::Clamp(State->FloodRateIn / 150.f, 0.f, 1.f)
 			: 0.f;
 		const bool bActive = WaterLevel01 >= Profile->FloodInteriorActivationThreshold01;
 

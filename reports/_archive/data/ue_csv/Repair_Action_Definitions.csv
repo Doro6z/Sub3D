@@ -1,0 +1,3 @@
+Name,display_name,kind,base_duration_s,required_item,perm_fix
+---,string,string (enum),float,string,bool
+ROW_EXAMPLE,,,,,false

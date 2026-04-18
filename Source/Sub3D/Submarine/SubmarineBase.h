@@ -2,18 +2,27 @@
 
 #include "CoreMinimal.h"
 #include "GameFramework/Pawn.h"
+#include "StructuralHullTypes.h"
 #include "SubmarineRuntimeTypes.h"
 #include "SubmarineBase.generated.h"
 
 class USubMovementComponent;
 class USubHullComponent;
+class USubFloodComponent;
+class USubmarineDefinition;
+class USubmarineGeneratorSpec;
+class USubmarineGeneratedGeometryComponent;
 class USubmarineSystemsComponent;
 class USubmarineCompartmentComponent;
 class USubmarineStationManagerComponent;
 class USubmarineRadarComponent;
 class USubInteriorFrameComponent;
 class UBreachVfxManagerComponent;
+class UCompartmentVolumeComponent;
+class UDoorFloodVfxComponent;
 class UFloodWaterVisualsComponent;
+class USubHullVisualDamageComponent;
+class USubmarineLayoutAsset;
 class USubmarineFeedbackDirectorComponent;
 class USubSonarComponent;
 class USubSonarSystemComponent;
@@ -45,13 +54,22 @@ public:
 	// ── Components ────────────────────────────────────────────────────────
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
+	USceneComponent* SubmarineRoot;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
 	UStaticMeshComponent* HullMesh;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
+	UStaticMeshComponent* MovementCollisionProxy;
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
 	USubMovementComponent* SubMovement;
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
 	USubHullComponent* SubHull;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
+	USubFloodComponent* SubFlood;
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
 	USubmarineSystemsComponent* Systems;
@@ -73,6 +91,12 @@ public:
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
 	UFloodWaterVisualsComponent* FloodWaterVisuals;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
+	USubHullVisualDamageComponent* HullVisualDamage;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
+	UDoorFloodVfxComponent* DoorFloodVfx;
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components", meta = (DisplayName = "Feedback Director"))
 	USubmarineFeedbackDirectorComponent* FeedbackManager;
@@ -99,7 +123,67 @@ public:
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
 	USceneComponent* TurretHardpoint;
 
-	// ── Pilot tracking ────────────────────────────────────────────────────
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
+	USubmarineGeneratedGeometryComponent* GeneratedGeometry;
+
+	// --- Generator pipeline --------------------------------------------------
+
+	/** If set and GeneratedDefinition is null, Generate() runs in BeginPlay. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Submarine|Generator")
+	TObjectPtr<USubmarineGeneratorSpec> GeneratorSpec;
+
+	/** If set, SubFlood initializes from this definition in BeginPlay. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Submarine|Generator")
+	TObjectPtr<USubmarineDefinition> GeneratedDefinition;
+
+	/**
+	 * Class used to spawn interactable door actors from
+	 * GeneratedDefinition->Connections. Set this to a blueprint subclass of
+	 * ASubDoorActor (BP_Door) on the submarine actor in the level. If left
+	 * unset, no doors are spawned and the generator path emits a warning.
+	 * Named with the Generator prefix to avoid shadowing the legacy
+	 * DoorActorClass that already exists on ASubmarineCompilerActor.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Submarine|Generator")
+	TSubclassOf<ASubDoorActor> GeneratorDoorActorClass;
+
+	/**
+	 * Spawn ASubDoorActor instances for each traversable connection in
+	 * GeneratedDefinition. Called from BeginPlay after BuildFromDefinition.
+	 * Safe to call with a null world (returns silently).
+	 */
+	UFUNCTION(BlueprintCallable, Category = "Submarine|Generator")
+	void SpawnDoorsFromDefinition();
+
+	/**
+	 * Returns the current count of doors spawned via SpawnDoorsFromDefinition.
+	 * Intended for automation tests that need to observe the lifecycle
+	 * (spawn / clear / respawn) from outside the class. Production gameplay
+	 * should iterate FindAttachedDoorById or similar instead.
+	 */
+	UFUNCTION(BlueprintPure, Category = "Submarine|Generator|Debug")
+	int32 GetSpawnedGeneratorDoorCount() const { return SpawnedGeneratorDoors.Num(); }
+
+	/**
+	 * Editor-time regeneration of the submarine from GeneratorSpec.
+	 * Clears the current GeneratedDefinition and any materialized PMCs, then
+	 * runs Generate() + BuildMeshData() + BuildFromDefinition() in order.
+	 * Does not touch SubFlood, StationManager, or breach bridges — those are
+	 * BeginPlay-only. Intended for fast iteration on hull shape in editor
+	 * without restarting PIE.
+	 */
+	UFUNCTION(CallInEditor, BlueprintCallable, Category = "Submarine|Generator|Debug")
+	void RebuildFromSpec();
+
+	/**
+	 * Editor-time clear of the generated state (Definition + materialized PMCs).
+	 * Leaves the actor in a clean pre-generation state. Does not touch SubFlood
+	 * or StationManager. Intended as a reset before RebuildFromSpec.
+	 */
+	UFUNCTION(CallInEditor, BlueprintCallable, Category = "Submarine|Generator|Debug")
+	void ClearGeneratedState();
+
+	// --- Pilot tracking --------------------------------------------------
 
 	// The crew member currently at the helm (null = unmanned)
 	UPROPERTY(BlueprintReadOnly, Replicated, Category = "Submarine")
@@ -119,7 +203,7 @@ public:
 
 	// ── Hull damage (Proto 02) ──────────────────────────────────────────
 
-	// Damage scale: damage = NormalImpulse.Size() * Scale
+	// Legacy fallback: when a physics impulse is available, convert it to hull damage.
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Submarine|Damage")
 	float HullImpactDamageScale = 0.0001f;
 
@@ -128,6 +212,29 @@ public:
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Submarine|Damage")
 	float HullWeaponDamageRadiusCm = 35.f;
+
+	// Pure generator path: damage-to-inflow conversion when SubHull has no structural sheets.
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Submarine|Damage", meta = (ClampMin = "0.0"))
+	float DamageToBreachInflowScale = 5.f;
+
+	// A4: low-speed scraping should not breach the hull.
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Submarine|Damage", meta = (ClampMin = "0.0"))
+	float HullCollisionDamageMinSpeedCmS = 300.f;
+
+	// At or above this approach speed, collisions use full catastrophic damage.
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Submarine|Damage", meta = (ClampMin = "1.0"))
+	float HullCollisionCatastrophicSpeedCmS = 1250.f;
+
+	// Catastrophic collision damage before hull-cell falloff/material scaling.
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Submarine|Damage", meta = (ClampMin = "0.0"))
+	float HullCollisionDamageAtCatastrophicSpeed = 220.f;
+
+	// Curves the severity ramp between min and catastrophic speed.
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Submarine|Damage", meta = (ClampMin = "1.0"))
+	float HullCollisionDamageExponent = 2.f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Submarine|Damage|Debug")
+	bool bDebugLogHullCollisions = false;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Replicated, Category = "Submarine|Debug")
 	bool bFreezeMovementForTesting = false;
@@ -148,6 +255,12 @@ public:
 
 	// ── Interior / Crew support ──────────────────────────────────────────
 
+	/** Component tag that marks a primitive component as a manually authored walkable surface.
+	 *  Used by handmade submarines (Craniata path) where there is no generated geometry to
+	 *  expose floor collision. Tag the desired components in the Details panel to opt in. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Submarine|Interior")
+	FName ManualWalkableTag = TEXT("HandmadeWalkable");
+
 	/** Returns components that provide walkable surfaces for crew inside the submarine. */
 	UFUNCTION(BlueprintPure, Category = "Submarine|Interior")
 	virtual TArray<UPrimitiveComponent*> GetInteriorWalkableComponents() const;
@@ -158,6 +271,16 @@ public:
 
 	UFUNCTION(BlueprintCallable, CallInEditor, Category = "Submarine|Damage|Debug")
 	bool CreateDebugBreachOnFirstExteriorSheet(float DamageAmount = 150.f);
+
+	// LEGACY (Phase 7A, 2026-04-10) — Proto authoring helper.
+	// Produces a SubmarineLayoutAsset from editor-placed CompartmentVolumeComponents.
+	// Do not call from new authoring flows. The SubmarineGenerator path (Phase 5D)
+	// will replace this entirely. Will be removed in Phase 7B.
+	/** Scans all CompartmentVolumeComponents on this actor, merges by CompartmentId,
+	 *  and creates or updates a SubmarineLayoutAsset assigned to SubHull.
+	 *  Volumes with the same CompartmentId are unioned into a single compartment. */
+	UFUNCTION(BlueprintCallable, CallInEditor, Category = "Submarine|Layout")
+	void BakeLayoutFromVolumes();
 
 	UFUNCTION(BlueprintCallable, Category = "Submarine")
 	void RefreshRepState();
@@ -192,6 +315,24 @@ public:
 	virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const override;
 
 private:
+	/** Bridge SubHull breach clusters to SubFlood inflow when SubFlood is the active sim. */
+	UFUNCTION()
+	void HandleBreachesUpdatedForFlood(const TArray<FBreachClusterState>& Breaches);
+
+	/** Destroy any doors previously spawned by SpawnDoorsFromDefinition. */
+	void DestroySpawnedGeneratorDoors();
+
 	UPROPERTY(Transient)
 	TWeakObjectPtr<UPrimitiveComponent> BoundMovementCollisionComponent;
+
+	UPROPERTY(Transient)
+	TArray<TWeakObjectPtr<UPrimitiveComponent>> BoundHullCollisionComponents;
+
+	/**
+	 * Door actors spawned from GeneratedDefinition->Connections by
+	 * SpawnDoorsFromDefinition. Tracked so ClearGeneratedState and
+	 * RebuildFromSpec can destroy them cleanly before regenerating.
+	 */
+	UPROPERTY(Transient)
+	TArray<TObjectPtr<ASubDoorActor>> SpawnedGeneratorDoors;
 };

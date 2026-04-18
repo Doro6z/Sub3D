@@ -1,0 +1,3 @@
+Name,display_name,kind,depth_min_m,depth_max_m
+---,string,string (enum),float,float
+ROW_EXAMPLE,,,,

@@ -1,0 +1,3 @@
+Name,display_name,roundness_range,aspect_ratio_hint,notes
+---,string,string,float,string
+ROW_EXAMPLE,,,,

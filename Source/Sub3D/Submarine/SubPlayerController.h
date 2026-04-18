@@ -31,6 +31,16 @@ public:
 	UPROPERTY(BlueprintReadWrite, Replicated, Category = "Crew Control")
 	ECrewControlMode CurrentControlMode = ECrewControlMode::OnFoot;
 
+	// ── HUD ───────────────────────────────────────────────────────────────
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HUD")
+	TSubclassOf<class USubPlayerHUDWidget> HUDWidgetClass;
+
+	UPROPERTY(BlueprintReadOnly, Category = "HUD")
+	class USubPlayerHUDWidget* HUDWidget;
+
+	virtual void BeginPlay() override;
+
 	// The currently occupied station actor, if any
 	UPROPERTY(BlueprintReadOnly, Replicated, Category = "Crew Control")
 	AActor* CurrentStation = nullptr;
@@ -79,12 +89,56 @@ public:
 	// Route driving inputs directly from controller to station or sub
 	UFUNCTION(BlueprintCallable, Server, Unreliable, Category = "Crew Control")
 	void ServerRouteHelmThrust(float Value);
-	
+
+	// Ramp the throttle up / down while a key is held. Intent is a direction
+	// (-1..+1) applied each sim tick at ThrottleRampRate units/sec. Wired
+	// from IA_Thrust in BP: pass the axis value on Triggered, 0 on Completed.
+	UFUNCTION(BlueprintCallable, Server, Unreliable, Category = "Crew Control")
+	void ServerRouteHelmThrottleRamp(float Intent);
+
 	UFUNCTION(BlueprintCallable, Server, Unreliable, Category = "Crew Control")
 	void ServerRouteHelmSteer(float Value);
 
+	// Hold-to-ramp rudder. Intent in -1..+1 (sign = direction, magnitude
+	// scales the rate). 0 stops the ramp and the existing auto-recenter
+	// (when RudderHold is off) takes over. Wire IA_Rudder Triggered →
+	// pass axis value here, IA_Rudder Completed → pass 0.
+	UFUNCTION(BlueprintCallable, Server, Unreliable, Category = "Crew Control")
+	void ServerRouteHelmRudderRamp(float Intent);
+
 	UFUNCTION(BlueprintCallable, Server, Unreliable, Category = "Crew Control")
 	void ServerRouteHelmDive(float Value);
+
+	// Hold-to-ramp dive plane. Same contract as ServerRouteHelmRudderRamp.
+	UFUNCTION(BlueprintCallable, Server, Unreliable, Category = "Crew Control")
+	void ServerRouteHelmDivePlaneRamp(float Intent);
+
+	UFUNCTION(BlueprintCallable, Server, Reliable, Category = "Crew Control")
+	void ServerRouteRudderHoldEnabled(bool bEnabled);
+
+	UFUNCTION(BlueprintCallable, Server, Reliable, Category = "Crew Control")
+	void ServerRoutePlaneHoldEnabled(bool bEnabled);
+
+	UFUNCTION(BlueprintCallable, Server, Reliable, Category = "Crew Control")
+	void ServerRouteStabilizationMaster(bool bEnabled);
+
+	UFUNCTION(BlueprintCallable, Server, Reliable, Category = "Crew Control")
+	void ServerRouteAutoSpeedEnabled(bool bEnabled);
+
+	UFUNCTION(BlueprintCallable, Server, Reliable, Category = "Crew Control")
+	void ServerRouteAutoDepthEnabled(bool bEnabled);
+
+	UFUNCTION(BlueprintCallable, Server, Reliable, Category = "Crew Control")
+	void ServerRouteAutoPitchEnabled(bool bEnabled);
+
+	UFUNCTION(BlueprintCallable, Server, Reliable, Category = "Crew Control")
+	void ServerRouteTargetSpeedCmS(float SpeedCmS);
+
+	UFUNCTION(BlueprintCallable, Server, Reliable, Category = "Crew Control")
+	void ServerRouteTargetDepthMeters(float DepthMeters);
+
+	UFUNCTION(BlueprintCallable, Server, Reliable, Category = "Crew Control")
+	void ServerRouteTargetPitchDeg(float PitchDeg);
 
 	// Route ballast controls from helm UI (controller-first authority path)
 	UFUNCTION(BlueprintCallable, Server, Reliable, Category = "Crew Control")
@@ -158,4 +212,41 @@ public:
 	ASubmarineBase* GetResolvedCurrentSubmarine() const;
 
 	ASubmarineBase* ResolveCurrentSubmarine() const;
+
+	// ── Dev cheats (console commands, Exec) ─────────────────────────────
+	// Used to validate the First Playable gameplay loop without relying on
+	// full runtime simulation. All cheats resolve the current submarine and
+	// act on its SubFlood / Definition. Safe no-ops if unavailable.
+
+	/** Create or update a breach on the given compartment at RateLps liters/sec. */
+	UFUNCTION(Exec, Category = "Debug|Submarine")
+	void DevCheat_CreateBreach(FName CompartmentId, float RateLps);
+
+	/** Force a door/hatch connection state via its ConnectionId. */
+	UFUNCTION(Exec, Category = "Debug|Submarine")
+	void DevCheat_SetDoorClosed(FName ConnectionId, bool bClosed);
+
+	/** Directly set the flood level of a compartment (0-1), bypassing simulation. */
+	UFUNCTION(Exec, Category = "Debug|Submarine")
+	void DevCheat_SetFloodLevel(FName CompartmentId, float Level01);
+
+	/** Remove all breaches from all compartments (repair shortcut). */
+	UFUNCTION(Exec, Category = "Debug|Submarine")
+	void DevCheat_RepairAllBreaches();
+
+	/** Teleport the possessed pawn to the center of the named compartment. */
+	UFUNCTION(Exec, Category = "Debug|Submarine")
+	void DevCheat_TeleportToCompartment(FName CompartmentId);
+
+	/** Print the list of compartments and their current flood levels to the log. */
+	UFUNCTION(Exec, Category = "Debug|Submarine")
+	void DevCheat_ListCompartments();
+
+	/** Set a crew anim parameter by name. Usage: Anim LegSwingAxis 2 */
+	UFUNCTION(Exec, Category = "Debug|Crew")
+	void Anim(const FString& ParamName, float Value);
+
+	/** Print all crew anim parameters */
+	UFUNCTION(Exec, Category = "Debug|Crew")
+	void AnimList();
 };

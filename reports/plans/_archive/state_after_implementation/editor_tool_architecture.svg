@@ -1,0 +1,62 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 650" font-family="sans-serif">
+    <!-- Background -->
+    <rect width="1000" height="650" fill="#1e1e1e" rx="10"/>
+
+    <!-- Title -->
+    <text x="500" y="40" fill="#fff" font-size="24" font-weight="bold" text-anchor="middle">Submarine Editor Architecture</text>
+
+    <!-- UI Layer -->
+    <rect x="50" y="80" width="900" height="150" rx="10" fill="#2d3436" stroke="#a29bfe" stroke-width="2"/>
+    <text x="70" y="110" fill="#a29bfe" font-size="18" font-weight="bold">Editor UI Layer (Unreal Editor / Slate)</text>
+    <rect x="70" y="130" width="180" height="80" rx="5" fill="#34495e" stroke="#fff"/>
+    <text x="160" y="175" fill="#fff" font-size="14" text-anchor="middle">Details Panel</text>
+    <rect x="270" y="130" width="180" height="80" rx="5" fill="#34495e" stroke="#fff"/>
+    <text x="360" y="175" fill="#fff" font-size="14" text-anchor="middle">Component Visualizers</text>
+    <rect x="470" y="130" width="460" height="80" rx="5" fill="#34495e" stroke="#fff"/>
+    <text x="700" y="175" fill="#fff" font-size="14" text-anchor="middle">Interactive Viewport (Gizmos for Bulkheads/Stations)</text>
+
+    <!-- Logic Layer (The Generator) -->
+    <rect x="150" y="280" width="700" height="180" rx="15" fill="#2d3436" stroke="#fdcb6e" stroke-width="3" stroke-dasharray="8,4"/>
+    <text x="500" y="315" fill="#fdcb6e" font-size="20" font-weight="bold" text-anchor="middle">Submarine Generator Tool (C++)</text>
+    
+    <g transform="translate(180, 340)">
+        <rect width="180" height="90" rx="8" fill="#4b6584" stroke="#fff"/>
+        <text x="90" y="40" fill="#fff" font-size="14" font-weight="bold" text-anchor="middle">Mesh Builder</text>
+        <text x="90" y="65" fill="#dfe6e9" font-size="12" text-anchor="middle">Low-Poly Preview</text>
+    </g>
+    <g transform="translate(410, 340)">
+        <rect width="180" height="90" rx="8" fill="#4b6584" stroke="#fff"/>
+        <text x="90" y="40" fill="#fff" font-size="14" font-weight="bold" text-anchor="middle">Logic Solver</text>
+        <text x="90" y="65" fill="#dfe6e9" font-size="12" text-anchor="middle">Flood Graph / Capacity</text>
+    </g>
+    <g transform="translate(640, 340)">
+        <rect width="180" height="90" rx="8" fill="#4b6584" stroke="#fff"/>
+        <text x="90" y="40" fill="#fff" font-size="14" font-weight="bold" text-anchor="middle">Assembler</text>
+        <text x="90" y="65" fill="#dfe6e9" font-size="12" text-anchor="middle">Spawn/Socket Logic</text>
+    </g>
+
+    <!-- Persistence Layer -->
+    <rect x="50" y="520" width="400" height="100" rx="10" fill="#0984e3" stroke="#fff" stroke-width="2"/>
+    <text x="250" y="560" fill="#fff" font-size="18" font-weight="bold" text-anchor="middle">USubmarineGeneratorSpec</text>
+    <text x="250" y="585" fill="#dfe6e9" font-size="14" text-anchor="middle">(Designer Intent - Serializable)</text>
+
+    <rect x="550" y="520" width="400" height="100" rx="10" fill="#eb4d4b" stroke="#fff" stroke-width="2"/>
+    <text x="750" y="560" fill="#fff" font-size="18" font-weight="bold" text-anchor="middle">USubmarineDefinition</text>
+    <text x="750" y="585" fill="#dfe6e9" font-size="14" text-anchor="middle">(Baked Runtime Data)</text>
+
+    <!-- Connection Arrows -->
+    <path d="M 500 230 L 500 280" stroke="#fff" stroke-width="2" marker-end="url(#arrow)"/>
+    <path d="M 250 520 L 250 460" stroke="#fff" stroke-width="2" marker-end="url(#arrow)"/>
+    <path d="M 750 460 L 750 520" stroke="#fff" stroke-width="2" marker-end="url(#arrow)"/>
+    <path d="M 450 570 L 550 570" stroke="#fdcb6e" stroke-width="3" stroke-dasharray="5,5" marker-end="url(#arrowGold)"/>
+    <text x="500" y="560" fill="#fdcb6e" font-size="14" font-weight="bold" text-anchor="middle">Bake Process</text>
+
+    <defs>
+        <marker id="arrow" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto" markerUnits="strokeWidth">
+            <path d="M0,0 L0,6 L9,3 z" fill="#fff" />
+        </marker>
+        <marker id="arrowGold" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto" markerUnits="strokeWidth">
+            <path d="M0,0 L0,6 L9,3 z" fill="#fdcb6e" />
+        </marker>
+    </defs>
+</svg>

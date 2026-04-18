@@ -1,0 +1,3 @@
+Name,player_id,catalog_id,nickname,damage_state,last_mission_id
+---,string,string,string,float,string
+ROW_EXAMPLE,,,,,

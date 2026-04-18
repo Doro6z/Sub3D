@@ -1,0 +1,3 @@
+Name,display_name,biome_id,depth_m,danger_rating
+---,string,string,float,int32
+ROW_EXAMPLE,,,,

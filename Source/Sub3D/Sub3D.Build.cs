@@ -21,7 +21,11 @@ public class Sub3D : ModuleRules
 			"GameplayTags",
 			"Niagara",
 			"PCG",
-			"RuntimeSyncDiagnostics"
+			"PhysicsCore",
+			"RuntimeSyncDiagnostics",
+			"AnimGraphRuntime",
+			"Sub3DRuntime",
+			"Sub3DCore"
 		});
 
 		if (Target.bBuildEditor)
@@ -30,7 +34,10 @@ public class Sub3D : ModuleRules
 			{
 				"AssetRegistry",
 				"MeshDescription",
-				"StaticMeshDescription"
+				"StaticMeshDescription",
+				"UnrealEd",
+				"AnimGraph",
+				"BlueprintGraph"
 			});
 		}
 
@@ -38,6 +45,7 @@ public class Sub3D : ModuleRules
 		{
 			"Sub3D",
 			"Sub3D/Submarine",
+			"Sub3D/Submarine/Generator",
 			"Sub3D/WorldGen",
 			"Sub3D/Diagnostics"
 		});

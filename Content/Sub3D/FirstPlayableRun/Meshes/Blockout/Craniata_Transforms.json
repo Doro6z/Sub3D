@@ -1,0 +1,2544 @@
+{
+  "schema_version": 1,
+  "object_count": 141,
+  "objects": {
+    "SM_Airlock_Cassette": {
+      "location_cm": [
+        2919.800048828125,
+        1.358746886253357,
+        384.61773681640625
+      ],
+      "rotation_quat_xyzw": [
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ],
+      "scale": [
+        1.0,
+        1.0,
+        1.0
+      ]
+    },
+    "SM_Airlock_Door_Port": {
+      "location_cm": [
+        2919.800048828125,
+        1.358746886253357,
+        384.61773681640625
+      ],
+      "rotation_quat_xyzw": [
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ],
+      "scale": [
+        1.0,
+        1.0,
+        1.0
+      ]
+    },
+    "SM_Airlock_Door_Stbd": {
+      "location_cm": [
+        2919.800048828125,
+        1.358746886253357,
+        384.61773681640625
+      ],
+      "rotation_quat_xyzw": [
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ],
+      "scale": [
+        1.0,
+        1.0,
+        1.0
+      ]
+    },
+    "SM_Antenna_ComsA_Lower": {
+      "location_cm": [
+        2436.0,
+        40.0,
+        591.7360229492188
+      ],
+      "rotation_quat_xyzw": [
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ],
+      "scale": [
+        1.0,
+        1.0,
+        1.0
+      ]
+    },
+    "SM_Antenna_ComsA_Upper": {
+      "location_cm": [
+        2436.0,
+        40.0,
+        690.7360229492188
+      ],
+      "rotation_quat_xyzw": [
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ],
+      "scale": [
+        1.0,
+        1.0,
+        1.0
+      ]
+    },
+    "SM_Antenna_ComsB_Lower": {
+      "location_cm": [
+        2604.0,
+        -40.0,
+        584.2686767578125
+      ],
+      "rotation_quat_xyzw": [
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ],
+      "scale": [
+        1.0,
+        1.0,
+        1.0
+      ]
+    },
+    "SM_Antenna_ComsB_Upper": {
+      "location_cm": [
+        2604.0,
+        -40.0,
+        666.7686767578125
+      ],
+      "rotation_quat_xyzw": [
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ],
+      "scale": [
+        1.0,
+        1.0,
+        1.0
+      ]
+    },
+    "SM_Antenna_Sonar_Lower": {
+      "location_cm": [
+        2772.0,
+        0.0,
+        575.338134765625
+      ],
+      "rotation_quat_xyzw": [
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ],
+      "scale": [
+        1.0,
+        1.0,
+        1.0
+      ]
+    },
+    "SM_Antenna_Sonar_Upper": {
+      "location_cm": [
+        2772.0,
+        0.0,
+        630.338134765625
+      ],
+      "rotation_quat_xyzw": [
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ],
+      "scale": [
+        1.0,
+        1.0,
+        1.0
+      ]
+    },
+    "SM_Ballast_Service_Aft": {
+      "location_cm": [
+        2605.5,
+        0.0,
+        -282.0
+      ],
+      "rotation_quat_xyzw": [
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ],
+      "scale": [
+        1.0,
+        1.0,
+        1.0
+      ]
+    },
+    "SM_Ballast_Service_Fwd": {
+      "location_cm": [
+        850.5,
+        0.0,
+        -278.0
+      ],
+      "rotation_quat_xyzw": [
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ],
+      "scale": [
+        1.0,
+        1.0,
+        1.0
+      ]
+    },
+    "SM_BallastAccess_Aft_Port": {
+      "location_cm": [
+        2593.5,
+        -75.0,
+        -235.25
+      ],
+      "rotation_quat_xyzw": [
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ],
+      "scale": [
+        1.0,
+        1.0,
+        1.0
+      ]
+    },
+    "SM_BallastAccess_Aft_Stbd": {
+      "location_cm": [
+        2593.5,
+        75.0,
+        -235.25
+      ],
+      "rotation_quat_xyzw": [
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ],
+      "scale": [
+        1.0,
+        1.0,
+        1.0
+      ]
+    },
+    "SM_BallastAccess_Fwd_Port": {
+      "location_cm": [
+        838.5,
+        -75.0,
+        -235.25
+      ],
+      "rotation_quat_xyzw": [
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ],
+      "scale": [
+        1.0,
+        1.0,
+        1.0
+      ]
+    },
+    "SM_BallastAccess_Fwd_Stbd": {
+      "location_cm": [
+        838.5,
+        75.0,
+        -235.25
+      ],
+      "rotation_quat_xyzw": [
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ],
+      "scale": [
+        1.0,
+        1.0,
+        1.0
+      ]
+    },
+    "SM_BallastPasserelle_Aft": {
+      "location_cm": [
+        2605.5,
+        0.0,
+        -235.25
+      ],
+      "rotation_quat_xyzw": [
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ],
+      "scale": [
+        1.0,
+        1.0,
+        1.0
+      ]
+    },
+    "SM_BallastPasserelle_Fwd": {
+      "location_cm": [
+        850.5,
+        0.0,
+        -235.25
+      ],
+      "rotation_quat_xyzw": [
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ],
+      "scale": [
+        1.0,
+        1.0,
+        1.0
+      ]
+    },
+    "SM_BallastTank_Aft_Port": {
+      "location_cm": [
+        2605.5,
+        -172.0,
+        -251.0
+      ],
+      "rotation_quat_xyzw": [
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ],
+      "scale": [
+        1.0,
+        1.0,
+        1.0
+      ]
+    },
+    "SM_BallastTank_Aft_Stbd": {
+      "location_cm": [
+        2605.5,
+        172.0,
+        -251.0
+      ],
+      "rotation_quat_xyzw": [
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ],
+      "scale": [
+        1.0,
+        1.0,
+        1.0
+      ]
+    },
+    "SM_BallastTank_Fwd_Port": {
+      "location_cm": [
+        850.5,
+        -174.0,
+        -247.10000610351562
+      ],
+      "rotation_quat_xyzw": [
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ],
+      "scale": [
+        1.0,
+        1.0,
+        1.0
+      ]
+    },
+    "SM_BallastTank_Fwd_Stbd": {
+      "location_cm": [
+        850.5,
+        174.0,
+        -247.10000610351562
+      ],
+      "rotation_quat_xyzw": [
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ],
+      "scale": [
+        1.0,
+        1.0,
+        1.0
+      ]
+    },
+    "SM_BH_Lower_BallastAft": {
+      "location_cm": [
+        2163.0,
+        -0.004425048828125,
+        -222.1298828125
+      ],
+      "rotation_quat_xyzw": [
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ],
+      "scale": [
+        1.0,
+        1.0,
+        1.0
+      ]
+    },
+    "SM_BH_Lower_BallastFwd": {
+      "location_cm": [
+        1407.0,
+        0.0026702880859375,
+        -225.13217163085938
+      ],
+      "rotation_quat_xyzw": [
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ],
+      "scale": [
+        1.0,
+        1.0,
+        1.0
+      ]
+    },
+    "SM_BH_Lower_TechPartition": {
+      "location_cm": [
+        3024.0,
+        0.001983642578125,
+        -192.4229278564453
+      ],
+      "rotation_quat_xyzw": [
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ],
+      "scale": [
+        1.0,
+        1.0,
+        1.0
+      ]
+    },
+    "SM_BH_Main_Control": {
+      "location_cm": [
+        2637.60009765625,
+        0.000579833984375,
+        129.00245666503906
+      ],
+      "rotation_quat_xyzw": [
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ],
+      "scale": [
+        1.0,
+        1.0,
+        1.0
+      ]
+    },
+    "SM_BH_Main_Fwd": {
+      "location_cm": [
+        940.7999877929688,
+        0.0004730224609375,
+        237.9487762451172
+      ],
+      "rotation_quat_xyzw": [
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ],
+      "scale": [
+        1.0,
+        1.0,
+        1.0
+      ]
+    },
+    "SM_BH_Upper_Armory": {
+      "location_cm": [
+        1155.0,
+        0.006134033203125,
+        437.326171875
+      ],
+      "rotation_quat_xyzw": [
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ],
+      "scale": [
+        1.0,
+        1.0,
+        1.0
+      ]
+    },
+    "SM_BH_UpperAirlock_Inner": {
+      "location_cm": [
+        2694.800048828125,
+        0.002532958984375,
+        437.82110595703125
+      ],
+      "rotation_quat_xyzw": [
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ],
+      "scale": [
+        1.0,
+        1.0,
+        1.0
+      ]
+    },
+    "SM_CrewLocker_Port": {
+      "location_cm": [
+        651.0,
+        -155.0,
+        66.0
+      ],
+      "rotation_quat_xyzw": [
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ],
+      "scale": [
+        1.0,
+        1.0,
+        1.0
+      ]
+    },
+    "SM_CrewLocker_Stbd": {
+      "location_cm": [
+        651.0,
+        155.0,
+        66.0
+      ],
+      "rotation_quat_xyzw": [
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ],
+      "scale": [
+        1.0,
+        1.0,
+        1.0
+      ]
+    },
+    "SM_CrewProp_Module_Port": {
+      "location_cm": [
+        590.4000244140625,
+        -151.0,
+        58.0
+      ],
+      "rotation_quat_xyzw": [
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ],
+      "scale": [
+        1.0,
+        1.0,
+        1.0
+      ]
+    },
+    "SM_CrewProp_Module_Stbd": {
+      "location_cm": [
+        590.4000244140625,
+        151.0,
+        58.0
+      ],
+      "rotation_quat_xyzw": [
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ],
+      "scale": [
+        1.0,
+        1.0,
+        1.0
+      ]
+    },
+    "SM_Deck_engine_lower": {
+      "location_cm": [
+        3801.0,
+        0.0,
+        -87.0
+      ],
+      "rotation_quat_xyzw": [
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ],
+      "scale": [
+        1.0,
+        1.0,
+        1.0
+      ]
+    },
+    "SM_Deck_engine_upper": {
+      "location_cm": [
+        3423.0,
+        0.0,
+        -11.0
+      ],
+      "rotation_quat_xyzw": [
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ],
+      "scale": [
+        1.0,
+        1.0,
+        1.0
+      ]
+    },
+    "SM_Deck_lower_main": {
+      "location_cm": [
+        1785.0,
+        0.0,
+        -240.0
+      ],
+      "rotation_quat_xyzw": [
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ],
+      "scale": [
+        1.0,
+        1.0,
+        1.0
+      ]
+    },
+    "SM_Deck_main": {
+      "location_cm": [
+        1631.699951171875,
+        0.0,
+        -20.0
+      ],
+      "rotation_quat_xyzw": [
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ],
+      "scale": [
+        1.0,
+        1.0,
+        1.0
+      ]
+    },
+    "SM_Deck_upper": {
+      "location_cm": [
+        1976.0999755859375,
+        -1.5477294921875,
+        279.5048828125
+      ],
+      "rotation_quat_xyzw": [
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ],
+      "scale": [
+        1.0,
+        1.0,
+        1.0
+      ]
+    },
+    "SM_Door_Lower_BallastAft": {
+      "location_cm": [
+        2177.39990234375,
+        -56.0,
+        -130.82000732421875
+      ],
+      "rotation_quat_xyzw": [
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ],
+      "scale": [
+        1.0,
+        1.0,
+        1.0
+      ]
+    },
+    "SM_Door_Lower_BallastAft_Frame": {
+      "location_cm": [
+        2163.0,
+        -68.0,
+        -129.95599365234375
+      ],
+      "rotation_quat_xyzw": [
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ],
+      "scale": [
+        1.0,
+        1.0,
+        1.0
+      ]
+    },
+    "SM_Door_Lower_BallastFwd": {
+      "location_cm": [
+        1421.39990234375,
+        -56.0,
+        -130.82000732421875
+      ],
+      "rotation_quat_xyzw": [
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ],
+      "scale": [
+        1.0,
+        1.0,
+        1.0
+      ]
+    },
+    "SM_Door_Lower_BallastFwd_Frame": {
+      "location_cm": [
+        1407.0,
+        -68.0,
+        -129.95599365234375
+      ],
+      "rotation_quat_xyzw": [
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ],
+      "scale": [
+        1.0,
+        1.0,
+        1.0
+      ]
+    },
+    "SM_Door_Main_Control": {
+      "location_cm": [
+        2652.0,
+        -56.0,
+        89.18000030517578
+      ],
+      "rotation_quat_xyzw": [
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ],
+      "scale": [
+        1.0,
+        1.0,
+        1.0
+      ]
+    },
+    "SM_Door_Main_Control_Frame": {
+      "location_cm": [
+        2637.60009765625,
+        -68.0,
+        90.04400634765625
+      ],
+      "rotation_quat_xyzw": [
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ],
+      "scale": [
+        1.0,
+        1.0,
+        1.0
+      ]
+    },
+    "SM_Door_Main_Fwd": {
+      "location_cm": [
+        955.2000122070312,
+        -56.0,
+        89.18000030517578
+      ],
+      "rotation_quat_xyzw": [
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ],
+      "scale": [
+        1.0,
+        1.0,
+        1.0
+      ]
+    },
+    "SM_Door_Main_Fwd_Frame": {
+      "location_cm": [
+        940.7999877929688,
+        -68.0,
+        90.04400634765625
+      ],
+      "rotation_quat_xyzw": [
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ],
+      "scale": [
+        1.0,
+        1.0,
+        1.0
+      ]
+    },
+    "SM_Door_Upper_Airlock_Inner": {
+      "location_cm": [
+        2709.199951171875,
+        -56.0,
+        388.6849060058594
+      ],
+      "rotation_quat_xyzw": [
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ],
+      "scale": [
+        1.0,
+        1.0,
+        1.0
+      ]
+    },
+    "SM_Door_Upper_Airlock_Inner_Frame": {
+      "location_cm": [
+        2694.800048828125,
+        -68.0,
+        389.5489196777344
+      ],
+      "rotation_quat_xyzw": [
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ],
+      "scale": [
+        1.0,
+        1.0,
+        1.0
+      ]
+    },
+    "SM_Door_Upper_Armory": {
+      "location_cm": [
+        1169.39990234375,
+        -187.0,
+        388.6849060058594
+      ],
+      "rotation_quat_xyzw": [
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ],
+      "scale": [
+        1.0,
+        1.0,
+        1.0
+      ]
+    },
+    "SM_Door_Upper_Armory_Frame": {
+      "location_cm": [
+        1155.0,
+        -199.0,
+        389.5489196777344
+      ],
+      "rotation_quat_xyzw": [
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ],
+      "scale": [
+        1.0,
+        1.0,
+        1.0
+      ]
+    },
+    "SM_DriveShaft": {
+      "location_cm": [
+        4020.5,
+        0.0,
+        0.0
+      ],
+      "rotation_quat_xyzw": [
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ],
+      "scale": [
+        1.0,
+        1.0,
+        1.0
+      ]
+    },
+    "SM_Engine_Block": {
+      "location_cm": [
+        3771.60009765625,
+        0.0,
+        -82.0
+      ],
+      "rotation_quat_xyzw": [
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ],
+      "scale": [
+        1.0,
+        1.0,
+        1.0
+      ]
+    },
+    "SM_EngineControlCabinet": {
+      "location_cm": [
+        3444.0,
+        139.0,
+        40.0
+      ],
+      "rotation_quat_xyzw": [
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ],
+      "scale": [
+        1.0,
+        1.0,
+        1.0
+      ]
+    },
+    "SM_EngineRamp": {
+      "location_cm": [
+        3611.60009765625,
+        0.0,
+        -43.0
+      ],
+      "rotation_quat_xyzw": [
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ],
+      "scale": [
+        1.0,
+        1.0,
+        1.0
+      ]
+    },
+    "SM_FinAssembly": {
+      "location_cm": [
+        4011.0,
+        0.0,
+        0.0
+      ],
+      "rotation_quat_xyzw": [
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ],
+      "scale": [
+        1.0,
+        1.0,
+        1.0
+      ]
+    },
+    "SM_Flag_Antenna_ComsA": {
+      "location_cm": [
+        2447.10009765625,
+        40.0,
+        764.7360229492188
+      ],
+      "rotation_quat_xyzw": [
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ],
+      "scale": [
+        1.0,
+        1.0,
+        1.0
+      ]
+    },
+    "SM_Hardpoint_AftTop": {
+      "location_cm": [
+        3175.199951171875,
+        0.0,
+        357.9082336425781
+      ],
+      "rotation_quat_xyzw": [
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ],
+      "scale": [
+        1.0,
+        1.0,
+        1.0
+      ]
+    },
+    "SM_Hardpoint_FwdBottom": {
+      "location_cm": [
+        453.6000061035156,
+        0.0,
+        -402.08062744140625
+      ],
+      "rotation_quat_xyzw": [
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ],
+      "scale": [
+        1.0,
+        1.0,
+        1.0
+      ]
+    },
+    "SM_Hardpoint_FwdTop": {
+      "location_cm": [
+        411.6000061035156,
+        0.0,
+        396.96649169921875
+      ],
+      "rotation_quat_xyzw": [
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ],
+      "scale": [
+        1.0,
+        1.0,
+        1.0
+      ]
+    },
+    "SM_HardpointFairing_AftTop": {
+      "location_cm": [
+        3175.199951171875,
+        0.0,
+        352.9082336425781
+      ],
+      "rotation_quat_xyzw": [
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ],
+      "scale": [
+        1.0,
+        1.0,
+        1.0
+      ]
+    },
+    "SM_HardpointFairing_FwdBottom": {
+      "location_cm": [
+        453.6000061035156,
+        0.0,
+        -397.08062744140625
+      ],
+      "rotation_quat_xyzw": [
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ],
+      "scale": [
+        1.0,
+        1.0,
+        1.0
+      ]
+    },
+    "SM_HardpointFairing_FwdTop": {
+      "location_cm": [
+        411.6000061035156,
+        0.0,
+        389.96649169921875
+      ],
+      "rotation_quat_xyzw": [
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ],
+      "scale": [
+        1.0,
+        1.0,
+        1.0
+      ]
+    },
+    "SM_Hatch_Engine_SideService": {
+      "location_cm": [
+        3813.60009765625,
+        -96.0,
+        -64.0
+      ],
+      "rotation_quat_xyzw": [
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ],
+      "scale": [
+        1.0,
+        1.0,
+        1.0
+      ]
+    },
+    "SM_HatchDoor_FondAccess": {
+      "location_cm": [
+        1823.6400146484375,
+        -38.63999938964844,
+        -226.5
+      ],
+      "rotation_quat_xyzw": [
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ],
+      "scale": [
+        1.0,
+        1.0,
+        1.0
+      ]
+    },
+    "SM_HatchDoor_LowerAccess": {
+      "location_cm": [
+        1836.52001953125,
+        -45.91999816894531,
+        -6.0
+      ],
+      "rotation_quat_xyzw": [
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ],
+      "scale": [
+        1.0,
+        1.0,
+        1.0
+      ]
+    },
+    "SM_Hull": {
+      "location_cm": [
+        2100.0,
+        0.0,
+        93.02671813964844
+      ],
+      "rotation_quat_xyzw": [
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ],
+      "scale": [
+        1.0,
+        1.0,
+        1.0
+      ]
+    },
+    "SM_Hull_Weld_Long_150": {
+      "location_cm": [
+        2121.0,
+        -250.32196044921875,
+        144.0615692138672
+      ],
+      "rotation_quat_xyzw": [
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ],
+      "scale": [
+        1.0,
+        1.0,
+        1.0
+      ]
+    },
+    "SM_Hull_Weld_Long_210": {
+      "location_cm": [
+        2121.0,
+        -250.32196044921875,
+        -144.0615692138672
+      ],
+      "rotation_quat_xyzw": [
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ],
+      "scale": [
+        1.0,
+        1.0,
+        1.0
+      ]
+    },
+    "SM_Hull_Weld_Long_30": {
+      "location_cm": [
+        2121.0,
+        250.32196044921875,
+        144.0615692138672
+      ],
+      "rotation_quat_xyzw": [
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ],
+      "scale": [
+        1.0,
+        1.0,
+        1.0
+      ]
+    },
+    "SM_Hull_Weld_Long_330": {
+      "location_cm": [
+        2121.0,
+        250.32196044921875,
+        -144.0615692138672
+      ],
+      "rotation_quat_xyzw": [
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ],
+      "scale": [
+        1.0,
+        1.0,
+        1.0
+      ]
+    },
+    "SM_Hydro_Bow": {
+      "location_cm": [
+        504.0,
+        584.358154296875,
+        0.0
+      ],
+      "rotation_quat_xyzw": [
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ],
+      "scale": [
+        1.0,
+        1.0,
+        1.0
+      ]
+    },
+    "SM_Hydro_Fairings": {
+      "location_cm": [
+        2100.0,
+        422.358154296875,
+        0.0
+      ],
+      "rotation_quat_xyzw": [
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ],
+      "scale": [
+        1.0,
+        1.0,
+        1.0
+      ]
+    },
+    "SM_Hydro_Stern": {
+      "location_cm": [
+        3696.0,
+        455.5350341796875,
+        0.0
+      ],
+      "rotation_quat_xyzw": [
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ],
+      "scale": [
+        1.0,
+        1.0,
+        1.0
+      ]
+    },
+    "SM_Junction_Control": {
+      "location_cm": [
+        2637.60009765625,
+        92.0,
+        243.50491333007812
+      ],
+      "rotation_quat_xyzw": [
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ],
+      "scale": [
+        1.0,
+        1.0,
+        1.0
+      ]
+    },
+    "SM_Junction_Fwd": {
+      "location_cm": [
+        940.7999877929688,
+        92.0,
+        243.50491333007812
+      ],
+      "rotation_quat_xyzw": [
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ],
+      "scale": [
+        1.0,
+        1.0,
+        1.0
+      ]
+    },
+    "SM_Ladder_EngineUpper_ToHullFloor": {
+      "location_cm": [
+        3633.0,
+        -41.08000183105469,
+        -174.01515197753906
+      ],
+      "rotation_quat_xyzw": [
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ],
+      "scale": [
+        1.0,
+        1.0,
+        1.0
+      ]
+    },
+    "SM_Ladder_LowerToFondAccess": {
+      "location_cm": [
+        1785.0,
+        -41.08000183105469,
+        -320.9465026855469
+      ],
+      "rotation_quat_xyzw": [
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ],
+      "scale": [
+        1.0,
+        1.0,
+        1.0
+      ]
+    },
+    "SM_Ladder_LowerToMain_LowerAccess": {
+      "location_cm": [
+        1785.0,
+        -41.08000183105469,
+        -29.150001525878906
+      ],
+      "rotation_quat_xyzw": [
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ],
+      "scale": [
+        1.0,
+        1.0,
+        1.0
+      ]
+    },
+    "SM_MooringLug_Aft_Port_Base": {
+      "location_cm": [
+        3670.800048828125,
+        -284.9228820800781,
+        36.0
+      ],
+      "rotation_quat_xyzw": [
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ],
+      "scale": [
+        1.0,
+        1.0,
+        1.0
+      ]
+    },
+    "SM_MooringLug_Aft_Port_Top": {
+      "location_cm": [
+        3670.800048828125,
+        -284.9228820800781,
+        47.0
+      ],
+      "rotation_quat_xyzw": [
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ],
+      "scale": [
+        1.0,
+        1.0,
+        1.0
+      ]
+    },
+    "SM_MooringLug_Aft_Stbd_Base": {
+      "location_cm": [
+        3670.800048828125,
+        284.9228820800781,
+        36.0
+      ],
+      "rotation_quat_xyzw": [
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ],
+      "scale": [
+        1.0,
+        1.0,
+        1.0
+      ]
+    },
+    "SM_MooringLug_Aft_Stbd_Top": {
+      "location_cm": [
+        3670.800048828125,
+        284.9228820800781,
+        47.0
+      ],
+      "rotation_quat_xyzw": [
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ],
+      "scale": [
+        1.0,
+        1.0,
+        1.0
+      ]
+    },
+    "SM_MooringLug_Bow_Port_Base": {
+      "location_cm": [
+        302.3999938964844,
+        -370.9996337890625,
+        64.0
+      ],
+      "rotation_quat_xyzw": [
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ],
+      "scale": [
+        1.0,
+        1.0,
+        1.0
+      ]
+    },
+    "SM_MooringLug_Bow_Port_Top": {
+      "location_cm": [
+        302.3999938964844,
+        -370.9996337890625,
+        75.0
+      ],
+      "rotation_quat_xyzw": [
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ],
+      "scale": [
+        1.0,
+        1.0,
+        1.0
+      ]
+    },
+    "SM_MooringLug_Bow_Stbd_Base": {
+      "location_cm": [
+        302.3999938964844,
+        370.9996337890625,
+        64.0
+      ],
+      "rotation_quat_xyzw": [
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ],
+      "scale": [
+        1.0,
+        1.0,
+        1.0
+      ]
+    },
+    "SM_MooringLug_Bow_Stbd_Top": {
+      "location_cm": [
+        302.3999938964844,
+        370.9996337890625,
+        75.0
+      ],
+      "rotation_quat_xyzw": [
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ],
+      "scale": [
+        1.0,
+        1.0,
+        1.0
+      ]
+    },
+    "SM_Periscope_Eye": {
+      "location_cm": [
+        1588.0,
+        0.0,
+        818.0
+      ],
+      "rotation_quat_xyzw": [
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ],
+      "scale": [
+        1.0,
+        1.0,
+        1.0
+      ]
+    },
+    "SM_Periscope_Housing": {
+      "location_cm": [
+        1596.0,
+        0.0,
+        285.5049133300781
+      ],
+      "rotation_quat_xyzw": [
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ],
+      "scale": [
+        1.0,
+        1.0,
+        1.0
+      ]
+    },
+    "SM_Periscope_Mast": {
+      "location_cm": [
+        1596.0,
+        0.0,
+        279.5049133300781
+      ],
+      "rotation_quat_xyzw": [
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ],
+      "scale": [
+        1.0,
+        1.0,
+        1.0
+      ]
+    },
+    "SM_Pipe_CeilingMain": {
+      "location_cm": [
+        1898.4000244140625,
+        0.0,
+        135.00245666503906
+      ],
+      "rotation_quat_xyzw": [
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ],
+      "scale": [
+        1.0,
+        1.0,
+        1.0
+      ]
+    },
+    "SM_Pipe_Hyd_Drop": {
+      "location_cm": [
+        1992.8160400390625,
+        87.0,
+        115.75245666503906
+      ],
+      "rotation_quat_xyzw": [
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ],
+      "scale": [
+        1.0,
+        1.0,
+        1.0
+      ]
+    },
+    "SM_Pipe_Hyd_DropElbow": {
+      "location_cm": [
+        1992.81591796875,
+        87.0,
+        244.50491333007812
+      ],
+      "rotation_quat_xyzw": [
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ],
+      "scale": [
+        1.0,
+        1.0,
+        1.0
+      ]
+    },
+    "SM_Pipe_Hyd_Main": {
+      "location_cm": [
+        1789.2000732421875,
+        87.0,
+        244.50491333007812
+      ],
+      "rotation_quat_xyzw": [
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ],
+      "scale": [
+        1.0,
+        1.0,
+        1.0
+      ]
+    },
+    "SM_Pipe_Reactor_Drop": {
+      "location_cm": [
+        1823.135986328125,
+        97.0,
+        108.75245666503906
+      ],
+      "rotation_quat_xyzw": [
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ],
+      "scale": [
+        1.0,
+        1.0,
+        1.0
+      ]
+    },
+    "SM_Pipe_Reactor_DropElbow": {
+      "location_cm": [
+        1823.135986328125,
+        97.0,
+        230.50491333007812
+      ],
+      "rotation_quat_xyzw": [
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ],
+      "scale": [
+        1.0,
+        1.0,
+        1.0
+      ]
+    },
+    "SM_Pipe_Reactor_Main": {
+      "location_cm": [
+        1789.2000732421875,
+        97.0,
+        230.50491333007812
+      ],
+      "rotation_quat_xyzw": [
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ],
+      "scale": [
+        1.0,
+        1.0,
+        1.0
+      ]
+    },
+    "SM_Pipe_Water_Drop": {
+      "location_cm": [
+        1585.583984375,
+        92.0,
+        122.75245666503906
+      ],
+      "rotation_quat_xyzw": [
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ],
+      "scale": [
+        1.0,
+        1.0,
+        1.0
+      ]
+    },
+    "SM_Pipe_Water_DropElbow": {
+      "location_cm": [
+        1585.583984375,
+        92.0,
+        258.5049133300781
+      ],
+      "rotation_quat_xyzw": [
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ],
+      "scale": [
+        1.0,
+        1.0,
+        1.0
+      ]
+    },
+    "SM_Pipe_Water_Main": {
+      "location_cm": [
+        1789.2000732421875,
+        92.0,
+        258.5049133300781
+      ],
+      "rotation_quat_xyzw": [
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ],
+      "scale": [
+        1.0,
+        1.0,
+        1.0
+      ]
+    },
+    "SM_Propeller": {
+      "location_cm": [
+        4264.4501953125,
+        0.0,
+        0.0
+      ],
+      "rotation_quat_xyzw": [
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ],
+      "scale": [
+        1.0,
+        1.0,
+        1.0
+      ]
+    },
+    "SM_Propulsor_Duct": {
+      "location_cm": [
+        4261.0,
+        0.0,
+        0.0
+      ],
+      "rotation_quat_xyzw": [
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ],
+      "scale": [
+        1.0,
+        1.0,
+        1.0
+      ]
+    },
+    "SM_Reactor_Block": {
+      "location_cm": [
+        3108.0,
+        0.0,
+        -49.0
+      ],
+      "rotation_quat_xyzw": [
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ],
+      "scale": [
+        1.0,
+        1.0,
+        1.0
+      ]
+    },
+    "SM_ReactorLine_Port": {
+      "location_cm": [
+        3437.699951171875,
+        -38.0,
+        8.0
+      ],
+      "rotation_quat_xyzw": [
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ],
+      "scale": [
+        1.0,
+        1.0,
+        1.0
+      ]
+    },
+    "SM_ReactorLine_Stbd": {
+      "location_cm": [
+        3437.699951171875,
+        38.0,
+        8.0
+      ],
+      "rotation_quat_xyzw": [
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ],
+      "scale": [
+        1.0,
+        1.0,
+        1.0
+      ]
+    },
+    "SM_ReactorPassage_Port": {
+      "location_cm": [
+        3105.0,
+        -124.0,
+        -36.0
+      ],
+      "rotation_quat_xyzw": [
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ],
+      "scale": [
+        1.0,
+        1.0,
+        1.0
+      ]
+    },
+    "SM_ReactorPassage_Stbd": {
+      "location_cm": [
+        3105.0,
+        124.0,
+        -36.0
+      ],
+      "rotation_quat_xyzw": [
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ],
+      "scale": [
+        1.0,
+        1.0,
+        1.0
+      ]
+    },
+    "SM_RudderAssembly": {
+      "location_cm": [
+        3919.0,
+        0.0,
+        213.71131896972656
+      ],
+      "rotation_quat_xyzw": [
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ],
+      "scale": [
+        1.0,
+        1.0,
+        1.0
+      ]
+    },
+    "SM_Skeg": {
+      "location_cm": [
+        4026.0,
+        0.0,
+        -195.658935546875
+      ],
+      "rotation_quat_xyzw": [
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ],
+      "scale": [
+        1.0,
+        1.0,
+        1.0
+      ]
+    },
+    "SM_Stair_UpperToMain_UpperAccess": {
+      "location_cm": [
+        1258.0,
+        0.0,
+        180.75245666503906
+      ],
+      "rotation_quat_xyzw": [
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ],
+      "scale": [
+        1.0,
+        1.0,
+        1.0
+      ]
+    },
+    "SM_Turret_AftTop": {
+      "location_cm": [
+        3175.199951171875,
+        0.0,
+        383.364013671875
+      ],
+      "rotation_quat_xyzw": [
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ],
+      "scale": [
+        1.0,
+        1.0,
+        1.0
+      ]
+    },
+    "SM_Turret_FwdBottom": {
+      "location_cm": [
+        512.7999877929688,
+        0.0,
+        -471.08062744140625
+      ],
+      "rotation_quat_xyzw": [
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ],
+      "scale": [
+        1.0,
+        1.0,
+        1.0
+      ]
+    },
+    "SM_Turret_FwdTop": {
+      "location_cm": [
+        411.6000061035156,
+        0.0,
+        425.96649169921875
+      ],
+      "rotation_quat_xyzw": [
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ],
+      "scale": [
+        1.0,
+        1.0,
+        1.0
+      ]
+    },
+    "SM_TurretSocket_AftTop": {
+      "location_cm": [
+        3175.199951171875,
+        0.0,
+        373.9082336425781
+      ],
+      "rotation_quat_xyzw": [
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ],
+      "scale": [
+        1.0,
+        1.0,
+        1.0
+      ]
+    },
+    "SM_TurretSocket_FwdBottom": {
+      "location_cm": [
+        453.6000061035156,
+        0.0,
+        -420.08062744140625
+      ],
+      "rotation_quat_xyzw": [
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ],
+      "scale": [
+        1.0,
+        1.0,
+        1.0
+      ]
+    },
+    "SM_TurretSocket_FwdTop": {
+      "location_cm": [
+        411.6000061035156,
+        0.0,
+        414.96649169921875
+      ],
+      "rotation_quat_xyzw": [
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ],
+      "scale": [
+        1.0,
+        1.0,
+        1.0
+      ]
+    },
+    "SM_TurretStation_Aft_Rotator": {
+      "location_cm": [
+        2461.199951171875,
+        0.0,
+        151.0
+      ],
+      "rotation_quat_xyzw": [
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ],
+      "scale": [
+        1.0,
+        1.0,
+        1.0
+      ]
+    },
+    "SM_TurretStation_Aft_Static": {
+      "location_cm": [
+        2461.199951171875,
+        0.0,
+        226.50245666503906
+      ],
+      "rotation_quat_xyzw": [
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ],
+      "scale": [
+        1.0,
+        1.0,
+        1.0
+      ]
+    },
+    "SM_TurretStation_Fwd_Rotator": {
+      "location_cm": [
+        2125.199951171875,
+        0.0,
+        151.0
+      ],
+      "rotation_quat_xyzw": [
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ],
+      "scale": [
+        1.0,
+        1.0,
+        1.0
+      ]
+    },
+    "SM_TurretStation_Fwd_Static": {
+      "location_cm": [
+        2125.199951171875,
+        0.0,
+        226.50245666503906
+      ],
+      "rotation_quat_xyzw": [
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ],
+      "scale": [
+        1.0,
+        1.0,
+        1.0
+      ]
+    },
+    "SM_UpperAccess_Liner": {
+      "location_cm": [
+        1281.0,
+        0.0,
+        279.10491943359375
+      ],
+      "rotation_quat_xyzw": [
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ],
+      "scale": [
+        1.0,
+        1.0,
+        1.0
+      ]
+    },
+    "SM_UpperStorageCrate_Port_0": {
+      "location_cm": [
+        1047.199951171875,
+        -141.0,
+        315.5049133300781
+      ],
+      "rotation_quat_xyzw": [
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ],
+      "scale": [
+        1.0,
+        1.0,
+        1.0
+      ]
+    },
+    "SM_UpperStorageCrate_Port_1": {
+      "location_cm": [
+        1206.800048828125,
+        -141.0,
+        322.5049133300781
+      ],
+      "rotation_quat_xyzw": [
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ],
+      "scale": [
+        1.0,
+        1.0,
+        1.0
+      ]
+    },
+    "SM_UpperStorageCrate_Port_2": {
+      "location_cm": [
+        1400.0,
+        -141.0,
+        329.5049133300781
+      ],
+      "rotation_quat_xyzw": [
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ],
+      "scale": [
+        1.0,
+        1.0,
+        1.0
+      ]
+    },
+    "SM_UpperStorageCrate_Port_3": {
+      "location_cm": [
+        1593.199951171875,
+        -141.0,
+        336.5049133300781
+      ],
+      "rotation_quat_xyzw": [
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ],
+      "scale": [
+        1.0,
+        1.0,
+        1.0
+      ]
+    },
+    "SM_UpperStorageCrate_Stbd_0": {
+      "location_cm": [
+        1047.199951171875,
+        141.0,
+        315.5049133300781
+      ],
+      "rotation_quat_xyzw": [
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ],
+      "scale": [
+        1.0,
+        1.0,
+        1.0
+      ]
+    },
+    "SM_UpperStorageCrate_Stbd_1": {
+      "location_cm": [
+        1206.800048828125,
+        141.0,
+        322.5049133300781
+      ],
+      "rotation_quat_xyzw": [
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ],
+      "scale": [
+        1.0,
+        1.0,
+        1.0
+      ]
+    },
+    "SM_UpperStorageCrate_Stbd_2": {
+      "location_cm": [
+        1400.0,
+        141.0,
+        329.5049133300781
+      ],
+      "rotation_quat_xyzw": [
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ],
+      "scale": [
+        1.0,
+        1.0,
+        1.0
+      ]
+    },
+    "SM_UpperStorageCrate_Stbd_3": {
+      "location_cm": [
+        1593.199951171875,
+        141.0,
+        336.5049133300781
+      ],
+      "rotation_quat_xyzw": [
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ],
+      "scale": [
+        1.0,
+        1.0,
+        1.0
+      ]
+    },
+    "SM_UpperStorageLocker_Port": {
+      "location_cm": [
+        1873.199951171875,
+        -145.0,
+        358.5049133300781
+      ],
+      "rotation_quat_xyzw": [
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ],
+      "scale": [
+        1.0,
+        1.0,
+        1.0
+      ]
+    },
+    "SM_UpperStorageLocker_Stbd": {
+      "location_cm": [
+        1873.199951171875,
+        145.0,
+        358.5049133300781
+      ],
+      "rotation_quat_xyzw": [
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ],
+      "scale": [
+        1.0,
+        1.0,
+        1.0
+      ]
+    },
+    "SM_Valve_Hyd_0": {
+      "location_cm": [
+        1223.5999755859375,
+        87.0,
+        244.50491333007812
+      ],
+      "rotation_quat_xyzw": [
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ],
+      "scale": [
+        1.0,
+        1.0,
+        1.0
+      ]
+    },
+    "SM_Valve_Hyd_1": {
+      "location_cm": [
+        1506.4000244140625,
+        87.0,
+        244.50491333007812
+      ],
+      "rotation_quat_xyzw": [
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ],
+      "scale": [
+        1.0,
+        1.0,
+        1.0
+      ]
+    },
+    "SM_Valve_Hyd_2": {
+      "location_cm": [
+        1789.199951171875,
+        87.0,
+        244.50491333007812
+      ],
+      "rotation_quat_xyzw": [
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ],
+      "scale": [
+        1.0,
+        1.0,
+        1.0
+      ]
+    },
+    "SM_Valve_Hyd_4": {
+      "location_cm": [
+        2354.800048828125,
+        87.0,
+        244.50491333007812
+      ],
+      "rotation_quat_xyzw": [
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ],
+      "scale": [
+        1.0,
+        1.0,
+        1.0
+      ]
+    },
+    "SM_Valve_Reactor_0": {
+      "location_cm": [
+        1223.5999755859375,
+        97.0,
+        230.50491333007812
+      ],
+      "rotation_quat_xyzw": [
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ],
+      "scale": [
+        1.0,
+        1.0,
+        1.0
+      ]
+    },
+    "SM_Valve_Reactor_1": {
+      "location_cm": [
+        1506.4000244140625,
+        97.0,
+        230.50491333007812
+      ],
+      "rotation_quat_xyzw": [
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ],
+      "scale": [
+        1.0,
+        1.0,
+        1.0
+      ]
+    },
+    "SM_Valve_Reactor_3": {
+      "location_cm": [
+        2072.0,
+        97.0,
+        230.50491333007812
+      ],
+      "rotation_quat_xyzw": [
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ],
+      "scale": [
+        1.0,
+        1.0,
+        1.0
+      ]
+    },
+    "SM_Valve_Reactor_4": {
+      "location_cm": [
+        2354.800048828125,
+        97.0,
+        230.50491333007812
+      ],
+      "rotation_quat_xyzw": [
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ],
+      "scale": [
+        1.0,
+        1.0,
+        1.0
+      ]
+    },
+    "SM_Valve_Water_0": {
+      "location_cm": [
+        1223.5999755859375,
+        92.0,
+        258.5049133300781
+      ],
+      "rotation_quat_xyzw": [
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ],
+      "scale": [
+        1.0,
+        1.0,
+        1.0
+      ]
+    },
+    "SM_Valve_Water_2": {
+      "location_cm": [
+        1789.199951171875,
+        92.0,
+        258.5049133300781
+      ],
+      "rotation_quat_xyzw": [
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ],
+      "scale": [
+        1.0,
+        1.0,
+        1.0
+      ]
+    },
+    "SM_Valve_Water_3": {
+      "location_cm": [
+        2072.0,
+        92.0,
+        258.5049133300781
+      ],
+      "rotation_quat_xyzw": [
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ],
+      "scale": [
+        1.0,
+        1.0,
+        1.0
+      ]
+    },
+    "SM_Valve_Water_4": {
+      "location_cm": [
+        2354.800048828125,
+        92.0,
+        258.5049133300781
+      ],
+      "rotation_quat_xyzw": [
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ],
+      "scale": [
+        1.0,
+        1.0,
+        1.0
+      ]
+    }
+  }
+}

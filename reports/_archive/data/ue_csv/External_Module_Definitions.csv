@@ -1,0 +1,3 @@
+Name,display_name,kind,mass_kg,drag_modifier,destructible
+---,string,string (enum),float,float,bool
+ROW_EXAMPLE,,,,,true

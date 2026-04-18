@@ -1,0 +1,3 @@
+Name,display_name,kind,has_trunk,modifies_silhouette
+---,string,string (enum),bool,bool
+ROW_EXAMPLE,,,false,true

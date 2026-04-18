@@ -1,0 +1,3 @@
+Name,display_name,section_family_id,diameter_m,width_height_ratio,roundness,thickness_m,locked
+---,string,string,float,float,float,float,bool
+ROW_EXAMPLE,,,,,,,false

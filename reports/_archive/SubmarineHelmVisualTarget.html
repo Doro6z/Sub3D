@@ -1,0 +1,401 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Sub3D Helm - Final Visual Target</title>
+    <style>
+        :root {
+            /* Palette derived from the concept image */
+            --bg-base: #010409;
+            --panel-bg: rgba(6, 15, 25, 0.4);
+            --border-color: #1a3b4c;
+            
+            --text-cyan: #66d9ef;
+            --text-cyan-dim: #3a7a87;
+            --text-white: #e0f4f7;
+            
+            --neon-cyan: #22d3ee;
+            --neon-amber: #f59e0b;
+            --neon-red: #ef4444;
+            --bg-red: rgba(239, 68, 68, 0.2);
+            
+            --grid-line: rgba(34, 211, 238, 0.05);
+
+            --font-main: 'Courier New', Courier, monospace;
+        }
+
+        * { box-sizing: border-box; }
+
+        body {
+            margin: 0; padding: 20px;
+            background-color: var(--bg-base);
+            color: var(--text-cyan);
+            font-family: var(--font-main);
+            height: 100vh;
+            display: flex; flex-direction: column; gap: 15px;
+            overflow: hidden;
+            
+            /* Background Grid */
+            background-image: 
+                linear-gradient(var(--grid-line) 1px, transparent 1px),
+                linear-gradient(90deg, var(--grid-line) 1px, transparent 1px);
+            background-size: 30px 30px;
+        }
+
+        /* --- LAYOUT --- */
+        .app-grid {
+            flex: 1;
+            display: grid;
+            grid-template-columns: 350px 1fr 380px;
+            grid-template-rows: 60px 1fr;
+            gap: 15px;
+        }
+
+        /* Top Banner spanning full width */
+        .top-banner {
+            grid-column: 1 / -1;
+            border: 1px solid var(--border-color);
+            background: var(--panel-bg);
+            display: flex; justify-content: space-between; align-items: center;
+            padding: 0 30px;
+            position: relative;
+        }
+
+        .top-banner::after {
+            content: ''; position: absolute; top:0; left:0; right:0; bottom:0;
+            pointer-events: none;
+            background-image: linear-gradient(var(--grid-line) 1px, transparent 1px), linear-gradient(90deg, var(--grid-line) 1px, transparent 1px);
+            background-size: 15px 15px; opacity:0.5;
+        }
+
+        .banner-text {
+            font-size: 1.8rem;
+            letter-spacing: 2px;
+            text-transform: uppercase;
+            z-index: 1;
+        }
+
+        /* Panels */
+        .panel {
+            border: 1px solid var(--border-color);
+            background: var(--panel-bg);
+            position: relative;
+            display: flex; flex-direction: column;
+            overflow: hidden;
+        }
+        
+        .panel-bg-grid {
+            position: absolute; inset:0; pointer-events:none;
+            background-image: linear-gradient(var(--grid-line) 1px, transparent 1px), linear-gradient(90deg, var(--grid-line) 1px, transparent 1px);
+            background-size: 20px 20px;
+        }
+
+        .left-col { display: grid; grid-template-rows: 1fr 1fr 1.5fr; gap: 15px; }
+
+        /* --- SPECIFIC PANELS --- */
+
+        /* Clearance Panel */
+        .clearance-svg { width: 100%; height: 100%; }
+        .panel-lbl-bottom {
+            position: absolute; bottom: 15px; left: 0; width: 100%;
+            text-align: center; font-size: 1.2rem; z-index: 2;
+        }
+
+        /* Sub Status Panel */
+        .sub-status { padding: 20px; display:flex; flex-direction:column; justify-content:flex-end; z-index:1; }
+        .danger-box {
+            background: var(--bg-red); border: 1px solid var(--neon-red); color: var(--neon-red);
+            padding: 10px; text-align: center; margin-top: 10px; font-size: 1.1rem; text-transform:uppercase;
+        }
+        .dim-text { color: var(--text-cyan-dim); margin-bottom: 5px; font-size:0.9rem;}
+
+        /* Topo Panel */
+        .topo-lbl { position:absolute; bottom:10px; left:15px; font-size:1rem; z-index:2; }
+        
+        /* Sonar Center */
+        .sonar-header { display:flex; justify-content:space-between; padding:15px 20px; font-size:1.1rem; z-index:2; position:absolute; width:100%; top:0; }
+        .sonar-footer { text-align:center; padding:15px; font-size:1.1rem; z-index:2; position:absolute; width:100%; bottom:0; }
+        .sonar-stage { flex:1; display:flex; align-items:center; justify-content:center; position:relative; z-index:1; }
+
+        /* Controls Right */
+        .ctrl-panel { padding: 20px 25px; z-index:2; display:flex; flex-direction:column; gap:25px; }
+        .ctrl-block { display:flex; flex-direction:column; gap:10px; }
+        .ctrl-header { display:flex; justify-content:space-between; align-items:flex-end; font-size: 1.2rem; }
+        
+        .slider-track {
+            height: 6px; background: #0c1e2e; border: 1px solid var(--border-color); border-radius:3px; position:relative;
+        }
+        .slider-fill { position:absolute; top:0; left:0; height:100%; background: var(--text-cyan); }
+        .slider-fill.danger { background: var(--border-color); } /* Used for dimming when danger */
+        .slider-handle {
+            position:absolute; top:50%; transform:translate(-50%, -50%);
+            width: 16px; height: 16px; border-radius:50%; background: var(--neon-cyan);
+            box-shadow: 0 0 10px var(--neon-cyan);
+        }
+        .slider-handle.center { left: 50%; }
+
+        .ctrl-labels { display:flex; justify-content:space-between; font-size:0.9rem; }
+        .ctrl-labels .dim { color: var(--text-cyan-dim); }
+
+        .stability-strip {
+            position:absolute; bottom:0; left:0; width:100%;
+            border-top: 1px solid var(--border-color); padding: 10px 20px;
+            font-size: 1rem;
+        }
+
+        .text-red { color: var(--neon-red); }
+        
+        /* Controls Toolbar (From Refit Prototype logic) */
+        .toolbar { position:absolute; top:-40px; right:0; display:flex; gap:10px; }
+        .state-btn {
+            background:#010409; border:1px solid #1a3b4c; color:#3a7a87; padding:4px 10px; font-family:monospace; cursor:pointer;
+        }
+        .state-btn.active { color:#22d3ee; border-color:#22d3ee; }
+
+    </style>
+</head>
+<body>
+
+    <div class="toolbar">
+        <button class="state-btn active" data-state="nominal">MODE: NOMINAL</button>
+        <button class="state-btn" data-state="danger">MODE: DANGER / TIGHT</button>
+    </div>
+
+    <div class="app-grid">
+        <!-- TOP BANNER -->
+        <div class="top-banner">
+            <div class="banner-text" id="ui-speed">SPEED: 18.5 KN</div>
+            <div class="banner-text" id="ui-depth">DEPTH: 320 M / MAX 600 M</div>
+        </div>
+
+        <!-- LEFT COLUMN -->
+        <div class="left-col">
+            <!-- Clearance -->
+            <div class="panel">
+                <div class="panel-bg-grid"></div>
+                <svg viewBox="0 0 200 200" class="clearance-svg" style="z-index: 1;">
+                    <!-- Crosshair -->
+                    <line x1="100" y1="20" x2="100" y2="150" stroke="var(--border-color)" stroke-width="2"/>
+                    <line x1="20" y1="100" x2="180" y2="100" stroke="var(--border-color)" stroke-width="2"/>
+                    <!-- Circles -->
+                    <circle cx="100" cy="100" r="70" fill="none" stroke="var(--text-cyan)" stroke-width="2"/>
+                    <!-- Submarine Simple Silhouette -->
+                    <rect x="70" y="80" width="60" height="40" rx="20" fill="var(--border-color)" opacity="0.8" />
+                    <rect x="90" y="65" width="15" height="15" fill="var(--border-color)" opacity="0.8" />
+                    <!-- Floor -->
+                    <line x1="50" y1="145" x2="150" y2="145" stroke="var(--text-cyan)" stroke-width="3"/>
+                </svg>
+                <div class="panel-lbl-bottom" id="ui-clearance">CLEARANCE: 45M</div>
+            </div>
+
+            <!-- Hull Status -->
+            <div class="panel">
+                <div class="panel-bg-grid"></div>
+                <div style="flex:1; padding: 20px; position:relative; z-index:1;">
+                    <svg viewBox="0 0 200 60" style="width:100%;">
+                        <path d="M 20,40 Q 20,20 40,20 L 140,20 Q 180,20 180,40 Z" fill="var(--border-color)" opacity="0.6"/>
+                        <rect x="70" y="5" width="30" height="15" fill="var(--border-color)" opacity="0.6"/>
+                        <line x1="10" y1="30" x2="20" y2="30" stroke="var(--text-cyan-dim)" stroke-width="2"/>
+                        <!-- Propeller -->
+                        <line x1="10" y1="20" x2="10" y2="40" stroke="var(--border-color)" stroke-width="3"/>
+                    </svg>
+                </div>
+                <div class="sub-status">
+                    <div class="banner-text" style="font-size:1.2rem;">SECTOR 7-B</div>
+                    <div class="dim-text">N 45° 32' / W 12° 15'</div>
+                    <div class="danger-box" id="ui-hull-warn" style="display:none;">DANGER: HIGH PRESSURE</div>
+                </div>
+            </div>
+
+            <!-- Topo Map -->
+            <div class="panel">
+                <div class="panel-bg-grid"></div>
+                <svg viewBox="0 0 200 200" style="width:100%; height:100%; position:absolute; inset:0; z-index:1;">
+                    <!-- Fake Topo lines -->
+                    <path d="M -20,50 Q 50,80 80,-20 M 0,80 Q 70,110 120,0 M -20,130 Q 80,150 160,-20 M 30,220 Q 120,180 220,50 M 80,220 Q 160,200 220,100" fill="none" stroke="var(--text-cyan-dim)" stroke-width="1" opacity="0.5"/>
+                    <path d="M 120,220 Q 190,210 220,140" fill="none" stroke="var(--text-cyan-dim)" stroke-width="1" opacity="0.5"/>
+                    
+                    <!-- Player Arrow -->
+                    <polygon points="100,80 90,110 100,100 110,110" fill="var(--neon-cyan)" />
+                    <circle cx="100" cy="100" r="30" fill="none" stroke="var(--text-cyan)" stroke-dasharray="2,4" opacity="0.3"/>
+                </svg>
+                <div class="topo-lbl dim-text">SECTOR 7-B - N 45° 32' / W 12° 15'</div>
+            </div>
+        </div>
+
+        <!-- CENTER COLUMN (SONAR) -->
+        <div class="panel" style="grid-column: 2;">
+            <div class="panel-bg-grid" style="background-size:40px 40px; opacity:0.3;"></div>
+            
+            <div class="sonar-header">
+                <span class="text-red" id="ui-integrity">HULL INTEGRITY 92%</span>
+                <span class="dim-text" id="ui-threat-log">THREAT THREAT BLI</span>
+            </div>
+
+            <div class="sonar-stage">
+                <svg viewBox="-500 -500 1000 1000" style="width:90%; max-width: 800px; height:90%;">
+                    
+                    <!-- Tick marks outer ring -->
+                    <circle cx="0" cy="0" r="460" fill="none" stroke="var(--text-cyan-dim)" stroke-width="8" stroke-dasharray="2, 10" opacity="0.6"/>
+                    
+                    <!-- Deep Sonar Rings -->
+                    <circle cx="0" cy="0" r="440" fill="none" stroke="var(--neon-cyan)" stroke-width="4" opacity="0.5"/>
+                    <circle cx="0" cy="0" r="330" fill="none" stroke="var(--neon-cyan)" stroke-width="2" opacity="0.3"/>
+                    <circle cx="0" cy="0" r="220" fill="none" stroke="var(--neon-cyan)" stroke-width="1" opacity="0.5"/>
+                    <circle cx="0" cy="0" r="110" fill="none" stroke="var(--neon-cyan)" stroke-width="1" opacity="0.2"/>
+
+                    <!-- Crosshairs -->
+                    <line x1="-480" y1="0" x2="480" y2="0" stroke="var(--border-color)" stroke-width="2"/>
+                    <line x1="0" y1="-480" x2="0" y2="480" stroke="var(--border-color)" stroke-width="2"/>
+
+                    <!-- Distance Labels -->
+                    <text x="-25" y="-120" fill="var(--text-cyan-dim)" font-size="20">500M</text>
+                    <text x="-28" y="-230" fill="var(--text-cyan-dim)" font-size="20">1000M</text>
+                    <text x="-28" y="-340" fill="var(--text-cyan-dim)" font-size="20">2000M</text>
+                    <text x="-28" y="-400" fill="var(--text-cyan-dim)" font-size="20">4000M</text>
+
+                    <!-- Radar Sweep -->
+                    <defs>
+                        <linearGradient id="sweepGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+                            <stop offset="0%" stop-color="var(--neon-cyan)" stop-opacity="0.3"/>
+                            <stop offset="100%" stop-color="var(--neon-cyan)" stop-opacity="0"/>
+                        </linearGradient>
+                    </defs>
+                    <path d="M0,0 L 310,-310 A 440 440 0 0 1 430,-100 Z" fill="url(#sweepGrad)" />
+                    <line x1="0" y1="0" x2="310" y2="-310" stroke="var(--neon-cyan)" stroke-width="3" opacity="0.8"/>
+
+                    <!-- Blips (Threats) -->
+                    <circle cx="280" cy="-220" r="15" fill="var(--neon-amber)" filter="drop-shadow(0 0 20px #f59e0b)"/>
+                    <!-- Trail -->
+                    <path d="M 280,-220 Q 300,-150 280,-80" fill="none" stroke="var(--neon-amber)" stroke-width="4" stroke-dasharray="2,6" opacity="0.5"/>
+                    
+                    <circle cx="120" cy="-90" r="10" fill="var(--neon-amber)" filter="drop-shadow(0 0 15px #f59e0b)"/>
+                </svg>
+            </div>
+
+            <div class="sonar-footer dim-text">
+                SONAR ACTIVE - RANGE 4000M - CONTACT BEARING 045°
+            </div>
+        </div>
+
+        <!-- RIGHT COLUMN (CONTROLS) -->
+        <div class="panel" style="grid-column: 3;">
+            <div class="panel-bg-grid"></div>
+            
+            <div class="ctrl-panel">
+                <!-- Propulsion -->
+                <div class="ctrl-block">
+                    <div class="ctrl-header"><span>PROPULSION</span></div>
+                    <div class="slider-track" style="margin: 10px 0;">
+                        <div class="slider-fill" style="width: 65%;"></div>
+                        <div class="slider-handle" style="left: 65%;"></div>
+                    </div>
+                    <div class="ctrl-labels">
+                        <span>0</span><span>65%</span><span>100%</span>
+                    </div>
+                </div>
+
+                <!-- Rudder -->
+                <div class="ctrl-block">
+                    <div class="ctrl-header"><span>RUDDER</span></div>
+                    <div class="slider-track" style="margin: 10px 0;">
+                        <div class="slider-fill danger" style="width: 50%;"></div>
+                        <div class="slider-handle center"></div>
+                    </div>
+                    <div class="ctrl-labels dim">
+                        <span>-35°<br>PORT</span><span style="color:var(--text-cyan);">0°</span><span style="text-align:right;">+35°<br>STBD</span>
+                    </div>
+                </div>
+
+                <!-- Ballast -->
+                <div class="ctrl-block" style="margin-top:10px;">
+                    <div class="ctrl-header">
+                        <span>BALLAST</span>
+                        <span class="text-red" id="ui-ballast-warn" style="display:none;font-size:0.9rem;">DANGER: HIGH PRESSURE</span>
+                    </div>
+                    <div class="slider-track" style="margin: 10px 0;">
+                        <div class="slider-fill" style="width: 40%;"></div>
+                        <div class="slider-handle" style="left: 40%;"></div>
+                    </div>
+                    <div class="ctrl-labels dim">
+                        <span>0%<br>FULL BLOW</span><span style="color:var(--text-cyan);">40%</span><span style="text-align:right;">100%<br>FULL FLOOD</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Stability Strip -->
+            <div class="stability-strip dim-text" id="ui-stability">
+                STABILITY DATA: TRIM +2°, PITCH -1°, ROLL 0°
+            </div>
+        </div>
+    </div>
+
+    <!-- SIMPLE LOGIC LINKING (Inspired by UXRefitPrototype) -->
+    <script>
+        const DOM = {
+            speed: document.getElementById('ui-speed'),
+            depth: document.getElementById('ui-depth'),
+            clearance: document.getElementById('ui-clearance'),
+            hullWarn: document.getElementById('ui-hull-warn'),
+            integrity: document.getElementById('ui-integrity'),
+            ballastWarn: document.getElementById('ui-ballast-warn'),
+            stability: document.getElementById('ui-stability'),
+            threatLog: document.getElementById('ui-threat-log')
+        };
+
+        const states = {
+            nominal: {
+                speed: "SPEED: 12.4 KN",
+                depth: "DEPTH: 168 M / MAX 600 M",
+                clearance: "CLEARANCE: 120M",
+                hullWarn: "none",
+                integrity: "HULL INTEGRITY 100%",
+                integrityColor: "var(--text-cyan-dim)",
+                ballastWarn: "none",
+                stability: "STABILITY DATA: TRIM 0°, PITCH -4.5°, ROLL 0°",
+                threatLog: "SONAR: NO CONTACTS"
+            },
+            danger: {
+                speed: "SPEED: 18.5 KN",
+                depth: "DEPTH: 320 M / MAX 600 M",
+                clearance: "CLEARANCE: 45M",
+                hullWarn: "block",
+                integrity: "HULL INTEGRITY 92%",
+                integrityColor: "var(--neon-red)",
+                ballastWarn: "inline",
+                stability: "STABILITY DATA: TRIM +2°, PITCH -1°, ROLL 0°",
+                threatLog: "THREAT THREAT BLI..."
+            }
+        };
+
+        function setState(name) {
+            const s = states[name];
+            DOM.speed.innerText = s.speed;
+            DOM.depth.innerText = s.depth;
+            DOM.clearance.innerText = s.clearance;
+            
+            DOM.hullWarn.style.display = s.hullWarn;
+            DOM.ballastWarn.style.display = s.ballastWarn;
+            
+            DOM.integrity.innerText = s.integrity;
+            DOM.integrity.style.color = s.integrityColor;
+            
+            DOM.stability.innerText = s.stability;
+            DOM.threatLog.innerText = s.threatLog;
+            
+            // Buttons
+            document.querySelectorAll('.state-btn').forEach(b => {
+                b.classList.toggle('active', b.dataset.state === name);
+            });
+        }
+
+        document.querySelectorAll('.state-btn').forEach(btn => {
+            btn.addEventListener('click', () => setState(btn.dataset.state));
+        });
+
+        // Initialize state to match the concept image precisely
+        setState('danger');
+
+    </script>
+</body>
+</html>

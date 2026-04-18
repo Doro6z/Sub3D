@@ -14,3 +14,5 @@ from .bulkheads_doors import (
     compute_bulkhead_top_z,
     place_bulkhead_with_clearance,
 )
+from .pivots import fix_all_pivots, fix_turret_pivots
+from .materials import assign_materials

@@ -4,7 +4,12 @@
 #include "Engine/StaticMesh.h"
 #include "GameFramework/Actor.h"
 #include "Materials/MaterialInterface.h"
+#include "SubFloodComponent.h"
 #include "SubHullComponent.h"
+#include "SubLegacyLog.h"
+#include "SubmarineBase.h"
+#include "SubmarineDefinition.h"
+#include "SubmarineLayoutAsset.h"
 
 UFloodWaterVisualsComponent::UFloodWaterVisualsComponent()
 {
@@ -17,25 +22,67 @@ void UFloodWaterVisualsComponent::BeginPlay()
 	Super::BeginPlay();
 
 	SubHull = GetOwner() ? GetOwner()->FindComponentByClass<USubHullComponent>() : nullptr;
-	if (!SubHull)
+	SubFlood = GetOwner() ? GetOwner()->FindComponentByClass<USubFloodComponent>() : nullptr;
+
+	if (!SubFlood)
 	{
 		return;
 	}
 
-	InitializeWaterPlanesFromHull();
-	SubHull->OnCompartmentFloodUpdated.AddDynamic(this, &UFloodWaterVisualsComponent::HandleCompartmentFloodUpdated);
-	RefreshFromCurrentFloodState();
+	if (SubFlood->IsInitialized())
+	{
+		ActivateSubFloodPath();
+		return;
+	}
+
+	// SubFlood not yet initialized — wait for SubmarineBase to init it.
+	SubFlood->OnFloodInitialized.AddDynamic(this, &UFloodWaterVisualsComponent::HandleFloodInitialized);
 }
 
 void UFloodWaterVisualsComponent::EndPlay(const EEndPlayReason::Type EndPlayReason)
 {
-	if (SubHull)
+	if (SubFlood)
 	{
-		SubHull->OnCompartmentFloodUpdated.RemoveDynamic(this, &UFloodWaterVisualsComponent::HandleCompartmentFloodUpdated);
+		SubFlood->OnFloodInitialized.RemoveDynamic(this, &UFloodWaterVisualsComponent::HandleFloodInitialized);
+		SubFlood->OnFloodStateUpdated.RemoveDynamic(this, &UFloodWaterVisualsComponent::HandleSubFloodUpdated);
 	}
 
 	DestroyWaterPlanes();
 	Super::EndPlay(EndPlayReason);
+}
+
+void UFloodWaterVisualsComponent::HandleFloodInitialized()
+{
+	if (!SubFlood || !SubFlood->IsInitialized())
+	{
+		return;
+	}
+
+	SubFlood->OnFloodInitialized.RemoveDynamic(this, &UFloodWaterVisualsComponent::HandleFloodInitialized);
+	ActivateSubFloodPath();
+}
+
+void UFloodWaterVisualsComponent::ActivateSubFloodPath()
+{
+	const ASubmarineBase* Sub = Cast<ASubmarineBase>(GetOwner());
+	if (Sub && Sub->GeneratedDefinition)
+	{
+		Definition = Sub->GeneratedDefinition;
+	}
+
+	DestroyWaterPlanes();
+
+	if (Definition)
+	{
+		InitializeWaterPlanesFromDefinition();
+	}
+	else
+	{
+		InitializeWaterPlanesFromLayout();
+	}
+
+	SubFlood->OnFloodStateUpdated.AddDynamic(this, &UFloodWaterVisualsComponent::HandleSubFloodUpdated);
+	RefreshFromCurrentFloodState();
 }
 
 void UFloodWaterVisualsComponent::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
@@ -103,86 +150,130 @@ float UFloodWaterVisualsComponent::ComputeSurfaceLocalZ(const FBox& LocalBounds,
 
 void UFloodWaterVisualsComponent::RefreshFromCurrentFloodState()
 {
-	if (!SubHull)
+	if (!SubFlood || !SubFlood->IsInitialized())
 	{
 		return;
 	}
 
 	if (WaterPlanes.Num() == 0)
 	{
-		InitializeWaterPlanesFromHull();
+		if (Definition)
+		{
+			InitializeWaterPlanesFromDefinition();
+		}
+		else
+		{
+			InitializeWaterPlanesFromLayout();
+		}
 	}
 
-	HandleCompartmentFloodUpdated(SubHull->GetCompartmentStates());
+	TArray<FCompartmentState> States;
+	SubFlood->ExportCompartmentStates(States);
+	HandleSubFloodUpdated(States);
 }
 
-void UFloodWaterVisualsComponent::HandleCompartmentFloodUpdated(const TArray<FCompartmentRuntimeState>& InCompartmentStates)
+void UFloodWaterVisualsComponent::HandleSubFloodUpdated(const TArray<FCompartmentState>& InStates)
 {
 	if (WaterPlanes.Num() == 0)
 	{
-		InitializeWaterPlanesFromHull();
+		if (Definition)
+		{
+			InitializeWaterPlanesFromDefinition();
+		}
+		else
+		{
+			InitializeWaterPlanesFromLayout();
+		}
 	}
 
+	ApplyFloodLevels([&](FName Id, float& OutLevel, float& OutHeight) -> bool
+	{
+		const FCompartmentState* S = InStates.FindByPredicate([Id](const FCompartmentState& C)
+		{
+			return C.CompartmentId == Id;
+		});
+		if (!S) return false;
+		OutLevel = S->FloodLevel01;
+		OutHeight = S->WaterHeightCm;
+		return true;
+	});
+}
+
+void UFloodWaterVisualsComponent::ApplyFloodLevels(const TFunction<bool(FName, float&, float&)>& GetLevelAndHeight)
+{
 	bool bAnyPlaneNeedsTick = false;
 
-	for (const FCompartmentRuntimeState& CompartmentState : InCompartmentStates)
+	for (FFloodWaterPlaneState& PlaneState : WaterPlanes)
 	{
-		FFloodWaterPlaneState* PlaneState = WaterPlanes.FindByPredicate([&](const FFloodWaterPlaneState& Candidate)
-		{
-			return Candidate.CompartmentId == CompartmentState.CompartmentId;
-		});
-
-		if (!PlaneState)
+		float Level = 0.f;
+		float Height = 0.f;
+		if (!GetLevelAndHeight(PlaneState.CompartmentId, Level, Height))
 		{
 			continue;
 		}
 
 		const FBox LocalBounds(
-			FVector(PlaneState->LocalCenter.X - PlaneState->LocalSizeCm.X * 0.5f, PlaneState->LocalCenter.Y - PlaneState->LocalSizeCm.Y * 0.5f, PlaneState->LocalMinZ),
-			FVector(PlaneState->LocalCenter.X + PlaneState->LocalSizeCm.X * 0.5f, PlaneState->LocalCenter.Y + PlaneState->LocalSizeCm.Y * 0.5f, PlaneState->LocalMaxZ));
+			FVector(PlaneState.LocalCenter.X - PlaneState.LocalSizeCm.X * 0.5f, PlaneState.LocalCenter.Y - PlaneState.LocalSizeCm.Y * 0.5f, PlaneState.LocalMinZ),
+			FVector(PlaneState.LocalCenter.X + PlaneState.LocalSizeCm.X * 0.5f, PlaneState.LocalCenter.Y + PlaneState.LocalSizeCm.Y * 0.5f, PlaneState.LocalMaxZ));
 
-		PlaneState->TargetLocalZ = ComputeSurfaceLocalZ(LocalBounds, CompartmentState.WaterLevelNormalized);
-		PlaneState->bTargetVisible = CompartmentState.WaterLevelNormalized >= WaterVisibleThreshold;
+		PlaneState.TargetLocalZ = ComputeSurfaceLocalZ(LocalBounds, Level);
+		PlaneState.bTargetVisible = Level >= WaterVisibleThreshold;
 
-		if (PlaneState->PlaneComponent && PlaneState->bTargetVisible)
+		if (PlaneState.PlaneComponent && PlaneState.bTargetVisible)
 		{
-			PlaneState->PlaneComponent->SetVisibility(true, true);
+			PlaneState.PlaneComponent->SetVisibility(true, true);
 		}
 
-		bAnyPlaneNeedsTick |= PlaneState->bTargetVisible
-			|| !FMath::IsNearlyEqual(PlaneState->CurrentLocalZ, PlaneState->TargetLocalZ, 0.5f);
+		bAnyPlaneNeedsTick |= PlaneState.bTargetVisible
+			|| !FMath::IsNearlyEqual(PlaneState.CurrentLocalZ, PlaneState.TargetLocalZ, 0.5f);
 	}
 
 	SetComponentTickEnabled(bAnyPlaneNeedsTick);
 }
 
-void UFloodWaterVisualsComponent::InitializeWaterPlanesFromHull()
+void UFloodWaterVisualsComponent::InitializeWaterPlanesFromLayout()
 {
 	DestroyWaterPlanes();
 
-	if (!SubHull || !GetOwner() || !GetOwner()->GetRootComponent())
+	if (!SubHull || !SubHull->LayoutAsset || !GetOwner() || !GetOwner()->GetRootComponent())
 	{
 		return;
 	}
 
-	const TArray<FCompartmentRuntimeState>& CompartmentStates = SubHull->GetCompartmentStates();
-	WaterPlanes.Reserve(CompartmentStates.Num());
+	// LEGACY (Phase 7A, 2026-04-10) — Proto fallback. We reach this path only
+	// when SubmarineBase has no GeneratedDefinition. Water plane geometry is
+	// read from LayoutAsset. Will be removed in Phase 7B.
+	UE_LOG(LogSubLegacy, Warning,
+		TEXT("[LEGACY] UFloodWaterVisualsComponent: building water planes from LayoutAsset '%s' on %s. ")
+		TEXT("This is a Proto03/04 fallback. Assign a GeneratedDefinition to use the generator path."),
+		*SubHull->LayoutAsset->GetName(),
+		*GetNameSafe(GetOwner()));
 
-	for (int32 PlaneIndex = 0; PlaneIndex < CompartmentStates.Num(); ++PlaneIndex)
+	const TArray<FSubCompartmentDef>& Compartments = SubHull->LayoutAsset->Compartments;
+	WaterPlanes.Reserve(Compartments.Num());
+
+	for (int32 PlaneIndex = 0; PlaneIndex < Compartments.Num(); ++PlaneIndex)
 	{
-		const FCompartmentRuntimeState& CompartmentState = CompartmentStates[PlaneIndex];
+		const FSubCompartmentDef& Comp = Compartments[PlaneIndex];
 		FBox LocalBounds(ForceInitToZero);
-		if (!BuildCompartmentBounds(CompartmentState.CompartmentId, LocalBounds))
+
+		// Try hydro bounds from layout first.
+		const FBox HydroBounds(Comp.HydroBoundsMin, Comp.HydroBoundsMax);
+		if (HydroBounds.IsValid && HydroBounds.GetExtent().GetMin() > KINDA_SMALL_NUMBER)
+		{
+			LocalBounds = HydroBounds;
+		}
+		else if (!BuildCompartmentBoundsFromSheets(Comp.CompartmentId, LocalBounds))
 		{
 			continue;
 		}
 
 		FFloodWaterPlaneState PlaneState;
-		PlaneState.CompartmentId = CompartmentState.CompartmentId;
+		PlaneState.CompartmentId = Comp.CompartmentId;
 		PlaneState.LocalCenter = FVector(LocalBounds.GetCenter().X, LocalBounds.GetCenter().Y, 0.f);
 		PlaneState.LocalSizeCm = FVector2D(
-			FMath::Max(10.f, LocalBounds.GetSize().X),
-			FMath::Max(10.f, LocalBounds.GetSize().Y));
+			FMath::Max(10.f, LocalBounds.GetSize().X + CompartmentBoundsPaddingCm * 2.f),
+			FMath::Max(10.f, LocalBounds.GetSize().Y + CompartmentBoundsPaddingCm * 2.f));
 		PlaneState.LocalMinZ = LocalBounds.Min.Z;
 		PlaneState.LocalMaxZ = FMath::Max(LocalBounds.Min.Z + 1.f, LocalBounds.Max.Z);
 		PlaneState.CurrentLocalZ = PlaneState.LocalMinZ;
@@ -198,7 +289,50 @@ void UFloodWaterVisualsComponent::InitializeWaterPlanesFromHull()
 	}
 }
 
-bool UFloodWaterVisualsComponent::BuildCompartmentBounds(FName CompartmentId, FBox& OutLocalBounds) const
+void UFloodWaterVisualsComponent::InitializeWaterPlanesFromDefinition()
+{
+	DestroyWaterPlanes();
+
+	if (!Definition || !GetOwner() || !GetOwner()->GetRootComponent())
+	{
+		return;
+	}
+
+	const TArray<FGeneratedCompartmentDef>& Compartments = Definition->Compartments;
+	WaterPlanes.Reserve(Compartments.Num());
+
+	for (int32 PlaneIndex = 0; PlaneIndex < Compartments.Num(); ++PlaneIndex)
+	{
+		const FGeneratedCompartmentDef& Comp = Compartments[PlaneIndex];
+
+		const FBox LocalBounds(Comp.HydroBoundsMin, Comp.HydroBoundsMax);
+		if (!LocalBounds.IsValid)
+		{
+			continue;
+		}
+
+		FFloodWaterPlaneState PlaneState;
+		PlaneState.CompartmentId = Comp.CompartmentId;
+		PlaneState.LocalCenter = FVector(LocalBounds.GetCenter().X, LocalBounds.GetCenter().Y, 0.f);
+		PlaneState.LocalSizeCm = FVector2D(
+			FMath::Max(10.f, LocalBounds.GetSize().X + CompartmentBoundsPaddingCm * 2.f),
+			FMath::Max(10.f, LocalBounds.GetSize().Y + CompartmentBoundsPaddingCm * 2.f));
+		PlaneState.LocalMinZ = LocalBounds.Min.Z;
+		PlaneState.LocalMaxZ = FMath::Max(LocalBounds.Min.Z + 1.f, LocalBounds.Max.Z);
+		PlaneState.CurrentLocalZ = PlaneState.LocalMinZ;
+		PlaneState.TargetLocalZ = PlaneState.LocalMinZ;
+		PlaneState.bTargetVisible = false;
+		PlaneState.PlaneComponent = CreatePlaneComponent(PlaneIndex, PlaneState);
+		if (PlaneState.PlaneComponent)
+		{
+			UpdatePlaneVisual(PlaneState);
+		}
+
+		WaterPlanes.Add(PlaneState);
+	}
+}
+
+bool UFloodWaterVisualsComponent::BuildCompartmentBoundsFromSheets(FName CompartmentId, FBox& OutLocalBounds) const
 {
 	OutLocalBounds = FBox(EForceInit::ForceInit);
 	if (!SubHull)
@@ -206,14 +340,9 @@ bool UFloodWaterVisualsComponent::BuildCompartmentBounds(FName CompartmentId, FB
 		return false;
 	}
 
-	if (SubHull->GetCompartmentLocalBounds(CompartmentId, OutLocalBounds))
-	{
-		return true;
-	}
-
 	for (const FStructuralSheetDef& Sheet : SubHull->GetStructuralSheets())
 	{
-		if (Sheet.ParentCompartmentId != CompartmentId)
+		if (Sheet.ParentCompartmentId != CompartmentId && Sheet.AdjacentCompartmentId != CompartmentId)
 		{
 			continue;
 		}

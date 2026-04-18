@@ -250,18 +250,18 @@
       "x_norm": 0.694
     },
     {
-      "coaming_height_cm": 52.0,
+      "coaming_height_cm": 48.0,
       "deck": "upper->main",
       "from": "C_upper_UpperFwd",
-      "half_length_cm": 188.0,
-      "half_width_cm": 68.0,
+      "half_length_cm": 80.0,
+      "half_width_cm": 44.0,
       "id": "N_vert_UpperAccess",
       "radius_cm": null,
       "shape": "rect",
       "to": "C_main_Fwd",
       "type": "Ladder",
-      "x_cm": 1402.8000000000002,
-      "x_norm": 0.334
+      "x_cm": 1281.0,
+      "x_norm": 0.305
     }
   ],
   "decks": [
@@ -343,7 +343,7 @@
         "type": "Hatch"
       },
       {
-        "capacity_area_cm2": 51136.0,
+        "capacity_area_cm2": 14080.0,
         "connection_id": "N_vert_UpperAccess",
         "from": "C_upper_UpperFwd",
         "to": "C_main_Fwd",
@@ -1140,7 +1140,7 @@
   },
   "schema_version": 1,
   "source_hashes": {
-    "main_py": "5ba382bf7fc511d41d386936940b3d009953b341edaff1a9cb262c2f3b524334",
+    "main_py": "09dd1a83b4cfb695757e3d6053bbf7e8f274a7d8891d75ebcc65a19600e3784c",
     "stations_json": "000c8242b54c389e10378ae576f677def9e4922e94082cd32d40b33555509c43"
   },
   "spawn_points": [
@@ -1217,32 +1217,7 @@
       "z_cm": -240.0
     }
   ],
-  "station_slots": [
-    {
-      "compartment": "C_main_Fwd",
-      "type": "Helm",
-      "x_cm": 1789.2,
-      "y_cm": 0.0,
-      "yaw_deg": 0.0,
-      "z_cm": -20.0
-    },
-    {
-      "compartment": "C_main_Aft",
-      "type": "Engine",
-      "x_cm": 3250.8,
-      "y_cm": 0.0,
-      "yaw_deg": 180.0,
-      "z_cm": -20.0
-    },
-    {
-      "compartment": "C_lower_Hub",
-      "type": "Ballast",
-      "x_cm": 1785.0,
-      "y_cm": 0.0,
-      "yaw_deg": 0.0,
-      "z_cm": -240.0
-    }
-  ],
+  "station_slots": [],
   "turret_hardpoints": [
     {
       "height": 14.0,

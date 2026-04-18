@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "UnrealMCP Server",
+      "runtimeExecutable": "C:\\Users\\coren\\AppData\\Local\\Programs\\Python\\Python312\\Scripts\\unrealmcp.exe",
+      "runtimeArgs": [],
+      "port": 55557
+    }
+  ]
+}

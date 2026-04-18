@@ -1,0 +1,535 @@
+{
+  "meta": {
+    "domain": "Hull & Authoring",
+    "parentId": "domain_1",
+    "description": "Schema definition for Hull & Authoring."
+  },
+  "tables": [
+    {
+      "id": "Submarine_Archetypes",
+      "domain": 1,
+      "priority": "high",
+      "description": "Defines the available submarine classes — size envelope, style, capacity constraints.",
+      "columns": [
+        {
+          "name": "archetype_id",
+          "type": "string",
+          "pk": true
+        },
+        {
+          "name": "display_name",
+          "type": "string",
+          "nullable": false
+        },
+        {
+          "name": "length_m",
+          "type": "float",
+          "nullable": false
+        },
+        {
+          "name": "max_diameter_m",
+          "type": "float",
+          "nullable": false
+        },
+        {
+          "name": "max_deck_count",
+          "type": "int",
+          "nullable": false
+        },
+        {
+          "name": "section_family_id",
+          "type": "string",
+          "fk": "Hull_Section_Families.section_family_id"
+        },
+        {
+          "name": "style_tag",
+          "type": "string",
+          "nullable": true
+        },
+        {
+          "name": "notes",
+          "type": "string",
+          "nullable": true
+        }
+      ],
+      "relations": [
+        {
+          "target": "Hull_Section_Families",
+          "type": "N:1",
+          "label": "uses section family"
+        },
+        {
+          "target": "Structural_Bay_Configs",
+          "type": "1:N",
+          "label": "has bays"
+        },
+        {
+          "target": "Station_Definitions",
+          "type": "N:N",
+          "label": "supports stations"
+        },
+        {
+          "target": "Submarine_Catalog",
+          "type": "1:N",
+          "label": "catalogued as"
+        }
+      ]
+    },
+    {
+      "id": "Hull_Section_Families",
+      "domain": 1,
+      "priority": "high",
+      "description": "Hull cross-section profiles available to archetypes (circular, oval, rectangular, etc.).",
+      "columns": [
+        {
+          "name": "section_family_id",
+          "type": "string",
+          "pk": true
+        },
+        {
+          "name": "display_name",
+          "type": "string",
+          "nullable": false
+        },
+        {
+          "name": "roundness_range",
+          "type": "string",
+          "nullable": true
+        },
+        {
+          "name": "aspect_ratio_hint",
+          "type": "float",
+          "nullable": true
+        },
+        {
+          "name": "notes",
+          "type": "string",
+          "nullable": true
+        }
+      ],
+      "relations": [
+        {
+          "target": "Submarine_Archetypes",
+          "type": "1:N",
+          "label": "used by archetypes"
+        },
+        {
+          "target": "Control_Ring_Presets",
+          "type": "1:N",
+          "label": "constrains ring presets"
+        }
+      ]
+    },
+    {
+      "id": "Control_Ring_Presets",
+      "domain": 1,
+      "priority": "high",
+      "description": "Reusable Control Ring configurations for hull shape authoring.",
+      "columns": [
+        {
+          "name": "preset_id",
+          "type": "string",
+          "pk": true
+        },
+        {
+          "name": "display_name",
+          "type": "string",
+          "nullable": false
+        },
+        {
+          "name": "section_family_id",
+          "type": "string",
+          "fk": "Hull_Section_Families.section_family_id"
+        },
+        {
+          "name": "diameter_m",
+          "type": "float",
+          "nullable": false
+        },
+        {
+          "name": "width_height_ratio",
+          "type": "float",
+          "nullable": true
+        },
+        {
+          "name": "roundness",
+          "type": "float",
+          "nullable": true
+        },
+        {
+          "name": "thickness_m",
+          "type": "float",
+          "nullable": true
+        },
+        {
+          "name": "locked",
+          "type": "bool",
+          "nullable": false,
+          "default": "false"
+        }
+      ],
+      "relations": [
+        {
+          "target": "Hull_Section_Families",
+          "type": "N:1",
+          "label": "belongs to section family"
+        }
+      ]
+    },
+    {
+      "id": "Structural_Bay_Configs",
+      "domain": 1,
+      "priority": "high",
+      "description": "Structural bay configurations within a submarine archetype — spatial envelope and floor capacity.",
+      "columns": [
+        {
+          "name": "bay_config_id",
+          "type": "string",
+          "pk": true
+        },
+        {
+          "name": "archetype_id",
+          "type": "string",
+          "fk": "Submarine_Archetypes.archetype_id"
+        },
+        {
+          "name": "display_name",
+          "type": "string",
+          "nullable": false
+        },
+        {
+          "name": "length_m",
+          "type": "float",
+          "nullable": false
+        },
+        {
+          "name": "usable_height_m",
+          "type": "float",
+          "nullable": false
+        },
+        {
+          "name": "usable_width_m",
+          "type": "float",
+          "nullable": false
+        },
+        {
+          "name": "max_floor_count",
+          "type": "int",
+          "nullable": false
+        },
+        {
+          "name": "order_index",
+          "type": "int",
+          "nullable": false
+        }
+      ],
+      "relations": [
+        {
+          "target": "Submarine_Archetypes",
+          "type": "N:1",
+          "label": "belongs to archetype"
+        },
+        {
+          "target": "Floor_Region_Types",
+          "type": "1:N",
+          "label": "contains floor regions"
+        }
+      ]
+    },
+    {
+      "id": "Floor_Region_Types",
+      "domain": 1,
+      "priority": "high",
+      "description": "Types of walkable floor regions within a structural bay.",
+      "columns": [
+        {
+          "name": "region_type_id",
+          "type": "string",
+          "pk": true
+        },
+        {
+          "name": "display_name",
+          "type": "string",
+          "nullable": false
+        },
+        {
+          "name": "kind",
+          "type": "enum",
+          "values": [
+            "main_band",
+            "side_corridor",
+            "mezzanine",
+            "platform",
+            "half_level",
+            "technical"
+          ]
+        },
+        {
+          "name": "min_width_m",
+          "type": "float",
+          "nullable": true
+        },
+        {
+          "name": "min_headroom_m",
+          "type": "float",
+          "nullable": true
+        },
+        {
+          "name": "walkable",
+          "type": "bool",
+          "nullable": false,
+          "default": "true"
+        }
+      ],
+      "relations": [
+        {
+          "target": "Structural_Bay_Configs",
+          "type": "N:1",
+          "label": "scoped by bay config"
+        }
+      ]
+    },
+    {
+      "id": "Opening_Definitions",
+      "domain": 1,
+      "priority": "high",
+      "description": "Geometric opening types (doorway, hatch, shaft, deck cutout).",
+      "columns": [
+        {
+          "name": "opening_id",
+          "type": "string",
+          "pk": true
+        },
+        {
+          "name": "display_name",
+          "type": "string",
+          "nullable": false
+        },
+        {
+          "name": "kind",
+          "type": "enum",
+          "values": [
+            "doorway",
+            "hatch_opening",
+            "shaft",
+            "deck_cutout",
+            "airlock"
+          ]
+        },
+        {
+          "name": "min_width_m",
+          "type": "float",
+          "nullable": true
+        },
+        {
+          "name": "min_height_m",
+          "type": "float",
+          "nullable": true
+        },
+        {
+          "name": "vertical",
+          "type": "bool",
+          "nullable": false,
+          "default": "false"
+        }
+      ],
+      "relations": [
+        {
+          "target": "Connector_Definitions",
+          "type": "N:N",
+          "label": "used by connectors"
+        },
+        {
+          "target": "Closure_Definitions",
+          "type": "N:N",
+          "label": "closable by"
+        }
+      ]
+    },
+    {
+      "id": "Connector_Definitions",
+      "domain": 1,
+      "priority": "high",
+      "description": "Circulation element types (ramp, ladder, passage, trunk).",
+      "columns": [
+        {
+          "name": "connector_id",
+          "type": "string",
+          "pk": true
+        },
+        {
+          "name": "display_name",
+          "type": "string",
+          "nullable": false
+        },
+        {
+          "name": "kind",
+          "type": "enum",
+          "values": [
+            "ramp",
+            "ladder",
+            "passage",
+            "trunk",
+            "hatch_connector"
+          ]
+        },
+        {
+          "name": "traversal_cost",
+          "type": "float",
+          "nullable": true
+        },
+        {
+          "name": "vertical",
+          "type": "bool",
+          "nullable": false,
+          "default": "false"
+        }
+      ],
+      "relations": [
+        {
+          "target": "Opening_Definitions",
+          "type": "N:N",
+          "label": "uses openings"
+        }
+      ]
+    },
+    {
+      "id": "Closure_Definitions",
+      "domain": 1,
+      "priority": "high",
+      "description": "Closable elements (door, hatch, valve) — controls flood propagation.",
+      "columns": [
+        {
+          "name": "closure_id",
+          "type": "string",
+          "pk": true
+        },
+        {
+          "name": "display_name",
+          "type": "string",
+          "nullable": false
+        },
+        {
+          "name": "kind",
+          "type": "enum",
+          "values": [
+            "door",
+            "hatch",
+            "valve",
+            "blast_door"
+          ]
+        },
+        {
+          "name": "flood_stops",
+          "type": "bool",
+          "nullable": false,
+          "default": "true"
+        },
+        {
+          "name": "breakable",
+          "type": "bool",
+          "nullable": false,
+          "default": "false"
+        },
+        {
+          "name": "default_open",
+          "type": "bool",
+          "nullable": false,
+          "default": "false"
+        }
+      ],
+      "relations": [
+        {
+          "target": "Opening_Definitions",
+          "type": "N:N",
+          "label": "closes openings"
+        }
+      ]
+    },
+    {
+      "id": "Partition_Definitions",
+      "domain": 1,
+      "priority": "high",
+      "description": "Interior partition types — pressure bulkheads and internal walls.",
+      "columns": [
+        {
+          "name": "partition_id",
+          "type": "string",
+          "pk": true
+        },
+        {
+          "name": "display_name",
+          "type": "string",
+          "nullable": false
+        },
+        {
+          "name": "kind",
+          "type": "enum",
+          "values": [
+            "pressure_bulkhead",
+            "internal_wall"
+          ]
+        },
+        {
+          "name": "flood_barrier",
+          "type": "bool",
+          "nullable": false,
+          "default": "true"
+        },
+        {
+          "name": "destructible",
+          "type": "bool",
+          "nullable": false,
+          "default": "false"
+        },
+        {
+          "name": "base_resistance",
+          "type": "float",
+          "nullable": true
+        }
+      ],
+      "relations": []
+    },
+    {
+      "id": "Outer_Envelope_Presets",
+      "domain": 1,
+      "priority": "medium",
+      "description": "Secondary envelope presets — Kiosk/Sail and similar integrated superstructures.",
+      "columns": [
+        {
+          "name": "envelope_id",
+          "type": "string",
+          "pk": true
+        },
+        {
+          "name": "display_name",
+          "type": "string",
+          "nullable": false
+        },
+        {
+          "name": "kind",
+          "type": "enum",
+          "values": [
+            "kiosk",
+            "sail",
+            "pod",
+            "sponson"
+          ]
+        },
+        {
+          "name": "has_trunk",
+          "type": "bool",
+          "nullable": false,
+          "default": "false"
+        },
+        {
+          "name": "modifies_silhouette",
+          "type": "bool",
+          "nullable": false,
+          "default": "true"
+        }
+      ],
+      "relations": []
+    }
+  ]
+}

@@ -1,0 +1,43 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 500" font-family="sans-serif">
+    <!-- Background -->
+    <rect width="800" height="500" fill="#1e1e1e" rx="10"/>
+
+    <!-- Title -->
+    <text x="400" y="50" fill="#fff" font-size="22" font-weight="bold" text-anchor="middle">Editor Interaction Loop (User Workflow)</text>
+
+    <!-- Cycle -->
+    <!-- Step 1 -->
+    <circle cx="150" cy="200" r="80" fill="#2d3436" stroke="#a29bfe" stroke-width="3"/>
+    <text x="150" y="195" fill="#a29bfe" font-size="16" font-weight="bold" text-anchor="middle">1. DEFINE</text>
+    <text x="150" y="215" fill="#fff" font-size="12" text-anchor="middle">Spec Editing</text>
+    <text x="150" y="230" fill="#dfe6e9" font-size="10" text-anchor="middle">(Hull, Decks, Wall Thick)</text>
+
+    <!-- Step 2 -->
+    <circle cx="400" cy="200" r="80" fill="#2d3436" stroke="#fdcb6e" stroke-width="3"/>
+    <text x="400" y="195" fill="#fdcb6e" font-size="16" font-weight="bold" text-anchor="middle">2. ARRANGE</text>
+    <text x="400" y="215" fill="#fff" font-size="12" text-anchor="middle">Live Manipulation</text>
+    <text x="400" y="230" fill="#dfe6e9" font-size="10" text-anchor="middle">(Bulkheads, Stations, Spawns)</text>
+
+    <!-- Step 3 -->
+    <circle cx="650" cy="200" r="80" fill="#2d3436" stroke="#55efc4" stroke-width="3"/>
+    <text x="650" y="195" fill="#55efc4" font-size="16" font-weight="bold" text-anchor="middle">3. VERIFY</text>
+    <text x="650" y="215" fill="#fff" font-size="12" text-anchor="middle">Preview &amp; Stats</text>
+    <text x="650" y="230" fill="#dfe6e9" font-size="10" text-anchor="middle">(Volume, Connection Graph)</text>
+
+    <!-- Arrows -->
+    <path d="M 230 200 L 320 200" stroke="#fff" stroke-width="3" marker-end="url(#arrow)"/>
+    <path d="M 480 200 L 570 200" stroke="#fff" stroke-width="3" marker-end="url(#arrow)"/>
+    <path d="M 650 280 Q 400 380 150 280" stroke="#fff" stroke-width="3" fill="none" marker-end="url(#arrow)" stroke-dasharray="5,5"/>
+    <text x="400" y="340" fill="#dfe6e9" font-size="12" text-anchor="middle">Iterate based on feedback</text>
+
+    <!-- Final Bake -->
+    <rect x="300" y="400" width="200" height="60" rx="10" fill="#0984e3" stroke="#fff" stroke-width="2"/>
+    <text x="400" y="435" fill="#fff" font-size="16" font-weight="bold" text-anchor="middle">GENERATE / BAKE</text>
+    <path d="M 400 280 L 400 400" stroke="#55efc4" stroke-width="3" marker-end="url(#arrow)"/>
+
+    <defs>
+        <marker id="arrow" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto" markerUnits="strokeWidth">
+            <path d="M0,0 L0,6 L9,3 z" fill="#fff" />
+        </marker>
+    </defs>
+</svg>

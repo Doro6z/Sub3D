@@ -6,9 +6,11 @@
 #include "SubCrewCharacter.generated.h"
 
 class UCameraComponent;
+class USpringArmComponent;
 class ASubmarineBase;
 class UInteractableComponent;
 class USubInteractionComponent;
+class USubCrewMovementComponent;
 
 /**
  * Crew member character.
@@ -33,7 +35,32 @@ public:
 	UCameraComponent* FPSCamera;
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
+	USpringArmComponent* TPSCameraBoom;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
+	UCameraComponent* TPSCamera;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
 	USubInteractionComponent* InteractionComponent;
+
+	/** Typed getter for the custom movement component. No cast needed in BP. */
+	UFUNCTION(BlueprintPure, Category = "Crew")
+	USubCrewMovementComponent* GetCrewMovement() const;
+
+	UFUNCTION(BlueprintCallable, Category = "Crew|Camera")
+	void ToggleCameraMode();
+
+	UFUNCTION(BlueprintCallable, Category = "Crew|Camera")
+	void SetFirstPersonMode(bool bNewFirstPerson);
+
+	UFUNCTION(BlueprintPure, Category = "Crew|Camera")
+	bool IsFirstPersonMode() const { return bWantsFirstPerson; }
+
+	UFUNCTION(BlueprintPure, Category = "Crew|Camera")
+	UCameraComponent* GetActiveViewCamera() const;
+
+	UFUNCTION(BlueprintPure, Category = "Crew|Camera")
+	float GetCurrentPostureCameraZ() const;
 
 	// ── Submarine attachment ──────────────────────────────────────────────
 
@@ -82,6 +109,19 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crew")
 	float InteractDistance = 250.f;
 
+	// ── Health ────────────────────────────────────────────────────────────
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crew|Health")
+	float MaxHealth = 100.f;
+
+	UPROPERTY(BlueprintReadOnly, Replicated, Category = "Crew|Health")
+	float Health = 100.f;
+
+	virtual float TakeDamage(float DamageAmount, struct FDamageEvent const& DamageEvent, class AController* EventInstigator, AActor* DamageCauser) override;
+
+	UFUNCTION(BlueprintPure, Category = "Crew|Health")
+	float GetHealthNormalized() const { return FMath::Clamp(Health / FMath::Max(1.f, MaxHealth), 0.f, 1.f); }
+
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crew|Environment|Pressure", meta = (ClampMin = "0.0"))
 	float BaseSafeAmbientPressureKPa = 121.59f;
 
@@ -124,8 +164,43 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crew|Environment|Water", meta = (ClampMin = "0.0", ClampMax = "5.0"))
 	float WaterMovementProtectionMultiplier = 1.f;
 
+	/** Hide head bone for local player in FPS mode */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crew|Camera")
+	bool bHideHeadInFPS = true;
+
+	/** Camera sway from submarine acceleration (cm per cm/s²) */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crew|Camera")
+	float CameraSwayAccelScale = 0.002f;
+
+	/** Camera sway from submarine angular velocity (cm per deg/s) */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crew|Camera")
+	float CameraSwayAngularScale = 0.05f;
+
+	/** Max camera sway offset (cm) */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crew|Camera")
+	float CameraSwayMaxCm = 3.f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crew|Camera", meta = (ClampMin = "0.1"))
+	float CameraBlendSpeed = 8.f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crew|Camera", meta = (ClampMin = "0.0"))
+	float ThirdPersonArmLength = 180.f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crew|Camera")
+	FVector ThirdPersonStandingSocketOffset = FVector(0.f, 55.f, 8.f);
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crew|Camera")
+	FVector ThirdPersonProneSocketOffset = FVector(0.f, 35.f, 12.f);
+
+	UPROPERTY(BlueprintReadOnly, Category = "Crew|Camera")
+	float CameraBlendAlpha = 0.f;
+
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crew|Debug")
 	bool bDebugLogEnvironmentState = false;
+
+	/** Show the anim tuner panel at startup */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crew|Debug")
+	bool bShowAnimDebugPanel = true;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crew|Debug", meta = (ClampMin = "0.1"))
 	float EnvironmentDebugLogIntervalSeconds = 1.f;
@@ -157,6 +232,12 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Crew|Environment")
 	void SetWaterMovementProtectionMultiplier(float NewWaterMovementProtectionMultiplier);
 
+	UFUNCTION(Server, Reliable)
+	void ServerSetPostureTarget(float Alpha);
+
+	UFUNCTION(Server, Reliable)
+	void ServerSetRunning(bool bNewRunning);
+
 	// ── Sub input RPCs — call these from Blueprint Event Graph ────────────
 
 	UFUNCTION(Server, Reliable, BlueprintCallable, Category = "Crew|Helm")
@@ -180,6 +261,9 @@ private:
 	void ApplyPressureEffects(float DeltaSeconds, float AmbientPressureKPa);
 	void ApplyWaterMovementState(float WaterImmersion01);
 	void ResetEnvironmentalState();
+	void UpdateCameraMode(float DeltaSeconds);
+	void UpdateCameraRig();
+	void UpdateLocalHeadVisibility();
 
 	UFUNCTION(Server, Reliable)
 	void Server_TakeHelm();
@@ -190,4 +274,6 @@ private:
 	float DefaultWalkSpeed = 300.f;
 	float DefaultSwimSpeed = 240.f;
 	float EnvironmentDebugLogTimer = 0.f;
+	bool bWantsFirstPerson = true;
+	bool bHeadHiddenForLocalView = false;
 };

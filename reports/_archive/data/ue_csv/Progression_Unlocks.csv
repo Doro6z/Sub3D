@@ -1,0 +1,3 @@
+Name,display_name,unlock_type,ref_id,xp_required,prereq_unlock_id
+---,string,string (enum),string,float,string
+ROW_EXAMPLE,,,,,

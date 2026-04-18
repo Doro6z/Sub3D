@@ -28,7 +28,8 @@ def _resolve_script_dirs():
     except Exception:
         pass
 
-    # Stable project fallback for this repository.
+    # Stable project fallbacks for this repository.
+    dirs.append(r"C:\Dev\Sub3D\Scripts\Blender\hull_blockout_gpt")
     dirs.append(r"C:\Dev\Sub3D\Source\scripts\hull_blockout_gpt")
     dirs.append(os.getcwd())
 
@@ -49,14 +50,16 @@ def _install_import_paths():
             sys.path.append(core_dir)
 
 
-def _load_bulkheads_module():
+def _load_core_submodule(filename, module_name, missing_msg):
+    """Generic loader: same strategy as the legacy bulkheads loader, reused for
+    pivots.py and materials.py so main.py can run from Blender's text editor
+    where __file__ is not defined."""
     _install_import_paths()
 
     for base in _resolve_script_dirs():
-        candidate = os.path.join(base, "core", "bulkheads_doors.py")
+        candidate = os.path.join(base, "core", filename)
         if not os.path.isfile(candidate):
             continue
-        module_name = "hull_blockout_gpt_bulkheads_doors"
         sys.modules.pop(module_name, None)
         spec = importlib.util.spec_from_file_location(module_name, candidate)
         if spec and spec.loader:
@@ -65,17 +68,43 @@ def _load_bulkheads_module():
             return module
 
     importlib.invalidate_caches()
-    sys.modules.pop("bulkheads_doors", None)
+    bare_name = filename[:-3] if filename.endswith(".py") else filename
+    sys.modules.pop(bare_name, None)
     try:
-        import bulkheads_doors as module
-        return module
+        return importlib.import_module(bare_name)
     except ModuleNotFoundError:
         pass
 
-    raise ModuleNotFoundError("Unable to load bulkheads_doors.py from hull_blockout_gpt/core")
+    raise ModuleNotFoundError(missing_msg)
+
+
+def _load_bulkheads_module():
+    return _load_core_submodule(
+        "bulkheads_doors.py",
+        "hull_blockout_gpt_bulkheads_doors",
+        "Unable to load bulkheads_doors.py from hull_blockout_gpt/core",
+    )
+
+
+def _load_pivots_module():
+    return _load_core_submodule(
+        "pivots.py",
+        "hull_blockout_gpt_pivots",
+        "Unable to load pivots.py from hull_blockout_gpt/core",
+    )
+
+
+def _load_materials_module():
+    return _load_core_submodule(
+        "materials.py",
+        "hull_blockout_gpt_materials",
+        "Unable to load materials.py from hull_blockout_gpt/core",
+    )
 
 
 _bulkheads_doors = _load_bulkheads_module()
+_pivots = _load_pivots_module()
+_materials = _load_materials_module()
 build_compartment_bulkhead = getattr(_bulkheads_doors, "build_compartment_bulkhead", _bulkheads_doors.build_standard_bulkhead)
 build_standard_pressure_door = getattr(_bulkheads_doors, "build_standard_pressure_door", _bulkheads_doors.build_standard_watertight_door)
 build_standard_bulkhead = _bulkheads_doors.build_standard_bulkhead
@@ -83,12 +112,18 @@ build_sliding_split_door = _bulkheads_doors.build_sliding_split_door
 build_standard_watertight_door = _bulkheads_doors.build_standard_watertight_door
 compute_bulkhead_top_z = _bulkheads_doors.compute_bulkhead_top_z
 place_bulkhead_with_clearance = _bulkheads_doors.place_bulkhead_with_clearance
+fix_all_pivots = _pivots.fix_all_pivots
+assign_materials = _materials.assign_materials
 
 LENGTH = 4200.0
 SUB_NAME = "Craniata"
 HULL_THICK = 15.0
 DECK_THICK = 18.0
 BH_THICK = 14.0
+DECK_CONTACT_OVERLAP = 1.0
+BULKHEAD_CONTACT_OVERLAP = 1.5
+UPPER_ROOM_SIDE_PAD = 10.0
+UPPER_ROOM_ROOF_START = 0.58
 RADIAL = 64
 N_RINGS = 300
 
@@ -148,6 +183,11 @@ DOOR_FRAME_MARGIN = 12.0
 DOOR_FRAME_DEPTH = 12.0
 DOOR_LEAF_DEPTH = 8.0
 DOOR_THRESHOLD = 10.0
+DOOR_ROUGH_MARGIN_X = 6.0
+DOOR_ROUGH_MARGIN_Z = 7.0
+DOOR_LEAF_OVERLAP = 2.0
+UPPER_ARMORY_DOOR_Y_OFFSET = -131.0
+LADDER_Y_OFFSET = -38.48
 
 MAIN_BULKHEAD_SPECS = [
     {"name": "Fwd", "x_norm": 0.224, "door_w": DOOR_W, "door_h": DOOR_H, "full_height": True},
@@ -173,6 +213,7 @@ AIRLOCK_TERRACE_FLAT_OFFSET = 90.0
 AIRLOCK_TERRACE_RECOVER_OFFSET = 240.0
 AIRLOCK_TERRACE_RECOVER_MID_OFFSET = 160.0
 AIRLOCK_CASSETTE_DEPTH = 24.0
+LOWER_HUB_CENTER_NORM = 0.425
 
 BH_MAIN_FWD_NAME = "Fwd"
 DOOR_CLEARANCE_H = 200.0
@@ -181,32 +222,46 @@ UPPER_DECK_AFT_NORM = SUPER_X_END - 0.003
 MAIN_DECK_CUTOUTS = [
     {
         "name": "LowerAccess",
-        "x_norm": 0.425,
+        "x_norm": LOWER_HUB_CENTER_NORM,
         "y_center": 0.0,
-        "half_length": 52.0,
-        "half_width": 46.0,
+        "shape": "round",
+        "radius": 56.0,
         "coaming_height": 48.0,
     },
 ]
 
 UPPER_DECK_CUTOUTS = [
+    # Staircase hole geometry.
+    # The previous values (x_norm=0.334, half_length=188, half_width=68) made
+    # the hole too large and positioned 188 cm FORWARD of the stair arrival,
+    # so the player's head bumped the upper deck during climb and the EXACT
+    # boolean sometimes failed silently, leaving only the coaming wireframe.
+    #
+    # New sizing: the stair spans x in [1129.2, 1335.3] cm and rises from
+    # z=-9 to z=267. A 180 cm character's head clears the upper-deck underside
+    # at x~=1205 during climb, and the last step ends at x=1335.3. The hole
+    # needs to cover that full range plus a small landing aft.
+    #
+    # Hole = [1201, 1361] in X (half_length=80, cx=1281 -> x_norm=0.305),
+    # y = +/-44 (stair+rails fit within 84 cm, 4 cm margin).
     {
         "name": "UpperAccess",
-        "x_norm": 0.425,
+        "x_norm": 0.305,
         "y_center": 0.0,
-        "half_length": 56.0,
-        "half_width": 48.0,
-        "coaming_height": 52.0,
+        "shape": "rect",
+        "half_length": 80.0,
+        "half_width": 44.0,
+        "coaming_height": 48.0,
     },
 ]
 
 LOWER_DECK_CUTOUTS = [
     {
-        "name": "LowerService",
-        "x_norm": 0.425,
+        "name": "FondAccess",
+        "x_norm": LOWER_HUB_CENTER_NORM,
         "y_center": 0.0,
-        "half_length": 48.0,
-        "half_width": 40.0,
+        "shape": "round",
+        "radius": 46.0,
         "coaming_height": 24.0,
     },
 ]
@@ -404,6 +459,39 @@ def interior_hw(x_cm, z):
     return math.sqrt(max(0.0, r * r - z * z))
 
 
+def deck_bottom_z(deck_center_z):
+    return deck_center_z - DECK_THICK * 0.5 - 0.5
+
+
+def upper_room_floor_z():
+    return sample_curve(0.40) - 150.0
+
+
+def _inner_half_width_with_offset(x_cm, z, offset_cm):
+    nx = max(0.0, min(1.0, x_cm / LENGTH))
+    main_r = sample_curve(nx)
+    r = max(0.0, main_r - max(0.0, HULL_THICK - offset_cm))
+    sb, super_w_local, super_h_local, shoulder_norm, _ = superstructure_state(nx)
+
+    if sb > 0.0 and z >= main_r * shoulder_norm:
+        super_hw = max(0.0, super_w_local * 0.5 - max(0.0, HULL_THICK - offset_cm)) * sb
+        shoulder_z = main_r * shoulder_norm
+        if z <= main_r:
+            bt = (z - shoulder_z) / max(1.0, main_r - shoulder_z)
+            hh = math.sqrt(max(0.0, r * r - z * z)) if abs(z) < r else 0.0
+            return max(hh, hh + (super_hw - hh) * smoothstep(bt))
+
+        dz = z - main_r
+        sh = max(1.0, super_h_local * sb - max(0.0, HULL_THICK - offset_cm))
+        if dz < sh:
+            return super_hw * math.sqrt(max(0.0, 1.0 - (dz / sh) ** 2))
+        return 0.0
+
+    if r <= 0.0 or abs(z) >= r:
+        return 0.0
+    return math.sqrt(max(0.0, r * r - z * z))
+
+
 def upper_ceiling_z(x_cm, margin=10.0):
     nx = max(0.0, min(1.0, x_cm / LENGTH))
     main_r = sample_curve(nx)
@@ -436,28 +524,7 @@ def interior_hw_superfilled(x_cm, z):
 
 
 def interior_contact_hw(x_cm, z):
-    nx = max(0.0, min(1.0, x_cm / LENGTH))
-    main_r = sample_curve(nx)
-    r = max(0.0, main_r - HULL_THICK - 1.5)
-    sb, super_w_local, super_h_local, shoulder_norm, _ = superstructure_state(nx)
-
-    if sb > 0.0 and z >= main_r * shoulder_norm:
-        sw = max(0.0, super_w_local * 0.5 - HULL_THICK - 1.5) * sb
-        shoulder_z = main_r * shoulder_norm
-        if z <= main_r:
-            bt = (z - shoulder_z) / max(1.0, main_r - shoulder_z)
-            hh = math.sqrt(max(0.0, r * r - z * z)) if abs(z) < r else 0.0
-            return max(hh, hh + (sw - hh) * smoothstep(bt))
-
-        dz = z - main_r
-        sh = max(1.0, super_h_local * sb - 1.5)
-        if dz < sh:
-            return sw * math.sqrt(max(0.0, 1.0 - (dz / sh) ** 2))
-        return 0.0
-
-    if r <= 0.0 or abs(z) >= r:
-        return 0.0
-    return math.sqrt(max(0.0, r * r - z * z))
+    return _inner_half_width_with_offset(x_cm, z, BULKHEAD_CONTACT_OVERLAP)
 
 
 def upper_inner_apex_z(x_cm, margin=1.5):
@@ -470,11 +537,62 @@ def upper_inner_apex_z(x_cm, margin=1.5):
 
 
 def upper_deck_hw(x_cm, z):
-    return interior_contact_hw(x_cm, z)
+    return upper_superstructure_contact_hw(x_cm, z, DECK_CONTACT_OVERLAP)
 
 
 def upper_bulkhead_hw(x_cm, z):
-    return interior_contact_hw(x_cm, z)
+    return upper_superstructure_contact_hw(x_cm, z, BULKHEAD_CONTACT_OVERLAP)
+
+
+def main_deck_hw(x_cm, z):
+    return _inner_half_width_with_offset(x_cm, z, DECK_CONTACT_OVERLAP)
+
+
+def lower_deck_hw(x_cm, z):
+    return _inner_half_width_with_offset(x_cm, z, DECK_CONTACT_OVERLAP)
+
+
+def main_bulkhead_hw(x_cm, z):
+    return _inner_half_width_with_offset(x_cm, z, BULKHEAD_CONTACT_OVERLAP)
+
+
+def lower_bulkhead_hw(x_cm, z):
+    return _inner_half_width_with_offset(x_cm, z, BULKHEAD_CONTACT_OVERLAP)
+
+
+def upper_room_apex_z(x_cm, overlap_cm=BULKHEAD_CONTACT_OVERLAP):
+    nx = max(0.0, min(1.0, x_cm / LENGTH))
+    main_r = sample_curve(nx)
+    sb, _, super_h_local, _, _ = superstructure_state(nx)
+    if sb <= 0.02:
+        return 0.0
+    return main_r + max(0.0, super_h_local * sb - max(0.0, HULL_THICK - overlap_cm - 2.0))
+
+
+def upper_superstructure_contact_hw(x_cm, z, overlap_cm=BULKHEAD_CONTACT_OVERLAP):
+    nx = max(0.0, min(1.0, x_cm / LENGTH))
+    sb, super_w_local, _, _, _ = superstructure_state(nx)
+    if sb <= 0.02:
+        return 0.0
+
+    floor_z = upper_room_floor_z()
+    ceiling_z = upper_room_apex_z(x_cm, overlap_cm)
+    if z >= ceiling_z:
+        return 0.0
+
+    super_hw = max(0.0, super_w_local * 0.5 - HULL_THICK + overlap_cm + UPPER_ROOM_SIDE_PAD)
+    if super_hw <= 0.0:
+        return 0.0
+
+    if z <= floor_z + 6.0:
+        return super_hw
+
+    roof_start_z = floor_z + max(1.0, (ceiling_z - floor_z) * UPPER_ROOM_ROOF_START)
+    if z <= roof_start_z:
+        return super_hw
+
+    roof_t = smoothstep((z - roof_start_z) / max(1.0, ceiling_z - roof_start_z))
+    return super_hw * math.cos(roof_t * math.pi * 0.5)
 
 
 def deck_cutouts_for(name):
@@ -504,9 +622,15 @@ def hull_half_width_at(x_cm, z_cm):
 
 def point_in_cutout(x, y, cutout):
     cx = cutout["x_norm"] * LENGTH
+    cy = cutout.get("y_center", 0.0)
+    if cutout.get("shape") == "round":
+        radius = cutout.get("radius", 40.0)
+        dx = x - cx
+        dy = y - cy
+        return dx * dx + dy * dy <= radius * radius
     return (
         abs(x - cx) <= cutout["half_length"]
-        and abs(y - cutout.get("y_center", 0.0)) <= cutout["half_width"]
+        and abs(y - cy) <= cutout["half_width"]
     )
 
 
@@ -529,6 +653,14 @@ def simple_mat(name, r, g, b):
         bsdf.inputs["Base Color"].default_value = (r, g, b, 1)
         bsdf.inputs["Roughness"].default_value = 0.7
     return mat
+
+
+# The stylized material system and the legacy classifier that used to live here
+# have been moved to core/materials.py. See that module for the full palette
+# (solid-PBR, no textures, lowpoly/voxel friendly) and classification patterns.
+# The call site at the bottom of main() now uses:
+#     from core.materials import assign_materials as _assign_materials
+#     _assign_materials()
 
 
 def make(name, verts, faces, r, g, b, smooth=True):
@@ -558,28 +690,170 @@ def add_solidify(obj, thick, offset=-1):
 
 
 def apply_object_modifier(obj, modifier_name):
-    bpy.context.view_layer.objects.active = obj
-    obj.select_set(True)
+    bpy.context.view_layer.update()
+    depsgraph = bpy.context.evaluated_depsgraph_get()
+    eval_obj = obj.evaluated_get(depsgraph)
+    baked_mesh = bpy.data.meshes.new_from_object(eval_obj, preserve_all_data_layers=True, depsgraph=depsgraph)
+    old_mesh = obj.data
+    obj.modifiers.clear()
+    obj.data = baked_mesh
+    if old_mesh and old_mesh.users == 0:
+        bpy.data.meshes.remove(old_mesh)
+
+
+def _cleanup_mesh_for_boolean(obj):
+    """Dissolve degenerate edges + recalc normals before a boolean operation.
+
+    Blender's EXACT solver silently fails on non-manifold inputs, leaving the
+    target mesh intact or with ghost topology. Running a degenerate-dissolve and
+    a normal-recalc before the cut drops the failure rate on lofted and
+    intersected decks to near zero.
+    """
+    if not obj or obj.type != "MESH":
+        return
+    prev_active = bpy.context.view_layer.objects.active
+    prev_selection = [o for o in bpy.context.view_layer.objects if o.select_get()]
     try:
-        bpy.ops.object.modifier_apply(modifier=modifier_name)
+        if bpy.context.mode != "OBJECT":
+            bpy.ops.object.mode_set(mode="OBJECT")
+        bpy.ops.object.select_all(action="DESELECT")
+        obj.select_set(True)
+        bpy.context.view_layer.objects.active = obj
+        bpy.ops.object.mode_set(mode="EDIT")
+        bpy.ops.mesh.select_all(action="SELECT")
+        bpy.ops.mesh.remove_doubles(threshold=0.0005)
+        bpy.ops.mesh.dissolve_degenerate(threshold=0.0005)
+        bpy.ops.mesh.normals_make_consistent(inside=False)
+        bpy.ops.object.mode_set(mode="OBJECT")
+    except RuntimeError as exc:
+        print(f"[WARN] _cleanup_mesh_for_boolean failed on {obj.name}: {exc}")
     finally:
         obj.select_set(False)
+        for o in prev_selection:
+            try:
+                o.select_set(True)
+            except ReferenceError:
+                pass
+        if prev_active and prev_active.name in bpy.data.objects:
+            bpy.context.view_layer.objects.active = prev_active
 
 
-def apply_boolean_difference(target_obj, cutter_obj, modifier_name):
+_BOOLEAN_SOLVER_PREFERENCE = {
+    # Logical intent -> ordered list of enum names to try.
+    # Newer Blender exposes ('FLOAT', 'EXACT', 'MANIFOLD'); older exposes ('FAST', 'EXACT').
+    "EXACT": ("EXACT",),
+    "FAST":  ("FLOAT", "FAST", "MANIFOLD"),
+}
+
+
+def _assign_boolean_solver(mod, intent):
+    for candidate in _BOOLEAN_SOLVER_PREFERENCE.get(intent, (intent,)):
+        try:
+            mod.solver = candidate
+            return candidate
+        except TypeError:
+            continue
+    # Leave the default Blender solver in place if nothing matched.
+    return mod.solver
+
+
+def apply_boolean_difference(target_obj, cutter_obj, modifier_name, solver="EXACT"):
+    if solver == "FAST":
+        _cleanup_mesh_for_boolean(target_obj)
     mod = target_obj.modifiers.new(modifier_name, "BOOLEAN")
     mod.operation = "DIFFERENCE"
-    mod.solver = "EXACT"
+    _assign_boolean_solver(mod, solver)
     mod.object = cutter_obj
 
-    bpy.context.view_layer.objects.active = target_obj
-    target_obj.select_set(True)
-    try:
-        bpy.ops.object.modifier_apply(modifier=mod.name)
-    finally:
-        target_obj.select_set(False)
+    bpy.context.view_layer.update()
+    depsgraph = bpy.context.evaluated_depsgraph_get()
+    eval_obj = target_obj.evaluated_get(depsgraph)
+    baked_mesh = bpy.data.meshes.new_from_object(eval_obj, preserve_all_data_layers=True, depsgraph=depsgraph)
+    old_mesh = target_obj.data
+    target_obj.modifiers.clear()
+    target_obj.data = baked_mesh
+    if old_mesh and old_mesh.users == 0:
+        bpy.data.meshes.remove(old_mesh)
 
     bpy.data.objects.remove(cutter_obj, do_unlink=True)
+
+
+def apply_boolean_intersect(target_obj, cutter_obj, modifier_name):
+    mod = target_obj.modifiers.new(modifier_name, "BOOLEAN")
+    mod.operation = "INTERSECT"
+    _assign_boolean_solver(mod, "EXACT")
+    mod.object = cutter_obj
+
+    bpy.context.view_layer.update()
+    depsgraph = bpy.context.evaluated_depsgraph_get()
+    eval_obj = target_obj.evaluated_get(depsgraph)
+    baked_mesh = bpy.data.meshes.new_from_object(eval_obj, preserve_all_data_layers=True, depsgraph=depsgraph)
+    old_mesh = target_obj.data
+    target_obj.modifiers.clear()
+    target_obj.data = baked_mesh
+    if old_mesh and old_mesh.users == 0:
+        bpy.data.meshes.remove(old_mesh)
+
+    bpy.data.objects.remove(cutter_obj, do_unlink=True)
+
+
+def bake_object_modifiers(obj):
+    if not obj or obj.type != "MESH":
+        return
+    if len(obj.modifiers) == 0:
+        return
+    apply_object_modifier(obj, obj.modifiers[0].name)
+
+
+def merge_mesh_objects(new_name, objs):
+    mesh_objs = []
+    seen = set()
+    for obj in objs:
+        if not obj or obj.type != "MESH":
+            continue
+        if obj.name in seen:
+            continue
+        seen.add(obj.name)
+        mesh_objs.append(obj)
+
+    if not mesh_objs:
+        return None
+
+    for obj in mesh_objs:
+        bake_object_modifiers(obj)
+
+    if len(mesh_objs) == 1:
+        merged = mesh_objs[0]
+        merged.name = new_name
+        merged.data.name = f"{new_name}_Mesh"
+        return merged
+
+    try:
+        view_layer = bpy.context.view_layer
+        for obj in bpy.data.objects:
+            if obj.select_get():
+                obj.select_set(False)
+
+        for obj in mesh_objs:
+            obj.select_set(True)
+        view_layer.objects.active = mesh_objs[0]
+
+        active = view_layer.objects.active
+        if active and active.mode != "OBJECT":
+            bpy.ops.object.mode_set(mode="OBJECT")
+
+        bpy.ops.object.join()
+        merged = view_layer.objects.active
+        merged.name = new_name
+        merged.data.name = f"{new_name}_Mesh"
+        merged.select_set(False)
+        return merged
+    except RuntimeError as exc:
+        print(f"[WARN] merge_mesh_objects failed for {new_name}: {exc}")
+        fallback = mesh_objs[0]
+        fallback.name = new_name
+        fallback.data.name = f"{new_name}_Mesh"
+        return fallback
 
 
 def append_box(verts, faces, x0, x1, y0, y1, z0, z1):
@@ -665,8 +939,45 @@ def cut_box_opening(target_obj, name, x0, x1, y0, y1, z0, z1):
     faces = []
     append_box(verts, faces, x0, x1, y0, y1, z0, z1)
     cutter = make(name, verts, faces, 0.8, 0.1, 0.1, smooth=False)
-    cutter.display_type = "WIRE"
-    cutter.hide_render = True
+    apply_boolean_difference(target_obj, cutter, f"{name}_Cut")
+
+
+def cut_round_opening_x(target_obj, name, x0, x1, y_center, z_center, radius):
+    verts = []
+    faces = []
+    radial = 28
+    profile = []
+    for i in range(radial):
+        a = 2.0 * math.pi * i / radial
+        profile.append((y_center + radius * math.cos(a), z_center + radius * math.sin(a)))
+    append_extruded_profile_x(verts, faces, x0, x1, profile)
+    cutter = make(name, verts, faces, 0.8, 0.1, 0.1, smooth=False)
+    apply_boolean_difference(target_obj, cutter, f"{name}_Cut")
+
+
+def cut_round_opening_z(target_obj, name, z0, z1, x_center, y_center, radius, segments=28):
+    verts = []
+    faces = []
+
+    for ring_z in (z0, z1):
+        for i in range(segments):
+            a = 2.0 * math.pi * i / segments
+            verts.append(
+                (
+                    x_center + radius * math.cos(a),
+                    y_center + radius * math.sin(a),
+                    ring_z,
+                )
+            )
+
+    for i in range(segments):
+        ni = (i + 1) % segments
+        faces.append((i, ni, segments + ni, segments + i))
+
+    faces.append(tuple(range(segments)))
+    faces.append(tuple(segments + i for i in reversed(range(segments))))
+
+    cutter = make(name, verts, faces, 0.8, 0.1, 0.1, smooth=False)
     apply_boolean_difference(target_obj, cutter, f"{name}_Cut")
 
 
@@ -791,6 +1102,30 @@ def build_ramp_x_object(name, x0, x1, y0, y1, z0, z1, thickness, r, g, b):
     return make(name, verts, faces, r, g, b, smooth=False)
 
 
+def build_ramp_x_oriented(name, x0, x1, y0, y1, z_at_x0, z_at_x1, thickness, r, g, b):
+    y0, y1 = sorted((y0, y1))
+    t = max(1.0, thickness)
+    verts = [
+        (x0, y0, z_at_x0),
+        (x0, y1, z_at_x0),
+        (x1, y1, z_at_x1),
+        (x1, y0, z_at_x1),
+        (x0, y0, z_at_x0 - t),
+        (x0, y1, z_at_x0 - t),
+        (x1, y1, z_at_x1 - t),
+        (x1, y0, z_at_x1 - t),
+    ]
+    faces = [
+        (0, 1, 2, 3),
+        (4, 7, 6, 5),
+        (0, 4, 5, 1),
+        (1, 5, 6, 2),
+        (2, 6, 7, 3),
+        (3, 7, 4, 0),
+    ]
+    return make(name, verts, faces, r, g, b, smooth=False)
+
+
 def build_cylinder_x(name, x0, x1, radius, y_center, z_center, r, g, b, segments=18):
     verts = []
     faces = []
@@ -819,6 +1154,38 @@ def build_cylinder_x(name, x0, x1, radius, y_center, z_center, r, g, b, segments
     verts.append((x1, y_center, z_center))
     for i in range(segments):
         faces.append((back, segments + i, segments + (i + 1) % segments))
+
+    return make(name, verts, faces, r, g, b)
+
+
+def build_cylinder_z(name, z0, z1, radius, x_center, y_center, r, g, b, segments=20):
+    verts = []
+    faces = []
+
+    for ring_z in (z0, z1):
+        for i in range(segments):
+            a = 2.0 * math.pi * i / segments
+            verts.append(
+                (
+                    x_center + radius * math.cos(a),
+                    y_center + radius * math.sin(a),
+                    ring_z,
+                )
+            )
+
+    for i in range(segments):
+        ni = (i + 1) % segments
+        faces.append((i, ni, segments + ni, segments + i))
+
+    bottom = len(verts)
+    verts.append((x_center, y_center, z0))
+    for i in range(segments):
+        faces.append((bottom, i, (i + 1) % segments))
+
+    top = len(verts)
+    verts.append((x_center, y_center, z1))
+    for i in range(segments):
+        faces.append((top, segments + (i + 1) % segments, segments + i))
 
     return make(name, verts, faces, r, g, b)
 
@@ -976,6 +1343,34 @@ def hull_ring(nx):
     return pts
 
 
+def inner_hull_ring(nx, overlap_cm=0.0):
+    thickness = max(1.0, HULL_THICK - overlap_cm)
+    profile = []
+    for y, z in hull_ring(nx):
+        radius = math.sqrt(y * y + z * z)
+        if radius <= 1e-4:
+            profile.append((y, z))
+            continue
+        inner_radius = max(1.0, radius - thickness)
+        scale = inner_radius / radius
+        profile.append((y * scale, z * scale))
+    return profile
+
+
+def build_inner_hull_volume(name, xs_cm, xe_cm, overlap_cm=0.0, sections=20):
+    verts = []
+    faces = []
+    section_count = max(4, sections)
+    loft_sections = []
+    for index in range(section_count + 1):
+        t = index / section_count
+        x = xs_cm + (xe_cm - xs_cm) * t
+        nx = max(0.0, min(1.0, x / LENGTH))
+        loft_sections.append((x, inner_hull_ring(nx, overlap_cm)))
+    append_loft_profiles_x(verts, faces, loft_sections)
+    return make(name, verts, faces, 0.20, 0.50, 0.20, smooth=False)
+
+
 def build_hull():
     verts = []
     faces = []
@@ -1014,7 +1409,8 @@ def build_deck(name, z, xs_n, xe_n, r, g, b, hw_fn=None):
     xe = xe_n * LENGTH
     nx = max(8, int((xe - xs) / 55))
     ny = 22 if name in ("main", "upper") else 18
-    cutouts = deck_cutouts_for(name)
+    # Openings are carved by dedicated boolean recuts later to keep clean round/rect boundaries.
+    cutouts = []
     if hw_fn is None:
         hw_fn = interior_hw
 
@@ -1051,8 +1447,219 @@ def build_deck(name, z, xs_n, xe_n, r, g, b, hw_fn=None):
         return None
 
     obj = make(f"SM_Deck_{name}", verts, faces, r, g, b, smooth=False)
-    add_solidify(obj, -DECK_THICK, 0)
+    mod = add_solidify(obj, -DECK_THICK, 0)
+    apply_object_modifier(obj, mod.name)
     return obj
+
+
+def build_upper_deck_clipped(z, xs_n, xe_n, r, g, b):
+    xs = xs_n * LENGTH
+    xe = xe_n * LENGTH
+    margin_x = 28.0
+    wide_half_width = SUPER_WIDTH * 0.9
+    z0 = z - DECK_THICK * 0.5
+    z1 = z + DECK_THICK * 0.5
+    obj = build_box_object("SM_Deck_upper", xs - margin_x, xe + margin_x, -wide_half_width, wide_half_width, z0, z1, r, g, b)
+
+    cutter = build_inner_hull_volume(
+        "SM_UpperEnvelopeCut_Deck",
+        xs - margin_x,
+        xe + margin_x,
+        overlap_cm=DECK_CONTACT_OVERLAP,
+        sections=max(14, int((xe - xs) / 120.0)),
+    )
+    apply_boolean_intersect(obj, cutter, "UpperDeckClip")
+
+    return obj
+
+
+def cut_standard_door_opening(target_obj, name, x_center, sill_z, width, height, thickness, y_center=0.0):
+    rough_half_w = width * 0.5 + DOOR_ROUGH_MARGIN_X
+    center_z = sill_z + height * 0.5
+    half_h = height * 0.5 + max(2.0, DOOR_ROUGH_MARGIN_Z - 2.0)
+    lower_scale = 0.82
+    radial = 28
+    profile = []
+    for i in range(radial):
+        a = 2.0 * math.pi * i / radial
+        c = math.cos(a)
+        s = math.sin(a)
+        h = half_h if s >= 0.0 else half_h * lower_scale
+        profile.append((y_center + rough_half_w * c, center_z + h * s))
+
+    verts = []
+    faces = []
+    append_extruded_profile_x(verts, faces, x_center - thickness, x_center + thickness, profile)
+    cutter = make(name, verts, faces, 0.8, 0.1, 0.1, smooth=False)
+    apply_boolean_difference(target_obj, cutter, f"{name}_Cut")
+
+
+def recut_round_hatch_on_deck(deck_obj_name, cutout, deck_center_z):
+    obj = bpy.data.objects.get(deck_obj_name)
+    if obj is None:
+        return
+    cx = cutout["x_norm"] * LENGTH
+    yc = cutout.get("y_center", 0.0)
+    radius = cutout["radius"]
+    cut_round_opening_z(
+        obj,
+        f"{deck_obj_name}_{cutout['name']}_RoundRecut",
+        deck_center_z - DECK_THICK * 1.2,
+        deck_center_z + DECK_THICK * 1.2,
+        cx,
+        yc,
+        radius,
+    )
+
+
+def recut_rect_hatch_on_deck(deck_obj_name, cutout, deck_center_z):
+    obj = bpy.data.objects.get(deck_obj_name)
+    if obj is None:
+        return
+    cx = cutout["x_norm"] * LENGTH
+    cy = cutout.get("y_center", 0.0)
+    hl = cutout["half_length"]
+    hw = cutout["half_width"]
+    # Rect recuts run after build_upper_deck_clipped, whose EXACT intersect can
+    # leave sliver edges that break a subsequent EXACT difference. Use FAST
+    # solver with a prior mesh cleanup for tolerance.
+    verts = []
+    faces = []
+    append_box(
+        verts,
+        faces,
+        cx - hl,
+        cx + hl,
+        cy - hw,
+        cy + hw,
+        deck_center_z - DECK_THICK * 1.5,
+        deck_center_z + DECK_THICK * 1.5,
+    )
+    cutter = make(f"{deck_obj_name}_{cutout['name']}_RectRecut", verts, faces, 0.8, 0.1, 0.1, smooth=False)
+    apply_boolean_difference(obj, cutter, f"{deck_obj_name}_{cutout['name']}_RectRecut_Cut", solver="FAST")
+
+
+def build_rect_hatch_liner(cutout, deck_center_z, name=None):
+    """Close the inner walls of a rect hole cut into a deck.
+
+    The FLOAT/FAST solver sometimes leaves the boundary faces of the cut
+    without proper inner walls. This builder drops an explicit liner mesh of
+    four vertical walls flush with the hole boundary, pushed 2 cm inward so
+    they always sit inside the hole and cover any boolean artifact.
+
+    The walls run from just below the deck underside to just at the deck top
+    surface — deliberately flush, no raised coaming extension. The cutout's
+    `coaming_height` is kept as data for a future dedicated coaming mesh, but
+    this liner does NOT read it (per 2026-04-16 spec: "pas censé ressortir").
+    """
+    cx = cutout["x_norm"] * LENGTH
+    cy = cutout.get("y_center", 0.0)
+    hl = cutout["half_length"]
+    hw = cutout["half_width"]
+    wall_t = 2.0  # cm, thickness of the inner wall strip
+
+    z_under = deck_center_z - DECK_THICK * 0.5 - 0.8
+    z_above = deck_center_z + DECK_THICK * 0.5
+
+    verts = []
+    faces = []
+    # Forward wall
+    append_box(
+        verts, faces,
+        cx - hl, cx - hl + wall_t,
+        cy - hw, cy + hw,
+        z_under, z_above,
+    )
+    # Aft wall
+    append_box(
+        verts, faces,
+        cx + hl - wall_t, cx + hl,
+        cy - hw, cy + hw,
+        z_under, z_above,
+    )
+    # Port wall
+    append_box(
+        verts, faces,
+        cx - hl, cx + hl,
+        cy - hw, cy - hw + wall_t,
+        z_under, z_above,
+    )
+    # Stbd wall
+    append_box(
+        verts, faces,
+        cx - hl, cx + hl,
+        cy + hw - wall_t, cy + hw,
+        z_under, z_above,
+    )
+    mesh_name = name or f"SM_{cutout['name']}_Liner"
+    return make(mesh_name, verts, faces, 0.28, 0.28, 0.28, smooth=False)
+
+
+def build_bulkhead_clipped(
+    name,
+    x_cm,
+    z_min,
+    z_max,
+    door_sill_z=None,
+    door_w=0.0,
+    door_h=0.0,
+    door_y=0.0,
+    overlap_cm=BULKHEAD_CONTACT_OVERLAP,
+    color=(0.44, 0.42, 0.38),
+):
+    x_pad = BH_THICK * 1.8
+    wide_half_width = SUPER_WIDTH * 1.05
+    z0 = z_min
+    z1 = z_max + 8.0
+    obj = build_box_object(
+        name,
+        x_cm - BH_THICK * 0.5,
+        x_cm + BH_THICK * 0.5,
+        -wide_half_width,
+        wide_half_width,
+        z0,
+        z1,
+        color[0],
+        color[1],
+        color[2],
+    )
+
+    cutter = build_inner_hull_volume(
+        f"{name}_EnvCut",
+        x_cm - x_pad,
+        x_cm + x_pad,
+        overlap_cm=overlap_cm,
+        sections=8,
+    )
+    apply_boolean_intersect(obj, cutter, f"{name}_Clip")
+
+    if door_w > 0.0 and door_h > 0.0 and door_sill_z is not None:
+        cut_standard_door_opening(
+            obj,
+            f"{name}_DoorCut",
+            x_cm,
+            door_sill_z,
+            door_w,
+            door_h,
+            BH_THICK * 1.2,
+            y_center=door_y,
+        )
+    return obj
+
+
+def build_upper_bulkhead_clipped(name, x_cm, z_floor, door_w, door_h, door_y=0.0, color=(0.44, 0.42, 0.38)):
+    return build_bulkhead_clipped(
+        name=name,
+        x_cm=x_cm,
+        z_min=z_floor,
+        z_max=upper_room_apex_z(x_cm, BULKHEAD_CONTACT_OVERLAP),
+        door_sill_z=z_floor,
+        door_w=door_w,
+        door_h=door_h,
+        door_y=door_y,
+        overlap_cm=BULKHEAD_CONTACT_OVERLAP,
+        color=color,
+    )
 
 
 def build_hatch_collar(name, deck_z, cutout, r, g, b):
@@ -1074,52 +1681,454 @@ def build_hatch_collar(name, deck_z, cutout, r, g, b):
     return make(name, verts, faces, r, g, b, smooth=False)
 
 
+def build_ladder(name, x_center, y_center, z0, z1, rail_spacing=34.0):
+    y_center += LADDER_Y_OFFSET
+    verts = []
+    faces = []
+    x0 = x_center - rail_spacing * 0.5
+    x1 = x_center + rail_spacing * 0.5
+    z0, z1 = sorted((z0, z1))
+    rail_t = 3.2
+    rung_t = 2.6
+    guide_t = 2.4
+    guide_y = y_center - 6.0
+
+    # Side rails.
+    append_box(verts, faces, x0 - rail_t * 0.5, x0 + rail_t * 0.5, y_center - rail_t * 0.5, y_center + rail_t * 0.5, z0, z1)
+    append_box(verts, faces, x1 - rail_t * 0.5, x1 + rail_t * 0.5, y_center - rail_t * 0.5, y_center + rail_t * 0.5, z0, z1)
+
+    # Rear guide rail (behind rungs).
+    append_box(
+        verts,
+        faces,
+        x_center - guide_t * 0.5,
+        x_center + guide_t * 0.5,
+        guide_y - guide_t * 0.5,
+        guide_y + guide_t * 0.5,
+        z0,
+        z1,
+    )
+
+    # Rungs.
+    rung_count = max(2, int((z1 - z0) / 34.0))
+    for i in range(rung_count + 1):
+        z = z0 + (z1 - z0) * (i / rung_count)
+        append_box(
+            verts,
+            faces,
+            x0 - 1.5,
+            x1 + 1.5,
+            y_center - rung_t * 0.5,
+            y_center + rung_t * 0.5,
+            z - rung_t * 0.5,
+            z + rung_t * 0.5,
+        )
+
+    # Small reinforcement ties between guide rail and rung plane.
+    tie_t = 1.6
+    for i in range(0, rung_count + 1, 2):
+        z = z0 + (z1 - z0) * (i / rung_count)
+        append_box(
+            verts,
+            faces,
+            x_center - 4.5,
+            x_center + 4.5,
+            guide_y + guide_t * 0.5,
+            y_center - rung_t * 0.5,
+            z - tie_t * 0.5,
+            z + tie_t * 0.5,
+        )
+
+    # Upper mounting brackets.
+    for side_x in (x0, x1):
+        append_box(
+            verts,
+            faces,
+            side_x - 2.0,
+            side_x + 2.0,
+            y_center - 2.0,
+            y_center + 2.0,
+            z1 - 10.0,
+            z1 + 10.0,
+        )
+
+    return make(name, verts, faces, 0.26, 0.26, 0.25, smooth=False)
+
+
+def build_round_hatches_and_ladders(upper_z):
+    for cutout in MAIN_DECK_CUTOUTS:
+        if cutout.get("shape") != "round":
+            continue
+        recut_round_hatch_on_deck("SM_Deck_main", cutout, DECK_MAIN_Z)
+        x = cutout["x_norm"] * LENGTH
+        y = cutout.get("y_center", 0.0)
+        radius = cutout["radius"]
+        build_cylinder_z(
+            f"SM_HatchDoor_{cutout['name']}",
+            DECK_MAIN_Z + DECK_THICK * 0.5 + 2.0,
+            DECK_MAIN_Z + DECK_THICK * 0.5 + 8.0,
+            radius * 0.82,
+            x + radius * 0.92,
+            y,
+            0.30,
+            0.31,
+            0.30,
+            segments=20,
+        )
+        build_ladder(
+            f"SM_Ladder_LowerToMain_{cutout['name']}",
+            x,
+            y,
+            DECK_LOWER_Z + DECK_THICK * 0.5 + 4.0,
+            DECK_MAIN_Z + 180.0,
+        )
+
+    for cutout in UPPER_DECK_CUTOUTS:
+        x = cutout["x_norm"] * LENGTH
+        y = cutout.get("y_center", 0.0)
+        if cutout.get("shape") == "round":
+            recut_round_hatch_on_deck("SM_Deck_upper", cutout, upper_z)
+        elif cutout.get("shape") == "rect":
+            recut_rect_hatch_on_deck("SM_Deck_upper", cutout, upper_z)
+            # Explicit liner so the four inner walls of the hole always read
+            # as closed, regardless of boolean solver quirks.
+            build_rect_hatch_liner(cutout, upper_z)
+
+        # Main->upper access via steep stair only (no ladder).
+        # Stair X offset relative to cutout center was -240 cm in the original,
+        # but the top step was landing too far forward of the hole. Shifted
+        # +113 cm on X per 2026-04-16 user spec so the arrival meets the aft
+        # edge of the hole and the player gets deck in front after the climb.
+        #
+        # z_top is chosen so that the top tread TOP surface is flush with the
+        # upper deck TOP surface (i.e. tread_top_z == upper_z + DECK_THICK/2).
+        # Tread thickness is 3.5 cm, so z_top (step bottom) = upper_z + DECK/2 - 3.5.
+        step_count = 11
+        tread_thickness = 3.5
+        stair_x0 = x - 127.0
+        stair_x1 = stair_x0 + 208.0
+        run = (stair_x1 - stair_x0) / step_count
+        z_bottom = DECK_MAIN_Z + DECK_THICK * 0.5 + 2.0
+        z_top = upper_z + DECK_THICK * 0.5 - tread_thickness
+        # Keep one extra step while making the last tread exactly meet arrival height.
+        rise = (z_top - z_bottom) / max(1, (step_count - 1))
+        stair_half_w = 32.0
+        rail_outer = stair_half_w + 10.0
+        handrail_height = 95.0  # cm above tread, ergonomic standard
+        stair_parts = []
+
+        def stair_z_at(xv):
+            t = (xv - stair_x0) / max(1.0, stair_x1 - stair_x0)
+            t = max(0.0, min(1.0, t))
+            return z_bottom + (z_top - z_bottom) * t
+
+        for i in range(step_count):
+            sx0 = stair_x0 + run * i
+            sx1 = sx0 + run * 0.9
+            sz0 = z_bottom + rise * i
+            sz1 = sz0 + 3.5
+            stair_parts.append(build_box_object(
+                f"SM_Stair_UpperToMain_{cutout['name']}_{i}",
+                sx0,
+                sx1,
+                y - stair_half_w,
+                y + stair_half_w,
+                sz0,
+                sz1,
+                0.28,
+                0.28,
+                0.27,
+            ))
+
+        # Side stringers under the stair.
+        stair_parts.append(build_ramp_x_oriented(
+            f"SM_StairStringer_{cutout['name']}_Port",
+            stair_x0,
+            stair_x1,
+            y - stair_half_w - 3.0,
+            y - stair_half_w + 1.0,
+            z_bottom - 10.0,
+            z_top - 10.0,
+            5.0,
+            0.24,
+            0.24,
+            0.23,
+        ))
+        stair_parts.append(build_ramp_x_oriented(
+            f"SM_StairStringer_{cutout['name']}_Stbd",
+            stair_x0,
+            stair_x1,
+            y + stair_half_w - 1.0,
+            y + stair_half_w + 3.0,
+            z_bottom - 10.0,
+            z_top - 10.0,
+            5.0,
+            0.24,
+            0.24,
+            0.23,
+        ))
+
+        # Handrails aligned with stair direction, parallel to the tread slope
+        # at a constant 95 cm above the tread top surface.
+        rail_z0 = z_bottom + tread_thickness + handrail_height
+        rail_z1 = z_top + tread_thickness + handrail_height
+        stair_parts.append(build_ramp_x_oriented(
+            f"SM_StairRail_{cutout['name']}_Port",
+            stair_x0,
+            stair_x1,
+            y - rail_outer - 2.0,
+            y - rail_outer + 2.0,
+            rail_z0,
+            rail_z1,
+            2.2,
+            0.24,
+            0.24,
+            0.23,
+        ))
+        stair_parts.append(build_ramp_x_oriented(
+            f"SM_StairRail_{cutout['name']}_Stbd",
+            stair_x0,
+            stair_x1,
+            y + rail_outer - 2.0,
+            y + rail_outer + 2.0,
+            rail_z0,
+            rail_z1,
+            2.2,
+            0.24,
+            0.24,
+            0.23,
+        ))
+        # Posts go from tread top up to the rail at a constant 95 cm height.
+        for side, suffix in ((-1.0, "Port"), (1.0, "Stbd")):
+            py = y + side * rail_outer
+            for i in range(6):
+                t = i / 5.0
+                px = stair_x0 + (stair_x1 - stair_x0) * t
+                tread_top_z = stair_z_at(px) + tread_thickness
+                pz0 = tread_top_z
+                pz1 = tread_top_z + handrail_height + 2.0
+                stair_parts.append(build_box_object(
+                    f"SM_StairRailPost_{cutout['name']}_{suffix}_{i}",
+                    px - 1.8,
+                    px + 1.8,
+                    py - 1.8,
+                    py + 1.8,
+                    pz0,
+                    pz1,
+                    0.24,
+                    0.24,
+                    0.23,
+                ))
+
+        # Under-stair supports from main deck.
+        for i, px in enumerate((stair_x0 + 58.0, stair_x0 + 136.0)):
+            z0 = DECK_MAIN_Z + DECK_THICK * 0.5 + 2.0
+            z1 = stair_z_at(px) - 10.5
+            if z1 <= z0 + 8.0:
+                continue
+            stair_parts.append(build_box_object(
+                f"SM_StairSupport_{cutout['name']}_{i}",
+                px - 3.0,
+                px + 3.0,
+                y - 9.0,
+                y + 9.0,
+                z0,
+                z1,
+                0.24,
+                0.24,
+                0.23,
+            ))
+
+        # Hangers up to upper deck underside.
+        hanger_z0 = z_top + 24.0
+        hanger_z1 = deck_bottom_z(upper_z) - 2.0
+        if hanger_z1 > hanger_z0 + 6.0:
+            for side, suffix in ((-1.0, "Port"), (1.0, "Stbd")):
+                py = y + side * rail_outer
+                for i, px in enumerate((stair_x1 - 16.0, stair_x1 - 54.0)):
+                    stair_parts.append(build_box_object(
+                        f"SM_StairHanger_{cutout['name']}_{suffix}_{i}",
+                        px - 1.8,
+                        px + 1.8,
+                        py - 1.8,
+                        py + 1.8,
+                        hanger_z0,
+                        hanger_z1,
+                        0.24,
+                        0.24,
+                        0.23,
+                    ))
+
+        merge_mesh_objects(
+            f"SM_Stair_UpperToMain_{cutout['name']}",
+            stair_parts,
+        )
+
+    for cutout in LOWER_DECK_CUTOUTS:
+        if cutout.get("shape") != "round":
+            continue
+        recut_round_hatch_on_deck("SM_Deck_lower_main", cutout, DECK_LOWER_Z)
+        x = cutout["x_norm"] * LENGTH
+        y = cutout.get("y_center", 0.0)
+        radius = cutout["radius"]
+        door_name = "SM_HatchDoor_FondAccess" if cutout["name"] == "FondAccess" else f"SM_HatchDoor_{cutout['name']}"
+        build_cylinder_z(
+            door_name,
+            DECK_LOWER_Z + DECK_THICK * 0.5 + 1.5,
+            DECK_LOWER_Z + DECK_THICK * 0.5 + 7.5,
+            radius * 0.84,
+            x + radius * 0.84,
+            y,
+            0.30,
+            0.31,
+            0.30,
+            segments=20,
+        )
+        hull_floor_z = -sample_curve(cutout["x_norm"]) + HULL_THICK + 16.0
+        build_ladder(
+            "SM_Ladder_LowerToFondAccess",
+            x,
+            y,
+            hull_floor_z,
+            DECK_LOWER_Z - DECK_THICK * 0.5 - 4.0,
+        )
+
+    # Engine upper deck access ladder down toward hull floor.
+    engine_x = 0.865 * LENGTH
+    hull_floor_z = -sample_curve(0.865) + HULL_THICK + 16.0
+    build_ladder(
+        "SM_Ladder_EngineUpper_ToHullFloor",
+        engine_x,
+        0.0,
+        hull_floor_z,
+        -98.0,
+    )
+
+
 def build_hydroplanes():
-    objs = []
-    for name, xn, span, chord in (("Bow", 0.12, 180, 130), ("Stern", 0.88, 180, 130)):
+    """Bow + stern hydroplanes with tapered NACA-style silhouette and root fairing.
+
+    Bow and stern stay separate (they pivot independently for depth control).
+    A small conical pod at the root hides the insertion into the hull.
+    Solidify is APPLIED so pivots compute correctly after the pass.
+    """
+    grouped = {"Bow": [], "Stern": []}
+    fairing_parts = []
+    for name, xn, span, chord in (("Bow", 0.12, 180.0, 130.0), ("Stern", 0.88, 180.0, 130.0)):
         x = xn * LENGTH
         r = sample_curve(xn)
-        half_chord = chord / 2
-        for side, label in ((1, "Stbd"), (-1, "Port")):
+        half_chord_root = chord * 0.5
+        half_chord_tip = chord * 0.30
+        le_fillet = 14.0
+        for side, label in ((1.0, "Stbd"), (-1.0, "Port")):
+            # 6-vertex NACA-ish silhouette: sharp-tapered tip with rounded root LE.
+            y_root = r * side
+            y_tip = (r + span) * side
             verts = [
-                (x - half_chord, r * side, 0),
-                (x + half_chord, r * side, 0),
-                (x + half_chord * 0.5, (r + span) * side, 0),
-                (x - half_chord * 0.4, (r + span) * side, 0),
+                (x - half_chord_root + le_fillet, y_root, 0.0),   # 0 root LE fillet start
+                (x + half_chord_root,             y_root, 0.0),   # 1 root TE
+                (x + half_chord_root * 0.55,      (r + span * 0.55) * side, 0.0),  # 2 mid TE
+                (x + half_chord_tip * 0.6,        y_tip, 0.0),    # 3 tip TE
+                (x - half_chord_tip + 8.0,        y_tip, 0.0),    # 4 tip LE
+                (x - half_chord_root * 0.7,       (r + span * 0.55) * side, 0.0),  # 5 mid LE
+                (x - half_chord_root,             y_root, 0.0),   # 6 root LE
             ]
-            obj = make(f"SM_Hydro_{name}_{label}", verts, [(0, 1, 2, 3)], 0.16, 0.20, 0.18, smooth=False)
-            add_solidify(obj, 10, 0)
-            objs.append(obj)
-    return objs
+            faces = [
+                (0, 1, 2, 5),
+                (5, 2, 3, 4),
+                (6, 0, 5),
+            ]
+            obj = make(f"SM_Hydro_{name}_{label}", verts, faces, 0.16, 0.20, 0.18, smooth=False)
+            mod = add_solidify(obj, 12.0, 0)
+            apply_object_modifier(obj, mod.name)
+            grouped[name].append(obj)
+
+            # Root fairing: small ellipsoidal-ish box covering the hull-to-plane joint.
+            fair_x0 = x - half_chord_root * 0.55
+            fair_x1 = x + half_chord_root * 0.55
+            fair_y_inner = y_root - side * 6.0
+            fair_y_outer = y_root + side * 18.0
+            fair_z0 = -18.0
+            fair_z1 = 18.0
+            fy0, fy1 = sorted((fair_y_inner, fair_y_outer))
+            fairing_parts.append(build_box_object(
+                f"SM_Hydro_{name}_Fairing_{label}",
+                fair_x0,
+                fair_x1,
+                fy0,
+                fy1,
+                fair_z0,
+                fair_z1,
+                0.16,
+                0.18,
+                0.17,
+            ))
+
+    merged = []
+    for name in ("Bow", "Stern"):
+        merged_obj = merge_mesh_objects(f"SM_Hydro_{name}", grouped[name])
+        if merged_obj:
+            merged.append(merged_obj)
+    if fairing_parts:
+        merge_mesh_objects("SM_Hydro_Fairings", fairing_parts)
+    return merged
 
 
 def build_fins():
-    objs = []
+    """Four X-shaped tail fins with rounded leading edge and root-to-tip taper.
+
+    Geometry: 6-vertex planar silhouette per fin (swept leading edge + tapered
+    tip + fillet at root). Solidify is APPLIED so the pivot reader sees the
+    finished shell. All four fins merge into SM_FinAssembly since they are
+    structural (no independent motion).
+    """
     fx = 0.955 * LENGTH
     r = sample_curve(0.955)
-    half_chord = 90
+    half_chord_root = 95.0
+    half_chord_tip = 35.0
+    le_fillet = 22.0
+    te_taper = 16.0
+    span = 220.0
+    parts = []
 
     for angle_deg in (45, 135, 225, 315):
         a = math.radians(angle_deg)
         ca, sa = math.cos(a), math.sin(a)
-        span = 250
-        verts = [
-            (fx - half_chord, r * ca, r * sa),
-            (fx + half_chord, r * ca, r * sa),
-            (fx + half_chord * 0.6, (r + span) * ca, (r + span) * sa),
-            (fx - half_chord * 0.3, (r + span) * ca, (r + span) * sa),
-        ]
-        obj = make(f"SM_Fin_{angle_deg}", verts, [(0, 1, 2, 3)], 0.16, 0.20, 0.18, smooth=False)
-        add_solidify(obj, 12, 0)
-        objs.append(obj)
 
-    return objs
+        def at(r_local, dx):
+            return (fx + dx, r_local * ca, r_local * sa)
+
+        r_root = r
+        r_mid = r + span * 0.5
+        r_tip = r + span
+
+        verts = [
+            at(r_root, -half_chord_root + le_fillet),             # 0 root LE fillet start
+            at(r_root, half_chord_root),                          # 1 root TE
+            at(r_mid,  half_chord_root * 0.55),                   # 2 mid TE
+            at(r_tip,  half_chord_tip * 0.6),                     # 3 tip TE
+            at(r_tip, -half_chord_tip + te_taper),                # 4 tip LE
+            at(r_mid, -half_chord_root * 0.7),                    # 5 mid LE
+            at(r_root, -half_chord_root),                         # 6 root LE tip
+        ]
+        faces = [
+            (0, 1, 2, 5),
+            (5, 2, 3, 4),
+            (6, 0, 5),      # leading-edge fillet triangle
+        ]
+        obj = make(f"SM_Fin_{angle_deg}", verts, faces, 0.16, 0.20, 0.18, smooth=False)
+        mod = add_solidify(obj, 14.0, 0)
+        apply_object_modifier(obj, mod.name)
+        parts.append(obj)
+
+    return [merge_mesh_objects("SM_FinAssembly", parts)]
 
 
 def build_rudder():
     nx = 0.955
     x_root = nx * LENGTH
     hull_r = sample_curve(nx)
+    rudder_parts = []
 
     fairing_verts = [
         (x_root - 92.0, 0.0, hull_r * 0.28),
@@ -1129,6 +2138,7 @@ def build_rudder():
     ]
     fairing = make("SM_Rudder_Fairing", fairing_verts, [(0, 1, 2, 3)], 0.16, 0.19, 0.17, smooth=False)
     add_solidify(fairing, 18.0, 0)
+    rudder_parts.append(fairing)
 
     post_verts = [
         (x_root - 18.0, 0.0, hull_r * 0.30),
@@ -1138,6 +2148,7 @@ def build_rudder():
     ]
     post = make("SM_Rudder_Post", post_verts, [(0, 1, 2, 3)], 0.17, 0.20, 0.18, smooth=False)
     add_solidify(post, 16.0, 0)
+    rudder_parts.append(post)
 
     blade_verts = [
         (x_root + 42.0, 0.0, hull_r * 0.34),
@@ -1147,6 +2158,7 @@ def build_rudder():
     ]
     blade = make("SM_Rudder", blade_verts, [(0, 1, 2, 3)], 0.19, 0.22, 0.20, smooth=False)
     add_solidify(blade, 14.0, 0)
+    rudder_parts.append(blade)
 
     tip_verts = [
         (x_root + 126.0, 0.0, hull_r + 152.0),
@@ -1156,6 +2168,7 @@ def build_rudder():
     ]
     tip = make("SM_Rudder_Tip", tip_verts, [(0, 1, 2, 3)], 0.17, 0.20, 0.18, smooth=False)
     add_solidify(tip, 12.0, 0)
+    rudder_parts.append(tip)
 
     skeg_verts = [
         (x_root - 44.0, 0.0, -hull_r * 0.58),
@@ -1165,6 +2178,7 @@ def build_rudder():
     ]
     skeg = make("SM_Skeg", skeg_verts, [(0, 1, 2, 3)], 0.16, 0.18, 0.17, smooth=False)
     add_solidify(skeg, 13.0, 0)
+    merge_mesh_objects("SM_RudderAssembly", rudder_parts)
 
 
 def build_propulsion_room_layout():
@@ -1326,7 +2340,8 @@ def build_propulsion_room_layout():
 
 
 def build_propulsor():
-    objs = []
+    rotating_parts = []
+    static_parts = []
     x = LENGTH - 8.0
     stern_r = sample_curve(0.995)
     duct_r = stern_r * 2.22
@@ -1366,7 +2381,8 @@ def build_propulsor():
         faces.append((i, inner_base + i, inner_base + ni, ni))
         faces.append((n + i, n + ni, inner_base + n + ni, inner_base + n + i))
 
-    objs.append(make("SM_Duct", verts, faces, 0.20, 0.22, 0.20))
+    duct = make("SM_Duct", verts, faces, 0.20, 0.22, 0.20)
+    static_parts.append(duct)
 
     hub_verts = []
     hub_faces = []
@@ -1405,7 +2421,8 @@ def build_propulsor():
     for i in range(hub_n):
         hub_faces.append((front_center, (i + 1) % hub_n, i))
 
-    objs.append(make("SM_Hub", hub_verts, hub_faces, 0.30, 0.28, 0.25))
+    hub_obj = make("SM_Hub", hub_verts, hub_faces, 0.30, 0.28, 0.25)
+    rotating_parts.append(hub_obj)
 
     rotor_x0 = x + duct_len * 0.44
     rotor_x1 = x + duct_len * 0.58
@@ -1419,9 +2436,10 @@ def build_propulsor():
     for i in range(rotor_n):
         ni = (i + 1) % rotor_n
         rotor_faces.append((i, ni, rotor_n + ni, rotor_n + i))
-    objs.append(make("SM_Rotor", rotor_verts, rotor_faces, 0.29, 0.27, 0.24))
+    rotor_obj = make("SM_Rotor", rotor_verts, rotor_faces, 0.29, 0.27, 0.24)
+    rotating_parts.append(rotor_obj)
 
-    build_cylinder_x(
+    ring_obj = build_cylinder_x(
         "SM_RotorHubRing",
         rotor_x0 + 3.0,
         rotor_x1 - 3.0,
@@ -1433,6 +2451,7 @@ def build_propulsor():
         0.25,
         segments=18,
     )
+    rotating_parts.append(ring_obj)
 
     blade_x_center = x + duct_len * 0.50
     blade_root = rotor_r * 0.99
@@ -1451,7 +2470,7 @@ def build_propulsor():
         blade_faces = [(0, 1, 3, 2), (2, 3, 5, 4)]
         obj = make(f"SM_Blade_{blade_index}", blade_verts, blade_faces, 0.35, 0.28, 0.22, smooth=False)
         add_solidify(obj, 6.0, 0)
-        objs.append(obj)
+        rotating_parts.append(obj)
 
     stator_count = 6
     stator_x0 = x + duct_len * 0.90
@@ -1472,9 +2491,11 @@ def build_propulsor():
             (stator_x1, stator_tip * ca + pa * stator_thickness, stator_tip * sa + pb * stator_thickness),
             (stator_x0, stator_root * ca + pa * stator_thickness, stator_root * sa + pb * stator_thickness),
         ]
-        objs.append(make(f"SM_Stator_{index}", verts, [(0, 1, 2, 3)], 0.20, 0.21, 0.20, smooth=False))
+        static_parts.append(make(f"SM_Stator_{index}", verts, [(0, 1, 2, 3)], 0.20, 0.21, 0.20, smooth=False))
 
-    return objs
+    merged_rotor = merge_mesh_objects("SM_Propeller", rotating_parts)
+    merged_static = merge_mesh_objects("SM_Propulsor_Duct", static_parts)
+    return [obj for obj in (merged_rotor, merged_static) if obj]
 
 
 def airlock_spec(upper_deck_z):
@@ -1588,8 +2609,6 @@ def cut_airlock_exit_pocket(hull_obj, spec):
         ],
     )
     cutter = make("SM_Airlock_ExitCutter", verts, faces, 0.8, 0.1, 0.1, smooth=False)
-    cutter.display_type = "WIRE"
-    cutter.hide_render = True
     apply_boolean_difference(hull_obj, cutter, "AirlockExitCut")
 
 
@@ -1601,7 +2620,12 @@ def build_airlock_exit_cassette(spec):
     sill_z = spec["sill_z"]
     head_z = spec["opening_top_z"]
 
-    build_box_object(
+    # Four frame pieces (Port/Stbd walls, Header ceiling, Sill floor) merged
+    # into a single SM_Airlock_Cassette static mesh. The former separate "Back"
+    # piece was a 4 cm slab behind the battants that served no gameplay purpose
+    # and visually sealed the passage; it has been removed per 2026-04-16 spec.
+    parts = []
+    parts.append(build_box_object(
         "SM_Airlock_Cassette_Port",
         frame_x0,
         frame_x1,
@@ -1612,8 +2636,8 @@ def build_airlock_exit_cassette(spec):
         0.28,
         0.30,
         0.29,
-    )
-    build_box_object(
+    ))
+    parts.append(build_box_object(
         "SM_Airlock_Cassette_Stbd",
         frame_x0,
         frame_x1,
@@ -1624,8 +2648,8 @@ def build_airlock_exit_cassette(spec):
         0.28,
         0.30,
         0.29,
-    )
-    build_box_object(
+    ))
+    parts.append(build_box_object(
         "SM_Airlock_Cassette_Header",
         frame_x0,
         frame_x1,
@@ -1636,8 +2660,8 @@ def build_airlock_exit_cassette(spec):
         0.28,
         0.30,
         0.29,
-    )
-    build_box_object(
+    ))
+    parts.append(build_box_object(
         "SM_Airlock_Cassette_Sill",
         frame_x0,
         frame_x1,
@@ -1648,20 +2672,13 @@ def build_airlock_exit_cassette(spec):
         0.28,
         0.30,
         0.29,
-    )
-    build_box_object(
-        "SM_Airlock_Cassette_Back",
-        frame_x1,
-        frame_x1 + 4.0,
-        -cassette_hw,
-        cassette_hw,
-        sill_z,
-        head_z,
-        0.22,
-        0.24,
-        0.23,
-    )
+    ))
+    merge_mesh_objects("SM_Airlock_Cassette", parts)
 
+    # Sliding battants: panel_gap=2, panel_margin=4 gives a 96x192 cm cover of
+    # a 100x200 cm opening. Character is 180 cm tall so the 190 cm clearance
+    # budget is preserved with 10 cm to spare. Seal strip is welded into the
+    # Port battant mesh (bulkheads_doors handles that).
     build_sliding_split_door(
         name_prefix="SM_Airlock_Door",
         x_center=frame_x0 + 10.0,
@@ -1670,11 +2687,36 @@ def build_airlock_exit_cassette(spec):
         append_box_fn=append_box,
         width=DOOR_W,
         height=DOOR_H,
-        panel_gap=8.0,
-        panel_margin=12.0,
+        panel_gap=2.0,
+        panel_margin=4.0,
         panel_depth=7.0,
         frame_depth=12.0,
+        seal_center_width=2.0,
         color=(0.33, 0.35, 0.34),
+    )
+
+    # Manual SAS hull cutter.
+    # The script's automatic cut_airlock_exit_pocket + solidify chain sometimes
+    # leaves the hull not fully pierced at the battant level. Ship a ready-made
+    # cutter mesh so the user can select hull + cutter and apply Boolean
+    # Difference by hand in Blender. Sized to cover the doorway with a comfort
+    # margin and extend well past the aft of the hull.
+    cutter_x0 = spec["x_back"] - 24.0
+    cutter_x1 = LENGTH + 160.0
+    cutter_hw = spec["opening_hw"] + 14.0          # 64 cm half-width -> 128 cm wide
+    cutter_z0 = spec["sill_z"] - 8.0
+    cutter_z1 = spec["opening_top_z"] + 24.0        # >=190 cm vertical clearance
+    build_box_object(
+        "SM_SAS_HullCutter_Manual",
+        cutter_x0,
+        cutter_x1,
+        -cutter_hw,
+        cutter_hw,
+        cutter_z0,
+        cutter_z1,
+        0.80,
+        0.10,
+        0.10,
     )
 
 
@@ -1732,36 +2774,13 @@ def build_airlock_battants(spec):
 
 def build_superstructure_armory_partition(upper_z):
     x_cm = UPPER_ARMORY_PARTITION_X_NORM * LENGTH
-    top_cap = upper_inner_apex_z(x_cm, margin=1.5)
-    top_z = min(
-        compute_bulkhead_top_z(
-            UPPER_ARMORY_PARTITION_X_NORM,
-            upper_z,
-            DECK_MAIN_Z,
-            sample_curve,
-            superstructure_state,
-            min_main_height=420.0,
-            min_upper_clearance=240.0,
-            top_margin=12.0,
-        ),
-        top_cap,
-    )
-    place_bulkhead_with_clearance(
-        name="SM_BH_Upper_Armory",
-        x_cm=x_cm,
-        z_min=upper_z,
-        z_max=top_z,
-        door_sill_z=upper_z,
-        interior_hw_fn=upper_bulkhead_hw,
-        make_fn=make,
-        add_solidify_fn=add_solidify,
-        bh_thickness=BH_THICK,
-        door_w=DOOR_W,
-        door_h=DOOR_H,
-        door_clearance_h=DOOR_CLEARANCE_H,
-        top_margin=24.0,
-        max_z_cap=top_cap,
-        color=(0.44, 0.42, 0.38),
+    return build_upper_bulkhead_clipped(
+        "SM_BH_Upper_Armory",
+        x_cm,
+        upper_z,
+        DOOR_W,
+        DOOR_H,
+        door_y=UPPER_ARMORY_DOOR_Y_OFFSET,
     )
 
 
@@ -1771,7 +2790,7 @@ def build_lower_technical_layout():
     catwalk_z1 = catwalk_z0 + BALLAST_CATWALK_THICK
 
     # Lower Deck Main only in the central hub room between ballast compartments.
-    build_deck("lower_main", DECK_LOWER_Z, LOWER_HUB_START, LOWER_HUB_END, 0.29, 0.28, 0.26)
+    build_deck("lower_main", DECK_LOWER_Z, LOWER_HUB_START, LOWER_HUB_END, 0.29, 0.28, 0.26, hw_fn=lower_deck_hw)
 
     for pair in BALLAST_PAIRS:
         half_len = pair["length_norm"] * LENGTH * 0.5
@@ -1912,13 +2931,13 @@ def build_turret_hardpoints():
 
 def build_turret_module(name, x_center, mount, socket_plane_z):
     if name == "AftTop":
-        build_manual_turret_module(name, x_center, socket_plane_z)
-        return
+        return build_manual_turret_module(name, x_center, socket_plane_z)
 
     sign = 1.0 if mount == "top" else -1.0
+    parts = []
     base_z0 = socket_plane_z if mount == "top" else socket_plane_z - 22.0
     base_z1 = base_z0 + 22.0
-    build_box_object(
+    parts.append(build_box_object(
         f"SM_TurretBase_{name}",
         x_center - 26.0,
         x_center + 26.0,
@@ -1929,10 +2948,10 @@ def build_turret_module(name, x_center, mount, socket_plane_z):
         0.22,
         0.24,
         0.22,
-    )
+    ))
 
     ring_z = base_z1 + sign * 6.0
-    build_cylinder_x(
+    parts.append(build_cylinder_x(
         f"SM_TurretRing_{name}",
         x_center - 10.0,
         x_center + 10.0,
@@ -1943,11 +2962,11 @@ def build_turret_module(name, x_center, mount, socket_plane_z):
         0.26,
         0.24,
         segments=18,
-    )
+    ))
 
     body_z0 = ring_z + (4.0 if mount == "top" else -32.0)
     body_z1 = body_z0 + 32.0
-    build_box_object(
+    parts.append(build_box_object(
         f"SM_TurretBody_{name}",
         x_center - 34.0,
         x_center + 28.0,
@@ -1958,11 +2977,11 @@ def build_turret_module(name, x_center, mount, socket_plane_z):
         0.20,
         0.21,
         0.20,
-    )
+    ))
 
     yoke_z0 = (body_z1 - 8.0) if mount == "top" else (body_z0 + 8.0)
     yoke_z1 = yoke_z0 + (10.0 if mount == "top" else -10.0)
-    build_box_object(
+    parts.append(build_box_object(
         f"SM_TurretYoke_{name}",
         x_center + 10.0,
         x_center + 42.0,
@@ -1973,11 +2992,11 @@ def build_turret_module(name, x_center, mount, socket_plane_z):
         0.21,
         0.22,
         0.21,
-    )
+    ))
 
     barrel_z = body_z1 - 6.0 if mount == "top" else body_z0 + 6.0
     for index, barrel_y in enumerate((-12.0, 12.0)):
-        build_cylinder_x(
+        parts.append(build_cylinder_x(
             f"SM_TurretBarrel_{name}_{index}",
             x_center + 34.0,
             x_center + 148.0,
@@ -1988,13 +3007,16 @@ def build_turret_module(name, x_center, mount, socket_plane_z):
             0.19,
             0.18,
             segments=12,
-        )
+        ))
+
+    return merge_mesh_objects(f"SM_Turret_{name}", parts)
 
 
 def build_manual_turret_module(name, x_center, socket_plane_z):
     tub_z0 = socket_plane_z
     tub_z1 = tub_z0 + 24.0
-    build_box_object(
+    parts = []
+    parts.append(build_box_object(
         f"SM_TurretBase_{name}",
         x_center - 28.0,
         x_center + 28.0,
@@ -2005,8 +3027,8 @@ def build_manual_turret_module(name, x_center, socket_plane_z):
         0.22,
         0.24,
         0.22,
-    )
-    build_cylinder_x(
+    ))
+    parts.append(build_cylinder_x(
         f"SM_TurretTub_{name}",
         x_center - 16.0,
         x_center + 16.0,
@@ -2017,8 +3039,8 @@ def build_manual_turret_module(name, x_center, socket_plane_z):
         0.24,
         0.22,
         segments=18,
-    )
-    build_box_object(
+    ))
+    parts.append(build_box_object(
         f"SM_TurretShield_{name}",
         x_center + 8.0,
         x_center + 22.0,
@@ -2029,9 +3051,9 @@ def build_manual_turret_module(name, x_center, socket_plane_z):
         0.20,
         0.21,
         0.20,
-    )
+    ))
     for index, barrel_y in enumerate((-11.0, 11.0)):
-        build_cylinder_x(
+        parts.append(build_cylinder_x(
             f"SM_TurretBarrel_{name}_{index}",
             x_center + 18.0,
             x_center + 138.0,
@@ -2042,9 +3064,9 @@ def build_manual_turret_module(name, x_center, socket_plane_z):
             0.19,
             0.18,
             segments=12,
-        )
+        ))
     for index, grip_y in enumerate((-18.0, 18.0)):
-        build_cylinder_x(
+        parts.append(build_cylinder_x(
             f"SM_TurretGrip_{name}_{index}",
             x_center - 8.0,
             x_center + 12.0,
@@ -2055,7 +3077,9 @@ def build_manual_turret_module(name, x_center, socket_plane_z):
             0.19,
             0.18,
             segments=10,
-        )
+        ))
+
+    return merge_mesh_objects(f"SM_Turret_{name}", parts)
 
 
 def hull_surface_y(x_cm, z_cm, side, offset=0.0):
@@ -2181,61 +3205,127 @@ def build_hull_gameplay_detail_kit(hull_obj, airlock_spec):
 
 
 def build_interior_props(upper_z):
-    console_z0 = DECK_MAIN_Z + DECK_THICK
-    console_z1 = console_z0 + 82.0
-    build_box_object(
-        "SM_HelmConsole",
-        0.438 * LENGTH,
-        0.492 * LENGTH,
-        -46.0,
-        46.0,
-        console_z0,
-        console_z1,
-        0.22,
-        0.23,
-        0.22,
-    )
-    build_box_object(
-        "SM_HelmDisplay",
-        0.480 * LENGTH,
-        0.492 * LENGTH,
-        -42.0,
-        42.0,
-        console_z1 - 28.0,
-        console_z1 + 18.0,
-        0.18,
-        0.20,
-        0.19,
-    )
+    # SM_HelmConsole and SM_HelmDisplay removed on 2026-04-16. They were blocky
+    # placeholders that clashed with the lowpoly/voxel art direction. A proper
+    # voxel helm kit can be authored in Blender directly, or added back here
+    # later as a dedicated builder.
+    ceiling_z = deck_bottom_z(upper_z) - 6.0
 
-    for suffix, side in (("Port", -1.0), ("Stbd", 1.0)):
-        y0 = side * 150.0
-        y1 = side * 92.0
-        by0, by1 = sorted((y0, y1))
-        build_box_object(
-            f"SM_TurretStation_Fwd_{suffix}",
-            0.472 * LENGTH,
-            0.520 * LENGTH,
-            by0,
-            by1,
-            console_z0,
-            console_z0 + 74.0,
-            0.21,
-            0.22,
-            0.21,
+    def build_turret_scope_station(name, x_center, y_center):
+        eye_z = DECK_MAIN_Z + 175.0
+        scope_top = ceiling_z + 4.0
+        scope_static_bottom = eye_z + 28.0
+        static_parts = []
+        rotating_parts = []
+
+        static_parts.append(
+            build_cylinder_z(
+                f"SM_TurretStation_{name}_Drop",
+                scope_static_bottom,
+                scope_top,
+                8.0,
+                x_center,
+                y_center,
+                0.21,
+                0.22,
+                0.21,
+                segments=18,
+            )
         )
-        build_box_object(
-            f"SM_TurretStation_Aft_{suffix}",
-            0.560 * LENGTH,
-            0.608 * LENGTH,
-            by0,
-            by1,
-            console_z0,
-            console_z0 + 74.0,
-            0.21,
-            0.22,
-            0.21,
+        static_parts.append(
+            build_cylinder_z(
+                f"SM_TurretStation_{name}_CeilingCollar",
+                scope_top - 18.0,
+                scope_top + 2.0,
+                15.0,
+                x_center,
+                y_center,
+                0.23,
+                0.24,
+                0.23,
+                segments=20,
+            )
         )
+
+        rotating_parts.append(
+            build_cylinder_z(
+                f"SM_TurretStation_{name}_AxisHub",
+                eye_z - 26.0,
+                eye_z + 18.0,
+                7.0,
+                x_center,
+                y_center,
+                0.20,
+                0.21,
+                0.20,
+                segments=16,
+            )
+        )
+        rotating_parts.append(
+            build_box_object(
+                f"SM_TurretStation_{name}_Head",
+                x_center - 16.0,
+                x_center + 16.0,
+                y_center - 12.0,
+                y_center + 12.0,
+                eye_z - 16.0,
+                eye_z + 10.0,
+                0.19,
+                0.20,
+                0.19,
+            )
+        )
+
+        for suffix, side in (("Port", -1.0), ("Stbd", 1.0)):
+            handle_y = y_center + side * 22.0
+            rotating_parts.append(
+                build_cylinder_x(
+                    f"SM_TurretStation_{name}_HandleBar_{suffix}",
+                    x_center - 14.0,
+                    x_center + 14.0,
+                    2.0,
+                    handle_y,
+                    eye_z - 4.0,
+                    0.18,
+                    0.19,
+                    0.18,
+                    segments=10,
+                )
+            )
+            rotating_parts.append(
+                build_cylinder_z(
+                    f"SM_TurretStation_{name}_HandlePostFwd_{suffix}",
+                    eye_z - 18.0,
+                    eye_z + 8.0,
+                    1.7,
+                    x_center + 9.0,
+                    handle_y,
+                    0.18,
+                    0.19,
+                    0.18,
+                    segments=10,
+                )
+            )
+            rotating_parts.append(
+                build_cylinder_z(
+                    f"SM_TurretStation_{name}_HandlePostAft_{suffix}",
+                    eye_z - 18.0,
+                    eye_z + 8.0,
+                    1.7,
+                    x_center - 9.0,
+                    handle_y,
+                    0.18,
+                    0.19,
+                    0.18,
+                    segments=10,
+                )
+            )
+
+        merge_mesh_objects(f"SM_TurretStation_{name}_Static", static_parts)
+        merge_mesh_objects(f"SM_TurretStation_{name}_Rotator", rotating_parts)
+
+    build_turret_scope_station("Fwd", 0.506 * LENGTH, 0.0)
+    build_turret_scope_station("Aft", 0.586 * LENGTH, 0.0)
 
     for suffix, side in (("Port", -1.0), ("Stbd", 1.0)):
         y0 = side * 188.0
@@ -2254,18 +3344,141 @@ def build_interior_props(upper_z):
             0.23,
         )
 
-    build_box_object(
-        "SM_UpperArmoryRack",
-        0.242 * LENGTH,
-        0.266 * LENGTH,
-        -150.0,
-        150.0,
-        upper_z + 4.0,
-        upper_z + 150.0,
-        0.22,
-        0.23,
-        0.22,
+    # Crew quarter: two single-mesh utility props (replace bunks/tables/chairs).
+    def build_crew_quarter_prop(name, x0, x1, y0, y1):
+        verts = []
+        faces = []
+        # Base chest
+        append_box(verts, faces, x0, x1, y0, y1, DECK_MAIN_Z + 10.0, DECK_MAIN_Z + 60.0)
+        # Top locker
+        append_box(
+            verts,
+            faces,
+            x0 + 6.0,
+            x1 - 6.0,
+            y0 + 4.0,
+            y1 - 4.0,
+            DECK_MAIN_Z + 60.0,
+            DECK_MAIN_Z + 146.0,
+        )
+        # Front service shelf
+        append_box(
+            verts,
+            faces,
+            x0 - 12.0,
+            x0 + 6.0,
+            y0 + 10.0,
+            y1 - 10.0,
+            DECK_MAIN_Z + 78.0,
+            DECK_MAIN_Z + 90.0,
+        )
+        return make(name, verts, faces, 0.22, 0.23, 0.22, smooth=False)
+
+    build_crew_quarter_prop(
+        "SM_CrewProp_Module_Port",
+        0.108 * LENGTH,
+        0.176 * LENGTH,
+        -184.0,
+        -118.0,
     )
+    build_crew_quarter_prop(
+        "SM_CrewProp_Module_Stbd",
+        0.108 * LENGTH,
+        0.176 * LENGTH,
+        118.0,
+        184.0,
+    )
+
+    # Upper deck storage crates/lockers.
+    upper_storage_z0 = upper_z + 2.0
+    for side_name, side in (("Port", -1.0), ("Stbd", 1.0)):
+        for idx, xn in enumerate((0.246, 0.284, 0.330, 0.376)):
+            x0 = xn * LENGTH
+            x1 = x0 + 28.0
+            y_outer = side * 164.0
+            y_inner = side * 118.0
+            y0, y1 = sorted((y_outer, y_inner))
+            height = 68.0 + idx * 14.0
+            build_box_object(
+                f"SM_UpperStorageCrate_{side_name}_{idx}",
+                x0,
+                x1,
+                y0,
+                y1,
+                upper_storage_z0,
+                upper_storage_z0 + height,
+                0.22,
+                0.23,
+                0.22,
+            )
+        locker_x0 = 0.430 * LENGTH
+        locker_x1 = 0.462 * LENGTH
+        ly_outer = side * 170.0
+        ly_inner = side * 120.0
+        ly0, ly1 = sorted((ly_outer, ly_inner))
+        build_box_object(
+            f"SM_UpperStorageLocker_{side_name}",
+            locker_x0,
+            locker_x1,
+            ly0,
+            ly1,
+            upper_storage_z0,
+            upper_storage_z0 + 154.0,
+            0.21,
+            0.22,
+            0.21,
+        )
+
+    pipe_parts = []
+    pipe_x0 = 0.214 * LENGTH
+    pipe_x1 = 0.690 * LENGTH
+    pipe_z = deck_bottom_z(upper_z) - 26.0
+    for suffix, side in (("Port", -1.0), ("Stbd", 1.0)):
+        py = side * 138.0
+        pipe_parts.append(
+            build_cylinder_x(
+                f"SM_Pipe_Main_{suffix}",
+                pipe_x0,
+                pipe_x1,
+                6.0,
+                py,
+                pipe_z,
+                0.18,
+                0.19,
+                0.18,
+                segments=16,
+            )
+        )
+        for idx, px in enumerate((0.336 * LENGTH, 0.500 * LENGTH, 0.620 * LENGTH)):
+            pipe_parts.append(
+                build_cylinder_z(
+                    f"SM_PipeDrop_{suffix}_{idx}",
+                    DECK_MAIN_Z + 40.0,
+                    pipe_z - 4.0,
+                    3.8,
+                    px,
+                    py,
+                    0.17,
+                    0.18,
+                    0.17,
+                    segments=12,
+                )
+            )
+            pipe_parts.append(
+                build_box_object(
+                    f"SM_PipeClamp_{suffix}_{idx}",
+                    px - 3.8,
+                    px + 3.8,
+                    py - 8.0,
+                    py + 8.0,
+                    pipe_z - 6.0,
+                    pipe_z + 6.0,
+                    0.20,
+                    0.21,
+                    0.20,
+                )
+            )
+    merge_mesh_objects("SM_Pipe_CeilingMain", pipe_parts)
     build_box_object(
         "SM_EngineControlCabinet",
         0.800 * LENGTH,
@@ -2294,7 +3507,10 @@ def build_bulkhead_doors(upper_z):
             frame_depth=DOOR_FRAME_DEPTH,
             leaf_depth=DOOR_LEAF_DEPTH,
             threshold=DOOR_THRESHOLD,
-            leaf_inset=4.0,
+            rough_margin_x=DOOR_ROUGH_MARGIN_X,
+            rough_margin_z=DOOR_ROUGH_MARGIN_Z,
+            leaf_overlap=DOOR_LEAF_OVERLAP,
+            leaf_inset=2.0,
             color=(0.30, 0.31, 0.30),
         )
 
@@ -2311,7 +3527,10 @@ def build_bulkhead_doors(upper_z):
             frame_depth=DOOR_FRAME_DEPTH,
             leaf_depth=DOOR_LEAF_DEPTH,
             threshold=DOOR_THRESHOLD,
-            leaf_inset=4.0,
+            rough_margin_x=DOOR_ROUGH_MARGIN_X,
+            rough_margin_z=DOOR_ROUGH_MARGIN_Z,
+            leaf_overlap=DOOR_LEAF_OVERLAP,
+            leaf_inset=2.0,
             color=(0.30, 0.31, 0.30),
         )
 
@@ -2327,9 +3546,360 @@ def build_bulkhead_doors(upper_z):
         frame_depth=DOOR_FRAME_DEPTH,
         leaf_depth=DOOR_LEAF_DEPTH,
         threshold=DOOR_THRESHOLD,
-        leaf_inset=4.0,
+        rough_margin_x=DOOR_ROUGH_MARGIN_X,
+        rough_margin_z=DOOR_ROUGH_MARGIN_Z,
+        leaf_overlap=DOOR_LEAF_OVERLAP,
+        leaf_inset=2.0,
         color=(0.30, 0.31, 0.30),
     )
+
+    build_standard_pressure_door(
+        name="SM_Door_Upper_Armory",
+        x_center=UPPER_ARMORY_PARTITION_X_NORM * LENGTH,
+        sill_z=upper_z,
+        make_fn=make,
+        append_box_fn=append_box,
+        width=DOOR_W,
+        height=DOOR_H,
+        frame_margin=DOOR_FRAME_MARGIN,
+        frame_depth=DOOR_FRAME_DEPTH,
+        leaf_depth=DOOR_LEAF_DEPTH,
+        threshold=DOOR_THRESHOLD,
+        rough_margin_x=DOOR_ROUGH_MARGIN_X,
+        rough_margin_z=DOOR_ROUGH_MARGIN_Z,
+        leaf_overlap=DOOR_LEAF_OVERLAP,
+        leaf_inset=2.0,
+        y_offset=UPPER_ARMORY_DOOR_Y_OFFSET,
+        color=(0.30, 0.31, 0.30),
+    )
+
+
+# ------------------------------------------------------------------
+# SF detail kit
+# ------------------------------------------------------------------
+#
+# Interior: three tri-color pipe runs (water / hydraulic / reactor) along the
+# starboard side of the main corridor, with valve wheels and junction boxes
+# at regular intervals. Exterior superstructure: one periscope housing and
+# three retractable antenna masts. Hull exterior: a few circumferential weld
+# seams at frame positions. All deco is static — no pivot logic required
+# beyond the antenna mast bases handled by core.pivots.
+
+SF_PIPE_Y = 92.0
+SF_PIPE_RADIUS = 5.5
+SF_PIPE_VERT_STEP = 14.0
+SF_VALVE_COUNT_PER_PIPE = 5
+SF_JUNCTION_BH_EXTRA_X = 22.0
+SF_JUNCTION_BH_EXTRA_Y = 22.0
+SF_PIPE_DROP_RADIUS = 4.5   # vertical drop segments (slightly thinner than main run)
+
+SF_PERISCOPE_X_NORM = 0.38
+SF_PERISCOPE_RISE = 220.0
+SF_PERISCOPE_RADIUS = 12.0
+
+SF_ANTENNA_SPECS = (
+    {"name": "ComsA", "x_norm": 0.58, "y": 40.0,  "rise": 180.0, "radius": 4.0, "tip_radius": 1.6, "flag": True},
+    {"name": "ComsB", "x_norm": 0.62, "y": -40.0, "rise": 150.0, "radius": 4.0, "tip_radius": 1.6, "flag": False},
+    {"name": "Sonar", "x_norm": 0.66, "y":  0.0,  "rise": 100.0, "radius": 6.0, "tip_radius": 3.0, "flag": False},
+)
+
+# Longitudinal welds: 4 beads running ALONG the hull at angles that stay
+# clearly on the hull exterior, well outside the conning-tower silhouette.
+# Upper pair (30, 150) sits on the high shoulders just below the super's
+# side walls; lower pair (210, 330) mirrors on the bilge so the four welds
+# read as a symmetric plate-seam grid. Scales with sample_curve at each X.
+SF_LONG_WELD_ANGLES_DEG = (30, 150, 210, 330)
+SF_LONG_WELD_X_START_NORM = 0.05
+SF_LONG_WELD_X_END_NORM = 0.96
+SF_LONG_WELD_SAMPLES = 48
+SF_LONG_WELD_OUTWARD_OFFSET = 3.5   # crest height above hull skin (cm) — more voyant
+SF_LONG_WELD_BASE_HALF_WIDTH = 3.2  # base half-width along tangent (cm)
+SF_LONG_WELD_CREST_HALF_WIDTH = 1.6 # crest half-width, smaller => pointier bead
+
+
+def _build_sf_pipe_runs(upper_z):
+    """Three tri-color pipe runs under the upper-deck underside, each with a
+    slight Y/Z offset (chaos), a pair of junction boxes at the Fwd and Control
+    bulkheads that anchor the pipe endpoints, plus a floor-diving L-bend in
+    the middle of the run so the pipes don't visually float in mid-air.
+
+    Per 2026-04-16 spec: pipes should "s'enfoncer dans le sol ou dans les
+    murs" at their ends, and show some chaos in their routing.
+    """
+    fwd_bh = next(spec for spec in MAIN_BULKHEAD_SPECS if spec["name"] == "Fwd")
+    ctrl_bh = next(spec for spec in MAIN_BULKHEAD_SPECS if spec["name"] == "Control")
+    pipe_x0 = fwd_bh["x_norm"] * LENGTH
+    pipe_x1 = ctrl_bh["x_norm"] * LENGTH
+
+    # Main horizontal level: ~12 cm below the upper-deck underside.
+    top_z = upper_z - DECK_THICK * 0.5 - 12.0
+    floor_z = DECK_MAIN_Z + DECK_THICK * 0.5 - 4.0   # L-bend target: just below main deck floor
+
+    # Per-run Y/Z jitter + distinct L-bend position (staggered across the length).
+    runs = (
+        {"name": "Water",   "y_jitter":  0.0,  "z_offset":  0.0,                     "drop_t": 0.38, "color_rgb": (0.12, 0.26, 0.46)},
+        {"name": "Hyd",     "y_jitter": -5.0,  "z_offset": -SF_PIPE_VERT_STEP,       "drop_t": 0.62, "color_rgb": (0.58, 0.44, 0.10)},
+        {"name": "Reactor", "y_jitter":  5.0,  "z_offset": -SF_PIPE_VERT_STEP * 2.0, "drop_t": 0.52, "color_rgb": (0.46, 0.15, 0.12)},
+    )
+
+    for run in runs:
+        pipe_y = SF_PIPE_Y + run["y_jitter"]
+        pipe_z = top_z + run["z_offset"]
+        cr, cg, cb = run["color_rgb"]
+
+        # Main horizontal run along X.
+        build_cylinder_x(
+            f"SM_Pipe_{run['name']}_Main",
+            pipe_x0,
+            pipe_x1,
+            SF_PIPE_RADIUS,
+            pipe_y,
+            pipe_z,
+            cr, cg, cb,
+            segments=12,
+        )
+
+        # Drop bend: vertical Z cylinder from pipe_z down into the main deck
+        # floor, plus a short horizontal elbow cylinder linking it to the main
+        # run. The drop ends slightly BELOW the deck surface so it reads as
+        # "plunging into the floor".
+        drop_x = pipe_x0 + (pipe_x1 - pipe_x0) * run["drop_t"]
+        build_cylinder_z(
+            f"SM_Pipe_{run['name']}_Drop",
+            floor_z,
+            pipe_z + 2.0,
+            SF_PIPE_DROP_RADIUS,
+            drop_x,
+            pipe_y,
+            cr, cg, cb,
+            segments=10,
+        )
+        # Small elbow fitting at the top of the drop (reads as a real coupling).
+        build_cylinder_z(
+            f"SM_Pipe_{run['name']}_DropElbow",
+            pipe_z - SF_PIPE_RADIUS - 2.0,
+            pipe_z + SF_PIPE_RADIUS + 2.0,
+            SF_PIPE_RADIUS + 1.8,
+            drop_x,
+            pipe_y,
+            0.14, 0.14, 0.14,
+            segments=10,
+        )
+
+        # Valve wheels spaced along the main horizontal run, avoiding the drop.
+        for i in range(SF_VALVE_COUNT_PER_PIPE):
+            t = (i + 1) / (SF_VALVE_COUNT_PER_PIPE + 1)
+            if abs(t - run["drop_t"]) < 0.06:
+                continue
+            vx = pipe_x0 + (pipe_x1 - pipe_x0) * t
+            build_cylinder_z(
+                f"SM_Valve_{run['name']}_{i}",
+                pipe_z - 10.0,
+                pipe_z + 10.0,
+                7.5,
+                vx,
+                pipe_y,
+                0.40, 0.34, 0.12,
+                segments=12,
+            )
+
+    # Junction boxes anchoring the pipe endpoints at both main bulkheads.
+    # They extend in Y and Z enough to swallow all three pipes and their
+    # per-run jitter, so the pipes appear to enter and exit real enclosures.
+    box_z_top = top_z + 12.0
+    box_z_bot = top_z - SF_PIPE_VERT_STEP * 2.0 - 14.0
+    for spec in (fwd_bh, ctrl_bh):
+        jx = spec["x_norm"] * LENGTH
+        build_box_object(
+            f"SM_Junction_{spec['name']}",
+            jx - SF_JUNCTION_BH_EXTRA_X,
+            jx + SF_JUNCTION_BH_EXTRA_X,
+            SF_PIPE_Y - SF_JUNCTION_BH_EXTRA_Y,
+            SF_PIPE_Y + SF_JUNCTION_BH_EXTRA_Y,
+            box_z_bot,
+            box_z_top,
+            0.18,
+            0.18,
+            0.18,
+        )
+
+
+def _build_sf_periscope(upper_z):
+    """Periscope housing: a tall cylinder rising from the upper-deck roof,
+    with a short horizontal eye-piece at the top (gamified silhouette)."""
+    x_cm = SF_PERISCOPE_X_NORM * LENGTH
+    main_r = sample_curve(SF_PERISCOPE_X_NORM)
+    _, _, super_h_local, _, _ = superstructure_state(SF_PERISCOPE_X_NORM)
+    roof_z = main_r + max(0.0, super_h_local * 0.9)
+    base_z = upper_z
+    top_z = roof_z + SF_PERISCOPE_RISE
+
+    # Mast
+    build_cylinder_z(
+        "SM_Periscope_Mast",
+        base_z,
+        top_z,
+        SF_PERISCOPE_RADIUS,
+        x_cm,
+        0.0,
+        0.14,
+        0.15,
+        0.16,
+        segments=14,
+    )
+    # Housing at the base (thicker cylinder) to read as an optics turret.
+    build_cylinder_z(
+        "SM_Periscope_Housing",
+        base_z + 6.0,
+        base_z + 40.0,
+        SF_PERISCOPE_RADIUS * 1.8,
+        x_cm,
+        0.0,
+        0.14,
+        0.15,
+        0.16,
+        segments=14,
+    )
+    # Eye-piece: small horizontal box pointing forward (-X).
+    build_box_object(
+        "SM_Periscope_Eye",
+        x_cm - 20.0,
+        x_cm + 4.0,
+        -4.0,
+        4.0,
+        top_z - 12.0,
+        top_z + 8.0,
+        0.12,
+        0.13,
+        0.14,
+    )
+
+
+def _build_sf_antennas():
+    """Retractable-style antenna masts: thin telescoping cylinders with a flag
+    at the tip for the com antennas (stylized/gamified)."""
+    for spec in SF_ANTENNA_SPECS:
+        x_cm = spec["x_norm"] * LENGTH
+        main_r = sample_curve(spec["x_norm"])
+        _, _, super_h_local, _, _ = superstructure_state(spec["x_norm"])
+        base_z = main_r + max(0.0, super_h_local * 0.9)
+        mid_z = base_z + spec["rise"] * 0.55
+        top_z = base_z + spec["rise"]
+
+        # Lower telescoping segment.
+        build_cylinder_z(
+            f"SM_Antenna_{spec['name']}_Lower",
+            base_z,
+            mid_z,
+            spec["radius"],
+            x_cm,
+            spec["y"],
+            0.22,
+            0.22,
+            0.24,
+            segments=12,
+        )
+        # Upper telescoping segment (thinner).
+        build_cylinder_z(
+            f"SM_Antenna_{spec['name']}_Upper",
+            mid_z,
+            top_z,
+            spec["tip_radius"],
+            x_cm,
+            spec["y"],
+            0.22,
+            0.22,
+            0.24,
+            segments=10,
+        )
+
+        if spec["flag"]:
+            # Gamified pennant at the tip. Renamed SM_Flag_* so the materials
+            # classifier picks the red "flag" key instead of the antenna metal.
+            build_box_object(
+                f"SM_Flag_Antenna_{spec['name']}",
+                x_cm + spec["tip_radius"] + 0.5,
+                x_cm + spec["tip_radius"] + 0.5 + 18.0,
+                spec["y"] - 0.8,
+                spec["y"] + 0.8,
+                top_z - 12.0,
+                top_z - 2.0,
+                0.72,
+                0.18,
+                0.12,
+            )
+
+
+def _build_sf_hull_welds():
+    """Four LONGITUDINAL weld beads running along the hull at 45/135/225/315
+    degrees (symmetric on the four quarter angles). Each bead has a proper
+    trapezoidal 3D cross-section (base_left, crest_left, crest_right,
+    base_right) and follows the hull curvature parametrically via
+    sample_curve. Reads as real plate seams under flat shading, and avoids
+    both the conning-tower zone (theta~90 deg) and the keel (theta~270 deg).
+    """
+    for angle_deg in SF_LONG_WELD_ANGLES_DEG:
+        theta = math.radians(angle_deg)
+        ct = math.cos(theta)
+        st = math.sin(theta)
+        # Tangent direction in the YZ plane, perpendicular to the radial normal.
+        # Used to give the bead its width along the hull surface.
+        tang_y = -st
+        tang_z = ct
+
+        verts = []
+        faces = []
+
+        n = SF_LONG_WELD_SAMPLES
+        for i in range(n + 1):
+            t = i / n
+            xn = SF_LONG_WELD_X_START_NORM + (SF_LONG_WELD_X_END_NORM - SF_LONG_WELD_X_START_NORM) * t
+            x_cm = xn * LENGTH
+            r_hull = sample_curve(xn)
+            r_crest = r_hull + SF_LONG_WELD_OUTWARD_OFFSET
+            hw_base = SF_LONG_WELD_BASE_HALF_WIDTH
+            hw_crest = SF_LONG_WELD_CREST_HALF_WIDTH
+
+            # Cross-section: 4 verts in the YZ plane, all at the same X.
+            y_bl = r_hull * ct - hw_base * tang_y
+            z_bl = r_hull * st - hw_base * tang_z
+            y_cl = r_crest * ct - hw_crest * tang_y
+            z_cl = r_crest * st - hw_crest * tang_z
+            y_cr = r_crest * ct + hw_crest * tang_y
+            z_cr = r_crest * st + hw_crest * tang_z
+            y_br = r_hull * ct + hw_base * tang_y
+            z_br = r_hull * st + hw_base * tang_z
+
+            verts.extend([
+                (x_cm, y_bl, z_bl),
+                (x_cm, y_cl, z_cl),
+                (x_cm, y_cr, z_cr),
+                (x_cm, y_br, z_br),
+            ])
+
+        # Bridge consecutive cross-sections with three quads each: left flank,
+        # crest, right flank. Three strips give the bead its trapezoidal body.
+        section_count = (n + 1)
+        for i in range(section_count - 1):
+            b0 = i * 4
+            b1 = (i + 1) * 4
+            faces.append((b0 + 0, b0 + 1, b1 + 1, b1 + 0))  # left flank
+            faces.append((b0 + 1, b0 + 2, b1 + 2, b1 + 1))  # crest top
+            faces.append((b0 + 2, b0 + 3, b1 + 3, b1 + 2))  # right flank
+
+        # Cap the two ends so the bead is a closed solid.
+        faces.append((0, 3, 2, 1))
+        end_base = (section_count - 1) * 4
+        faces.append((end_base + 0, end_base + 1, end_base + 2, end_base + 3))
+
+        make(f"SM_Hull_Weld_Long_{angle_deg}", verts, faces, 0.14, 0.18, 0.16, smooth=False)
+
+
+def build_sf_detail_kit(upper_z):
+    _build_sf_pipe_runs(upper_z)
+    _build_sf_periscope(upper_z)
+    _build_sf_antennas()
+    _build_sf_hull_welds()
 
 
 def main():
@@ -2356,9 +3926,9 @@ def main():
 
     print("--- Decks ---")
     main_fwd_norm = bulkhead_x_norm(BH_MAIN_FWD_NAME)
-    build_deck("main", DECK_MAIN_Z, 0.002, 0.775, 0.36, 0.34, 0.30)
+    build_deck("main", DECK_MAIN_Z, 0.002, 0.775, 0.36, 0.34, 0.30, hw_fn=main_deck_hw)
     upper_z = sample_curve(0.40) - 150
-    build_deck("upper", upper_z, main_fwd_norm, UPPER_DECK_AFT_NORM, 0.40, 0.38, 0.34, hw_fn=upper_deck_hw)
+    build_upper_deck_clipped(upper_z, main_fwd_norm, UPPER_DECK_AFT_NORM, 0.40, 0.38, 0.34)
 
     print("--- Lower technical layout (hub lower-main + ballast compartments) ---")
     build_lower_technical_layout()
@@ -2369,20 +3939,14 @@ def main():
     print("--- Turret hardpoints (3) ---")
     build_turret_hardpoints()
 
-    print("--- Hatch coamings ---")
-    for cutout in MAIN_DECK_CUTOUTS:
-        build_hatch_collar(f"SM_Hatch_{cutout['name']}", DECK_MAIN_Z, cutout, 0.34, 0.35, 0.33)
-    for cutout in LOWER_DECK_CUTOUTS:
-        build_hatch_collar(f"SM_Hatch_{cutout['name']}", DECK_LOWER_Z, cutout, 0.33, 0.34, 0.32)
-    for cutout in UPPER_DECK_CUTOUTS:
-        build_hatch_collar(f"SM_Hatch_{cutout['name']}", upper_z, cutout, 0.34, 0.35, 0.33)
+    print("--- Hatch openings + ladders ---")
+    build_round_hatches_and_ladders(upper_z)
     build_superstructure_armory_partition(upper_z)
 
     print("--- Bulkheads main ---")
-    upper_deck_underside_z = upper_z - (DECK_THICK * 0.5) + 1.0
+    upper_deck_underside_z = deck_bottom_z(upper_z)
     for spec in MAIN_BULKHEAD_SPECS:
         x_cm = spec["x_norm"] * LENGTH
-        hw_fn = upper_bulkhead_hw if spec["name"] == "Control" else interior_hw
         z_max = (
             min(
                 compute_bulkhead_top_z(
@@ -2392,45 +3956,34 @@ def main():
                     sample_curve,
                     superstructure_state,
                 ),
-                upper_inner_apex_z(x_cm, margin=1.5) if spec["name"] == "Control" else upper_ceiling_z(x_cm, margin=8.0),
+                upper_room_apex_z(x_cm, BULKHEAD_CONTACT_OVERLAP) if spec["name"] == "Control" else upper_ceiling_z(x_cm, margin=-BULKHEAD_CONTACT_OVERLAP),
             )
             if spec.get("full_height")
-            else min(upper_deck_underside_z, upper_inner_apex_z(x_cm, margin=1.5) if spec["name"] == "Control" else upper_ceiling_z(x_cm, margin=8.0))
+            else min(upper_deck_underside_z, upper_room_apex_z(x_cm, BULKHEAD_CONTACT_OVERLAP) if spec["name"] == "Control" else upper_ceiling_z(x_cm, margin=-BULKHEAD_CONTACT_OVERLAP))
         )
-        place_bulkhead_with_clearance(
+        build_bulkhead_clipped(
             name=f"SM_BH_Main_{spec['name']}",
             x_cm=x_cm,
             z_min=DECK_MAIN_Z,
             z_max=z_max,
             door_sill_z=DECK_MAIN_Z,
-            interior_hw_fn=hw_fn,
-            make_fn=make,
-            add_solidify_fn=add_solidify,
-            bh_thickness=BH_THICK,
             door_w=spec["door_w"],
             door_h=spec["door_h"],
-            door_clearance_h=DOOR_CLEARANCE_H,
-            top_margin=36.0,
-            max_z_cap=z_max,
+            overlap_cm=BULKHEAD_CONTACT_OVERLAP,
             color=(0.44, 0.42, 0.38),
         )
 
     print("--- Bulkheads lower ---")
     for spec in LOWER_BULKHEAD_SPECS:
-        lower_obj = place_bulkhead_with_clearance(
+        lower_obj = build_bulkhead_clipped(
             name=f"SM_BH_Lower_{spec['name']}",
             x_cm=spec["x_norm"] * LENGTH,
             z_min=LOWER_BH_Z_MIN,
-            z_max=DECK_MAIN_Z + 24.0,
+            z_max=deck_bottom_z(DECK_MAIN_Z),
             door_sill_z=DECK_LOWER_Z,
-            interior_hw_fn=interior_hw,
-            make_fn=make,
-            add_solidify_fn=add_solidify,
-            bh_thickness=BH_THICK,
             door_w=spec["door_w"],
             door_h=spec["door_h"],
-            door_clearance_h=DOOR_CLEARANCE_H,
-            top_margin=34.0,
+            overlap_cm=BULKHEAD_CONTACT_OVERLAP,
             color=(0.44, 0.42, 0.38),
         )
         if lower_obj:
@@ -2444,50 +3997,25 @@ def main():
                 LOWER_BH_Z_MIN - 2.0,
                 DECK_LOWER_Z - 18.0,
             )
-    build_standard_bulkhead(
+    build_bulkhead_clipped(
         name="SM_BH_Lower_TechPartition",
         x_cm=LOWER_TECH_PARTITION_X * LENGTH,
         z_min=LOWER_BH_Z_MIN,
-        z_max=DECK_MAIN_Z + 32.0,
-        door_sill_z=DECK_LOWER_Z,
-        interior_hw_fn=interior_hw,
-        make_fn=make,
-        add_solidify_fn=add_solidify,
-        bh_thickness=BH_THICK,
+        z_max=deck_bottom_z(DECK_MAIN_Z),
+        door_sill_z=None,
         door_w=0.0,
         door_h=0.0,
-        gy=24,
-        gz=20,
+        overlap_cm=BULKHEAD_CONTACT_OVERLAP,
         color=(0.44, 0.42, 0.38),
     )
 
     print("--- Bulkheads upper airlock (inner only) ---")
-    upper_bh_top = compute_bulkhead_top_z(
-        UPPER_AIRLOCK_INNER_BULKHEAD["x_norm"],
+    build_upper_bulkhead_clipped(
+        f"SM_BH_{UPPER_AIRLOCK_INNER_BULKHEAD['name']}",
+        UPPER_AIRLOCK_INNER_BULKHEAD["x_norm"] * LENGTH,
         upper_z,
-        DECK_MAIN_Z,
-        sample_curve,
-        superstructure_state,
-        min_main_height=420.0,
-        min_upper_clearance=280.0,
-        top_margin=16.0,
-    )
-    place_bulkhead_with_clearance(
-        name=f"SM_BH_{UPPER_AIRLOCK_INNER_BULKHEAD['name']}",
-        x_cm=UPPER_AIRLOCK_INNER_BULKHEAD["x_norm"] * LENGTH,
-        z_min=upper_z,
-        z_max=min(max(upper_z + 360.0, upper_bh_top), upper_inner_apex_z(UPPER_AIRLOCK_INNER_BULKHEAD["x_norm"] * LENGTH, margin=1.5)),
-        door_sill_z=upper_z,
-        interior_hw_fn=upper_bulkhead_hw,
-        make_fn=make,
-        add_solidify_fn=add_solidify,
-        bh_thickness=BH_THICK,
-        door_w=UPPER_AIRLOCK_INNER_BULKHEAD["door_w"],
-        door_h=UPPER_AIRLOCK_INNER_BULKHEAD["door_h"],
-        door_clearance_h=DOOR_CLEARANCE_H,
-        top_margin=34.0,
-        max_z_cap=upper_inner_apex_z(UPPER_AIRLOCK_INNER_BULKHEAD["x_norm"] * LENGTH, margin=1.5),
-        color=(0.44, 0.42, 0.38),
+        UPPER_AIRLOCK_INNER_BULKHEAD["door_w"],
+        UPPER_AIRLOCK_INNER_BULKHEAD["door_h"],
     )
 
     print("--- Watertight doors ---")
@@ -2500,7 +4028,6 @@ def main():
     cut_airlock_exit_pocket(hull_obj, spec)
     hull_solidify = add_solidify(hull_obj, HULL_THICK, -1)
     apply_object_modifier(hull_obj, hull_solidify.name)
-    build_aft_top_access(spec)
     build_airlock_exit_cassette(spec)
     build_hull_gameplay_detail_kit(hull_obj, spec)
 
@@ -2515,6 +4042,15 @@ def main():
 
     print("--- Ducted propulsor ---")
     build_propulsor()
+
+    print("--- SF detail kit (pipes / valves / junctions / periscope / antennas / hull welds) ---")
+    build_sf_detail_kit(upper_z)
+
+    print("--- Pivots (doors, rudder, hydroplanes, turrets, antennas, periscope) ---")
+    fix_all_pivots()
+
+    print("--- Solid-PBR material assignment (from core.materials) ---")
+    assign_materials()
 
     screen = getattr(bpy.context, "screen", None)
     if screen:
@@ -2538,7 +4074,10 @@ def main():
     print("  - Upper deck starts at BH_Main_Fwd and closes upper ceiling with aligned hatch axis.")
     print("  - Bulkheads/doors use one watertight standard (W100/H200) with 2m clearance logic.")
     print("  - Engine room keeps 2 deck levels + 1 main ramp, adds mezzanine and lower maintenance access.")
-    print("  - Rear SAS now uses a true hull cutout aligned to the exit door, without flat exit shell.")
+    print("  - Rear SAS uses a hull cutout + cassette frame (no Back wall) with 96x192 cm battants.")
+    print("  - Upper deck stair hole resized and centered on stair arrival (x_norm=0.305, 160x88 cm).")
+    print("  - SF detail kit: tri-color pipes, valve wheels, junction boxes, periscope, antennas.")
+    print("  - Materials / pivots / stubs now live under core/ and are invoked at the end of main.")
 
 
 main()

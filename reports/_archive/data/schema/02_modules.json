@@ -1,0 +1,244 @@
+{
+  "meta": {
+    "domain": "Modules & Stations",
+    "parentId": "domain_2",
+    "description": "Schema definition for Modules & Stations."
+  },
+  "tables": [
+    {
+      "id": "Station_Definitions",
+      "domain": 2,
+      "priority": "high",
+      "description": "Interior crew stations — Helm, Engine, Pump, Repair, Storage, etc.",
+      "columns": [
+        {
+          "name": "station_id",
+          "type": "string",
+          "pk": true
+        },
+        {
+          "name": "display_name",
+          "type": "string",
+          "nullable": false
+        },
+        {
+          "name": "kind",
+          "type": "enum",
+          "values": [
+            "helm",
+            "engine",
+            "pump",
+            "repair",
+            "sonar",
+            "storage",
+            "airlock_ctrl",
+            "generic"
+          ]
+        },
+        {
+          "name": "room_tag_id",
+          "type": "string",
+          "fk": "Room_Tag_Catalog.room_tag_id",
+          "nullable": true
+        },
+        {
+          "name": "interact_range",
+          "type": "float",
+          "nullable": true
+        },
+        {
+          "name": "requires_power",
+          "type": "bool",
+          "nullable": false,
+          "default": "true"
+        }
+      ],
+      "relations": [
+        {
+          "target": "Room_Tag_Catalog",
+          "type": "N:1",
+          "label": "tagged as"
+        },
+        {
+          "target": "Submarine_Archetypes",
+          "type": "N:N",
+          "label": "compatible with archetypes"
+        }
+      ]
+    },
+    {
+      "id": "Room_Tag_Catalog",
+      "domain": 2,
+      "priority": "high",
+      "description": "Functional room role tags — Navigation, Machine, Habitat, Ballast, Storage, etc.",
+      "columns": [
+        {
+          "name": "room_tag_id",
+          "type": "string",
+          "pk": true
+        },
+        {
+          "name": "display_name",
+          "type": "string",
+          "nullable": false
+        },
+        {
+          "name": "category",
+          "type": "enum",
+          "values": [
+            "navigation",
+            "machinery",
+            "habitat",
+            "ballast",
+            "storage",
+            "mission",
+            "access",
+            "technical"
+          ]
+        },
+        {
+          "name": "flood_priority",
+          "type": "int",
+          "nullable": true
+        },
+        {
+          "name": "notes",
+          "type": "string",
+          "nullable": true
+        }
+      ],
+      "relations": [
+        {
+          "target": "Station_Definitions",
+          "type": "1:N",
+          "label": "associated stations"
+        }
+      ]
+    },
+    {
+      "id": "External_Module_Definitions",
+      "domain": 2,
+      "priority": "medium",
+      "description": "External modules — propulsion, hydroplanes, rudders, stern pods.",
+      "columns": [
+        {
+          "name": "module_id",
+          "type": "string",
+          "pk": true
+        },
+        {
+          "name": "display_name",
+          "type": "string",
+          "nullable": false
+        },
+        {
+          "name": "kind",
+          "type": "enum",
+          "values": [
+            "propulsion",
+            "hydroplane",
+            "rudder",
+            "stern_pod",
+            "airlock",
+            "sonar_array"
+          ]
+        },
+        {
+          "name": "mass_kg",
+          "type": "float",
+          "nullable": true
+        },
+        {
+          "name": "drag_modifier",
+          "type": "float",
+          "nullable": true
+        },
+        {
+          "name": "destructible",
+          "type": "bool",
+          "nullable": false,
+          "default": "true"
+        }
+      ],
+      "relations": []
+    },
+    {
+      "id": "Equipment_Module_Definitions",
+      "domain": 2,
+      "priority": "medium",
+      "description": "Internal equipment modules — ballast systems, pumps, machinery.",
+      "columns": [
+        {
+          "name": "equip_id",
+          "type": "string",
+          "pk": true
+        },
+        {
+          "name": "display_name",
+          "type": "string",
+          "nullable": false
+        },
+        {
+          "name": "kind",
+          "type": "enum",
+          "values": [
+            "ballast",
+            "pump",
+            "generator",
+            "o2_scrubber",
+            "reactor",
+            "misc"
+          ]
+        },
+        {
+          "name": "power_draw_kw",
+          "type": "float",
+          "nullable": true
+        },
+        {
+          "name": "repairable",
+          "type": "bool",
+          "nullable": false,
+          "default": "true"
+        }
+      ],
+      "relations": []
+    },
+    {
+      "id": "Mission_Module_Definitions",
+      "domain": 2,
+      "priority": "low",
+      "description": "Mission-specific modules installed before or during gameplay.",
+      "columns": [
+        {
+          "name": "mission_module_id",
+          "type": "string",
+          "pk": true
+        },
+        {
+          "name": "display_name",
+          "type": "string",
+          "nullable": false
+        },
+        {
+          "name": "mission_type_tag",
+          "type": "string",
+          "nullable": true
+        },
+        {
+          "name": "one_time_use",
+          "type": "bool",
+          "nullable": false,
+          "default": "false"
+        }
+      ],
+      "relations": [
+        {
+          "target": "Mission_Templates",
+          "type": "N:N",
+          "label": "required by missions"
+        }
+      ]
+    }
+  ]
+}

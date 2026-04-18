@@ -1,0 +1,3 @@
+Name,display_name,kind,min_width_m,min_headroom_m,walkable
+---,string,string (enum),float,float,bool
+ROW_EXAMPLE,,,,,true

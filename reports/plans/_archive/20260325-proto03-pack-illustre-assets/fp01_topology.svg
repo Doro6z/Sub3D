@@ -1,0 +1,83 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 400" font-family="sans-serif">
+    <!-- Background -->
+    <rect width="1000" height="400" fill="#1e1e1e" rx="10"/>
+
+    <!-- Title -->
+    <text x="500" y="40" fill="#fff" font-size="20" font-weight="bold" text-anchor="middle">First Playable (FP01) Topology</text>
+
+    <!-- Ocean Context -->
+    <rect x="50" y="80" width="900" height="300" fill="none" stroke="#0984e3" stroke-width="2" stroke-dasharray="10,5" rx="10"/>
+    <text x="65" y="105" fill="#0984e3" font-size="16" font-style="italic">Ocean Boundary</text>
+
+    <!-- Submarine Outline -->
+    <rect x="120" y="130" width="760" height="150" fill="#2d3436" stroke="#fff" stroke-width="4" rx="50"/>
+
+    <!-- Compartments -->
+    <!-- Bow -->
+    <path d="M 120 180 Q 120 130 170 130 L 220 130 L 220 280 L 170 280 Q 120 280 120 230 Z" fill="#636e72" stroke="#fff" stroke-width="2"/>
+    <text x="170" y="200" fill="#fff" font-size="16" font-weight="bold" text-anchor="middle">Bow</text>
+    <text x="170" y="220" fill="#dfe6e9" font-size="10" text-anchor="middle">(Closed Hull)</text>
+
+    <!-- Helm -->
+    <rect x="220" y="130" width="160" height="150" fill="#0984e3" stroke="#fff" stroke-width="2"/>
+    <text x="300" y="195" fill="#fff" font-size="16" font-weight="bold" text-anchor="middle">Helm</text>
+    <text x="300" y="215" fill="#dfe6e9" font-size="12" text-anchor="middle">Compartment</text>
+
+    <!-- Crew/Main -->
+    <rect x="380" y="130" width="200" height="150" fill="#0984e3" stroke="#fff" stroke-width="2"/>
+    <text x="480" y="195" fill="#fff" font-size="16" font-weight="bold" text-anchor="middle">Main / Crew</text>
+    <text x="480" y="215" fill="#dfe6e9" font-size="12" text-anchor="middle">Compartment</text>
+
+    <!-- Engine -->
+    <rect x="580" y="130" width="150" height="150" fill="#0984e3" stroke="#fff" stroke-width="2"/>
+    <text x="655" y="195" fill="#fff" font-size="16" font-weight="bold" text-anchor="middle">Engine</text>
+    <text x="655" y="215" fill="#dfe6e9" font-size="12" text-anchor="middle">Compartment</text>
+
+    <!-- Stern -->
+    <path d="M 730 130 L 830 130 Q 880 130 880 180 L 880 230 Q 880 280 830 280 L 730 280 Z" fill="#636e72" stroke="#fff" stroke-width="2"/>
+    <text x="805" y="200" fill="#fff" font-size="16" font-weight="bold" text-anchor="middle">Stern</text>
+    <text x="805" y="220" fill="#dfe6e9" font-size="10" text-anchor="middle">(Closed Hull)</text>
+
+    <!-- Airlock -->
+    <rect x="440" y="280" width="80" height="60" fill="#00b894" stroke="#fff" stroke-width="2"/>
+    <text x="480" y="310" fill="#fff" font-size="14" font-weight="bold" text-anchor="middle">Airlock</text>
+    <text x="480" y="325" fill="#dfe6e9" font-size="10" text-anchor="middle">Chamber</text>
+
+    <!-- Bulkheads Lines -->
+    <line x1="220" y1="130" x2="220" y2="280" stroke="#ff7675" stroke-width="4"/>
+    <line x1="380" y1="130" x2="380" y2="280" stroke="#ff7675" stroke-width="4"/>
+    <line x1="580" y1="130" x2="580" y2="280" stroke="#ff7675" stroke-width="4"/>
+    <line x1="730" y1="130" x2="730" y2="280" stroke="#ff7675" stroke-width="4"/>
+
+    <!-- Doors (Connections) -->
+    <!-- Helm / Crew Door -->
+    <rect x="375" y="190" width="10" height="40" fill="#fdcb6e" stroke="#2d3436" stroke-width="1"/>
+    <text x="380" y="180" fill="#fdcb6e" font-size="12" font-style="italic" text-anchor="middle">Door</text>
+
+    <!-- Crew / Engine Door -->
+    <rect x="575" y="190" width="10" height="40" fill="#fdcb6e" stroke="#2d3436" stroke-width="1"/>
+    <text x="580" y="180" fill="#fdcb6e" font-size="12" font-style="italic" text-anchor="middle">Door</text>
+
+    <!-- Crew / Airlock Inner Door -->
+    <rect x="460" y="275" width="40" height="10" fill="#fdcb6e" stroke="#2d3436" stroke-width="1"/>
+    <text x="420" y="270" fill="#fdcb6e" font-size="12" font-style="italic">Inner Door</text>
+
+    <!-- Airlock / Ocean Outer Door -->
+    <rect x="460" y="335" width="40" height="10" fill="#e17055" stroke="#2d3436" stroke-width="1"/>
+    <text x="510" y="350" fill="#e17055" font-size="12" font-style="italic">Outer Door (to Ocean)</text>
+
+    <path d="M 480 345 L 480 370" stroke="#e17055" stroke-width="2" marker-end="url(#arrowLine)" stroke-dasharray="3,3"/>
+
+    <!-- Legend -->
+    <rect x="750" y="310" width="130" height="60" fill="#2d3436" stroke="#fff" rx="5"/>
+    <line x1="760" y1="330" x2="780" y2="330" stroke="#ff7675" stroke-width="4"/>
+    <text x="790" y="334" fill="#fff" font-size="12">Solid Bulkheads</text>
+    <rect x="765" y="345" width="10" height="15" fill="#fdcb6e"/>
+    <text x="790" y="357" fill="#fff" font-size="12">Graph Edges</text>
+
+    <defs>
+        <marker id="arrowLine" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto" markerUnits="strokeWidth">
+            <path d="M0,0 L0,6 L9,3 z" fill="#e17055" />
+        </marker>
+    </defs>
+</svg>

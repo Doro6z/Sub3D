@@ -1,0 +1,3 @@
+Name,fauna_id,cruise_speed,flee_speed,detection_range_m,flee_threshold,depth_min_m,depth_max_m
+---,string,float,float,float,float,float,float
+ROW_EXAMPLE,,,,,,,

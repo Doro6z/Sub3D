@@ -8,7 +8,10 @@
 class UMaterialInterface;
 class UStaticMesh;
 class UStaticMeshComponent;
+class USubFloodComponent;
 class USubHullComponent;
+class USubmarineDefinition;
+class USubmarineLayoutAsset;
 
 USTRUCT()
 struct FFloodWaterPlaneState
@@ -79,22 +82,39 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Flood|Visuals", meta = (ClampMin = "0.0"))
 	float InterpolationSpeed = 3.f;
 
+	/** Extends each water plane beyond compartment bounds so it renders through door openings.
+	 *  The DF material masks the overflow outside the hull. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Flood|Visuals", meta = (ClampMin = "0.0"))
+	float CompartmentBoundsPaddingCm = 50.f;
+
 protected:
 	UFUNCTION()
-	void HandleCompartmentFloodUpdated(const TArray<FCompartmentRuntimeState>& InCompartmentStates);
+	void HandleSubFloodUpdated(const TArray<FCompartmentState>& InStates);
+
+	UFUNCTION()
+	void HandleFloodInitialized();
 
 private:
-	void InitializeWaterPlanesFromHull();
-	bool BuildCompartmentBounds(FName CompartmentId, FBox& OutLocalBounds) const;
+	void ActivateSubFloodPath();
+	void InitializeWaterPlanesFromDefinition();
+	void InitializeWaterPlanesFromLayout();
+	bool BuildCompartmentBoundsFromSheets(FName CompartmentId, FBox& OutLocalBounds) const;
 	static void AppendSheetBounds(FBox& InOutBounds, const FStructuralSheetDef& Sheet);
 	UStaticMeshComponent* CreatePlaneComponent(int32 PlaneIndex, const FFloodWaterPlaneState& PlaneState);
 	void UpdatePlaneVisual(FFloodWaterPlaneState& PlaneState) const;
 	void UpdateTickEnabled();
 	void DestroyWaterPlanes();
+	void ApplyFloodLevels(const TFunction<bool(FName, float&, float&)>& GetLevelAndHeight);
 
 private:
 	UPROPERTY(Transient)
+	TObjectPtr<USubFloodComponent> SubFlood = nullptr;
+
+	UPROPERTY(Transient)
 	TObjectPtr<USubHullComponent> SubHull = nullptr;
+
+	UPROPERTY(Transient)
+	TObjectPtr<const USubmarineDefinition> Definition = nullptr;
 
 	UPROPERTY(Transient)
 	TArray<FFloodWaterPlaneState> WaterPlanes;

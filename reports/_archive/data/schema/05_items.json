@@ -1,0 +1,227 @@
+{
+  "meta": {
+    "domain": "Items & Loot",
+    "parentId": "domain_5",
+    "description": "Schema definition for Items & Loot."
+  },
+  "tables": [
+    {
+      "id": "Items_Stats",
+      "domain": 5,
+      "priority": "high",
+      "description": "All game items — stats, category, weight, stack size.",
+      "columns": [
+        {
+          "name": "item_id",
+          "type": "string",
+          "pk": true
+        },
+        {
+          "name": "display_name",
+          "type": "string",
+          "nullable": false
+        },
+        {
+          "name": "category_id",
+          "type": "string",
+          "fk": "Item_Categories.category_id"
+        },
+        {
+          "name": "weight_kg",
+          "type": "float",
+          "nullable": true
+        },
+        {
+          "name": "stack_size",
+          "type": "int",
+          "nullable": false,
+          "default": "1"
+        },
+        {
+          "name": "consumable",
+          "type": "bool",
+          "nullable": false,
+          "default": "false"
+        },
+        {
+          "name": "base_value",
+          "type": "float",
+          "nullable": true
+        },
+        {
+          "name": "mission_item",
+          "type": "bool",
+          "nullable": false,
+          "default": "false"
+        }
+      ],
+      "relations": [
+        {
+          "target": "Item_Categories",
+          "type": "N:1",
+          "label": "belongs to category"
+        },
+        {
+          "target": "Loot_Table_Entries",
+          "type": "1:N",
+          "label": "appears in loot"
+        }
+      ]
+    },
+    {
+      "id": "Item_Categories",
+      "domain": 5,
+      "priority": "high",
+      "description": "Item category definitions — Repair, Ammo, Consumable, Mission, Upgrade.",
+      "columns": [
+        {
+          "name": "category_id",
+          "type": "string",
+          "pk": true
+        },
+        {
+          "name": "display_name",
+          "type": "string",
+          "nullable": false
+        },
+        {
+          "name": "kind",
+          "type": "enum",
+          "values": [
+            "repair",
+            "ammo",
+            "consumable",
+            "mission",
+            "upgrade",
+            "resource",
+            "key"
+          ]
+        },
+        {
+          "name": "stackable",
+          "type": "bool",
+          "nullable": false,
+          "default": "true"
+        }
+      ],
+      "relations": [
+        {
+          "target": "Items_Stats",
+          "type": "1:N",
+          "label": "categorizes items"
+        }
+      ]
+    },
+    {
+      "id": "Loot_Tables",
+      "domain": 5,
+      "priority": "high",
+      "description": "Named loot tables — referenced by enemies, containers, wrecks.",
+      "columns": [
+        {
+          "name": "loot_table_id",
+          "type": "string",
+          "pk": true
+        },
+        {
+          "name": "display_name",
+          "type": "string",
+          "nullable": false
+        },
+        {
+          "name": "context",
+          "type": "enum",
+          "values": [
+            "enemy_drop",
+            "container",
+            "wreck",
+            "mission_reward",
+            "biome_ambient"
+          ]
+        },
+        {
+          "name": "rolls_min",
+          "type": "int",
+          "nullable": false,
+          "default": "1"
+        },
+        {
+          "name": "rolls_max",
+          "type": "int",
+          "nullable": false,
+          "default": "3"
+        }
+      ],
+      "relations": [
+        {
+          "target": "Loot_Table_Entries",
+          "type": "1:N",
+          "label": "contains entries"
+        },
+        {
+          "target": "Enemy_Loot_Weights",
+          "type": "1:N",
+          "label": "assigned to enemies"
+        }
+      ]
+    },
+    {
+      "id": "Loot_Table_Entries",
+      "domain": 5,
+      "priority": "high",
+      "description": "Individual entries in a loot table — item, weight, quantity range.",
+      "columns": [
+        {
+          "name": "entry_id",
+          "type": "string",
+          "pk": true
+        },
+        {
+          "name": "loot_table_id",
+          "type": "string",
+          "fk": "Loot_Tables.loot_table_id"
+        },
+        {
+          "name": "item_id",
+          "type": "string",
+          "fk": "Items_Stats.item_id"
+        },
+        {
+          "name": "weight",
+          "type": "float",
+          "nullable": false,
+          "default": "1.0"
+        },
+        {
+          "name": "qty_min",
+          "type": "int",
+          "nullable": false,
+          "default": "1"
+        },
+        {
+          "name": "qty_max",
+          "type": "int",
+          "nullable": false,
+          "default": "1"
+        },
+        {
+          "name": "conditional",
+          "type": "string",
+          "nullable": true
+        }
+      ],
+      "relations": [
+        {
+          "target": "Loot_Tables",
+          "type": "N:1",
+          "label": "part of loot table"
+        },
+        {
+          "target": "Items_Stats",
+          "type": "N:1",
+          "label": "references item"
+        }
+      ]
+    }
+  ]
+}

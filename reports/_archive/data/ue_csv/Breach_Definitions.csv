@@ -1,0 +1,3 @@
+Name,display_name,cause,default_severity,size_class,repairable
+---,string,string (enum),string,string (enum),bool
+ROW_EXAMPLE,,,,,true

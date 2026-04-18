@@ -1725,6 +1725,7 @@ void ATraversalRouteActor::SpawnMeshComponentSection(const TArray<FRouteMeshChun
 		Colors,
 		Tangents,
 		HasAuthority() && bSectionCollision && ResolveCollisionModeForStrategy(SurfaceBuildSettings, false) != ERouteMeshCollisionMode::None);
+	PMC->UpdateBounds();
 	PMC->SetCollisionEnabled(RuntimeCollisionEnabledFromMode(ResolveCollisionModeForStrategy(SurfaceBuildSettings, false)));
 	PMC->SetCollisionProfileName(UCollisionProfile::BlockAll_ProfileName);
 	ApplySubmarineCollisionResponses(PMC);

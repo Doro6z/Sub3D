@@ -1,5 +1,6 @@
 #include "SubmarineStationManagerComponent.h"
 
+#include "Generator/SubmarineDefinition.h"
 #include "SubStationBase.h"
 
 USubmarineStationManagerComponent::USubmarineStationManagerComponent()
@@ -50,6 +51,45 @@ void USubmarineStationManagerComponent::DiscoverAttachedStations()
 	}
 
 	UE_LOG(LogTemp, Log, TEXT("[%s] DiscoverAttachedStations: Registered %d stations."), *Owner->GetName(), RegisteredStations.Num());
+}
+
+void USubmarineStationManagerComponent::SpawnStationsFromDefinition(const USubmarineDefinition* Definition)
+{
+	AActor* Owner = GetOwner();
+	UWorld* World = GetWorld();
+	if (!Owner || !World || !Definition || !Owner->HasAuthority())
+	{
+		return;
+	}
+
+	for (const FGeneratedStationSlotDef& Slot : Definition->StationSlots)
+	{
+		const TSubclassOf<ASubStationBase>* ClassPtr = StationClassMap.Find(Slot.StationType);
+		if (!ClassPtr || !*ClassPtr)
+		{
+			UE_LOG(LogTemp, Warning, TEXT("[%s] SpawnStationsFromDefinition: no class mapped for StationType %d (Station=%s)"),
+				*Owner->GetName(), static_cast<int32>(Slot.StationType), *Slot.StationId.ToString());
+			continue;
+		}
+
+		const FTransform WorldTransform = Slot.LocalTransform * Owner->GetActorTransform();
+		FActorSpawnParameters SpawnParams;
+		SpawnParams.Owner = Owner;
+		SpawnParams.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
+
+		ASubStationBase* Station = World->SpawnActor<ASubStationBase>(*ClassPtr, WorldTransform, SpawnParams);
+		if (!Station)
+		{
+			continue;
+		}
+
+		Station->AttachToActor(Owner, FAttachmentTransformRules::KeepWorldTransform);
+		Station->StationType = Slot.StationType;
+		RegisterStation(Station);
+	}
+
+	UE_LOG(LogTemp, Log, TEXT("[%s] SpawnStationsFromDefinition: spawned and registered %d stations from definition."),
+		*Owner->GetName(), RegisteredStations.Num());
 }
 
 ASubStationBase* USubmarineStationManagerComponent::GetFirstStationOfType(ESubStationType StationType) const

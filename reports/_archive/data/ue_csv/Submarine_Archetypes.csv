@@ -1,0 +1,3 @@
+Name,display_name,length_m,max_diameter_m,max_deck_count,section_family_id,style_tag,notes
+---,string,float,float,int32,string,string,string
+ROW_EXAMPLE,,,,,,,

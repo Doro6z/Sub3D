@@ -5,8 +5,6 @@
 #include "SubmarineRuntimeTypes.h"
 #include "SubmarineCompartmentComponent.generated.h"
 
-class USubHullComponent;
-
 UCLASS(ClassGroup = (Submarine), meta = (BlueprintSpawnableComponent))
 class SUB3D_API USubmarineCompartmentComponent : public UActorComponent
 {
@@ -17,9 +15,6 @@ public:
 
 	virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
 	virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const override;
-
-	UFUNCTION(BlueprintCallable, Category = "Submarine|Compartments")
-	void SyncFromHullComponent(const USubHullComponent* HullComponent);
 
 	UFUNCTION(BlueprintCallable, Category = "Submarine|Compartments")
 	void RegisterDoor(const FDoorState& DoorState);

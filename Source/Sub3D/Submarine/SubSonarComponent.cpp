@@ -169,16 +169,10 @@ void USubSonarComponent::ExecutePingRaycasts()
 				const FVector WorldDir = SubQuat.RotateVector(LocalDir.GetSafeNormal());
 				const FVector End = Origin + WorldDir * PingMaxRangeCm;
 
-				TArray<FHitResult> Hits;
-				if (World->LineTraceMultiByChannel(Hits, Origin, End, PingTraceChannel, QueryParams))
+				FHitResult Hit;
+				if (World->LineTraceSingleByChannel(Hit, Origin, End, PingTraceChannel, QueryParams))
 				{
-					for (const FHitResult& Hit : Hits)
-					{
-						if (AddHitPoint(Hit))
-						{
-							break;
-						}
-					}
+					AddHitPoint(Hit);
 				}
 			}
 		}
@@ -200,16 +194,10 @@ void USubSonarComponent::ExecutePingRaycasts()
 			const FVector WorldDir = SubQuat.RotateVector(LocalDir);
 			const FVector End = Origin + WorldDir * PingMaxRangeCm;
 
-			TArray<FHitResult> Hits;
-			if (World->LineTraceMultiByChannel(Hits, Origin, End, PingTraceChannel, QueryParams))
+			FHitResult Hit;
+			if (World->LineTraceSingleByChannel(Hit, Origin, End, PingTraceChannel, QueryParams))
 			{
-				for (const FHitResult& Hit : Hits)
-				{
-					if (AddHitPoint(Hit))
-					{
-						break;
-					}
-				}
+				AddHitPoint(Hit);
 			}
 		}
 	}

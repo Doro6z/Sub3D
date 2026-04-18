@@ -14,7 +14,17 @@ DEFINE_LOG_CATEGORY_STATIC(LogSubInteraction, Log, All);
 
 USubInteractionComponent::USubInteractionComponent()
 {
-	PrimaryComponentTick.bCanEverTick = false;
+	PrimaryComponentTick.bCanEverTick = true;
+	PrimaryComponentTick.TickInterval = 0.1f; // 10Hz is enough for UI feedback
+}
+
+void USubInteractionComponent::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
+{
+	Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
+
+	// Update focused targets for UI
+	FocusedActor = ResolvePrimaryInteractTarget();
+	FocusedInteractable = FocusedActor ? FocusedActor->FindComponentByClass<UInteractableComponent>() : nullptr;
 }
 
 void USubInteractionComponent::TryPrimaryInteract()
@@ -64,7 +74,8 @@ bool USubInteractionComponent::TryRepairFocusedTarget(float RepairStrength, floa
 
 	FHitResult Hit;
 	ASubCrewCharacter* Crew = Cast<ASubCrewCharacter>(GetOwner());
-	if (!Crew || !Crew->GetWorld() || !Crew->FPSCamera)
+	UCameraComponent* ViewCamera = Crew ? Crew->GetActiveViewCamera() : nullptr;
+	if (!Crew || !Crew->GetWorld() || !ViewCamera)
 	{
 		return false;
 	}
@@ -147,13 +158,14 @@ void USubInteractionComponent::ServerTryRepairTarget_Implementation(AActor* Targ
 AActor* USubInteractionComponent::ResolvePrimaryInteractTarget(FVector* OutTraceStart, FVector* OutTraceEnd) const
 {
 	const ASubCrewCharacter* Crew = Cast<ASubCrewCharacter>(GetOwner());
-	if (!Crew || !Crew->FPSCamera || !Crew->GetWorld())
+	UCameraComponent* ViewCamera = Crew ? Crew->GetActiveViewCamera() : nullptr;
+	if (!Crew || !ViewCamera || !Crew->GetWorld())
 	{
 		return nullptr;
 	}
 
-	const FVector Start = Crew->FPSCamera->GetComponentLocation();
-	const FVector End = Start + Crew->FPSCamera->GetForwardVector() * Crew->InteractDistance;
+	const FVector Start = ViewCamera->GetComponentLocation();
+	const FVector End = Start + ViewCamera->GetForwardVector() * Crew->InteractDistance;
 
 	if (OutTraceStart)
 	{
@@ -206,15 +218,16 @@ AActor* USubInteractionComponent::ResolvePrimaryInteractTarget(FVector* OutTrace
 AActor* USubInteractionComponent::ResolveNearbyInteractableFallback(const FVector& TraceStart, const FVector& TraceEnd) const
 {
 	const ASubCrewCharacter* Crew = Cast<ASubCrewCharacter>(GetOwner());
-	if (!Crew || !Crew->FPSCamera || !Crew->GetWorld())
+	UCameraComponent* ViewCamera = Crew ? Crew->GetActiveViewCamera() : nullptr;
+	if (!Crew || !ViewCamera || !Crew->GetWorld())
 	{
 		return nullptr;
 	}
 
 	AActor* BestActor = nullptr;
 	float BestScore = -FLT_MAX;
-	const FVector ViewOrigin = Crew->FPSCamera->GetComponentLocation();
-	const FVector ViewForward = Crew->FPSCamera->GetForwardVector().GetSafeNormal();
+	const FVector ViewOrigin = ViewCamera->GetComponentLocation();
+	const FVector ViewForward = ViewCamera->GetForwardVector().GetSafeNormal();
 	const float MaxDistanceSq = FMath::Square(Crew->InteractDistance);
 
 	for (TActorIterator<AActor> It(Crew->GetWorld()); It; ++It)

@@ -1,0 +1,154 @@
+{
+  "meta": {
+    "domain": "Catalog & Product",
+    "parentId": "domain_3",
+    "description": "Schema definition for Catalog & Product."
+  },
+  "tables": [
+    {
+      "id": "Submarine_Catalog",
+      "domain": 3,
+      "priority": "medium",
+      "description": "Submarine offers available for unlock or purchase — links archetype to product layer.",
+      "columns": [
+        {
+          "name": "catalog_id",
+          "type": "string",
+          "pk": true
+        },
+        {
+          "name": "archetype_id",
+          "type": "string",
+          "fk": "Submarine_Archetypes.archetype_id"
+        },
+        {
+          "name": "display_name",
+          "type": "string",
+          "nullable": false
+        },
+        {
+          "name": "base_cost",
+          "type": "float",
+          "nullable": true
+        },
+        {
+          "name": "currency_type",
+          "type": "string",
+          "nullable": true
+        },
+        {
+          "name": "available_at",
+          "type": "enum",
+          "values": [
+            "lobby",
+            "shipyard",
+            "mission_reward",
+            "unlock"
+          ]
+        }
+      ],
+      "relations": [
+        {
+          "target": "Submarine_Archetypes",
+          "type": "N:1",
+          "label": "based on archetype"
+        },
+        {
+          "target": "Submarine_Unlock_Conditions",
+          "type": "1:N",
+          "label": "has unlock conditions"
+        }
+      ]
+    },
+    {
+      "id": "Submarine_Unlock_Conditions",
+      "domain": 3,
+      "priority": "low",
+      "description": "Conditions required to unlock a submarine catalog entry.",
+      "columns": [
+        {
+          "name": "condition_id",
+          "type": "string",
+          "pk": true
+        },
+        {
+          "name": "catalog_id",
+          "type": "string",
+          "fk": "Submarine_Catalog.catalog_id"
+        },
+        {
+          "name": "condition_type",
+          "type": "enum",
+          "values": [
+            "mission_complete",
+            "level_reached",
+            "item_owned",
+            "purchase"
+          ]
+        },
+        {
+          "name": "condition_ref",
+          "type": "string",
+          "nullable": true
+        },
+        {
+          "name": "notes",
+          "type": "string",
+          "nullable": true
+        }
+      ],
+      "relations": [
+        {
+          "target": "Submarine_Catalog",
+          "type": "N:1",
+          "label": "unlocks catalog entry"
+        }
+      ]
+    },
+    {
+      "id": "Owned_Submarine_States",
+      "domain": 3,
+      "priority": "low",
+      "description": "Per-player submarine ownership and customisation state. Post-Proto03.",
+      "columns": [
+        {
+          "name": "owned_id",
+          "type": "string",
+          "pk": true
+        },
+        {
+          "name": "player_id",
+          "type": "string",
+          "nullable": false
+        },
+        {
+          "name": "catalog_id",
+          "type": "string",
+          "fk": "Submarine_Catalog.catalog_id"
+        },
+        {
+          "name": "nickname",
+          "type": "string",
+          "nullable": true
+        },
+        {
+          "name": "damage_state",
+          "type": "float",
+          "nullable": true
+        },
+        {
+          "name": "last_mission_id",
+          "type": "string",
+          "nullable": true
+        }
+      ],
+      "relations": [
+        {
+          "target": "Submarine_Catalog",
+          "type": "N:1",
+          "label": "owns catalog entry"
+        }
+      ]
+    }
+  ]
+}

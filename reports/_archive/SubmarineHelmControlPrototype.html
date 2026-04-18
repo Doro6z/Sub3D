@@ -1,0 +1,457 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <title>Sub3D - Helm Station & Stabilization Prototype</title>
+    <style>
+        :root {
+            --bg: #030508;
+            --panel: #0d1421;
+            --panel-border: #1e293b;
+            --accent: #00f2ff;
+            --accent-dim: rgba(0, 242, 255, 0.2);
+            --danger: #ff3366;
+            --warning: #ffcc00;
+            --text: #e2e8f0;
+            --text-dim: #64748b;
+            --font-mono: 'Consolas', 'Courier New', monospace;
+            --font-ui: 'Segoe UI', system-ui, sans-serif;
+            --sonar-bg: #020617;
+            --sonar-line: #0f766e;
+            --sonar-blip: #2dd4bf;
+        }
+
+        body {
+            background-color: var(--bg); color: var(--text); font-family: var(--font-ui);
+            margin: 0; padding: 0; display: flex; flex-direction: column; height: 100vh; overflow: hidden;
+        }
+
+        /* Top Bar Theme Switcher */
+        .top-bar {
+            background: #0f172a; border-bottom: 1px solid var(--accent); padding: 10px 20px;
+            display: flex; justify-content: space-between; align-items: center; z-index: 100;
+        }
+        .theme-btn {
+            background: rgba(0, 242, 255, 0.1); border: 1px solid var(--accent); color: var(--accent);
+            padding: 5px 15px; border-radius: 4px; cursor: pointer; font-family: var(--font-mono); font-weight: bold;
+        }
+        .theme-btn:hover { background: rgba(0, 242, 255, 0.3); }
+
+        /* Layout Container */
+        .app-container { flex: 1; display: flex; padding: 20px; gap: 20px; box-sizing: border-box; }
+
+        .panel {
+            background: var(--panel); border: 1px solid var(--panel-border); border-radius: 8px;
+            padding: 15px; position: relative; box-shadow: 0 10px 30px rgba(0,0,0,0.5); display: flex; flex-direction: column;
+        }
+        .v-panel { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
+        
+        h2 { margin: 0 0 10px 0; font-size: 0.85rem; text-transform: uppercase; color: var(--text-dim); letter-spacing: 1px; border-bottom: 1px solid var(--panel-border); padding-bottom: 5px; }
+
+        /* Component Tag (Constraint Enforcer) */
+        .comp-tag {
+            position: absolute; top: -10px; right: 10px; background: #1e293b; color: #94a3b8;
+            font-size: 0.6rem; font-family: var(--font-mono); padding: 2px 6px; border: 1px solid #334155; border-radius: 4px;
+        }
+
+        /* Viewports */
+        svg { background: #05080c; width: 100%; height: 100%; border: 1px solid #111827; border-radius: 4px; }
+        .grid-line { stroke: #111827; stroke-width: 1; }
+        .sub-body { fill: var(--accent-dim); stroke: var(--accent); stroke-width: 2; }
+        .sub-accent { fill: var(--accent); }
+        
+        /* Sonar specifics */
+        .sonar-circle { fill: none; stroke: var(--sonar-line); stroke-width: 1; opacity: 0.3; }
+        .sonar-sweep { fill: url(#sweep-grad); }
+
+        /* Controls */
+        .flex-row { display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; gap: 5px; }
+        .data-box { background: rgba(0,0,0,0.3); padding: 5px; border-radius: 4px; font-family: var(--font-mono); border: 1px solid rgba(0,242,255,0.1); flex: 1; text-align: center; }
+        .data-val { font-size: 1.1rem; color: var(--accent); font-weight: bold; }
+        .data-label { font-size: 0.6rem; color: var(--text-dim); text-transform: uppercase; }
+
+        .control-group { margin-bottom: 15px; }
+        .control-header { display: flex; justify-content: space-between; font-size: 0.75rem; margin-bottom: 5px; color: var(--text-dim); }
+        
+        input[type="range"] { -webkit-appearance: none; width: 100%; background: transparent; height: 30px; margin: 0; cursor: pointer; }
+        input[type="range"]::-webkit-slider-runnable-track { width: 100%; height: 6px; background: #1e293b; border-radius: 3px; }
+        input[type="range"]::-webkit-slider-thumb {
+            -webkit-appearance: none; height: 24px; width: 12px; border-radius: 3px;
+            background: var(--accent); margin-top: -9px; box-shadow: 0 0 10px rgba(0,242,255,0.5);
+        }
+        .power-slider::-webkit-slider-thumb { background: var(--warning); box-shadow: 0 0 10px rgba(255,204,0,0.5); width: 16px; height: 32px; margin-top: -13px; transition:0.3s;}
+        .power-slider.danger::-webkit-slider-thumb { background: var(--danger); box-shadow: 0 0 15px rgba(255,51,102,0.8); }
+
+        .toggle-btn {
+            background: #1e293b; color: var(--text-dim); border: 1px solid #334155;
+            padding: 8px; border-radius: 4px; cursor: pointer; font-size: 0.75rem; font-family: var(--font-mono); font-weight: bold; text-align: center; transition: 0.2s;
+        }
+        .toggle-btn.active { background: rgba(0, 242, 255, 0.15); color: var(--accent); border-color: var(--accent); box-shadow: 0 0 10px rgba(0,242,255,0.2); }
+        .toggle-btn.master { background: rgba(255, 51, 102, 0.1); border-color: var(--danger); color: var(--danger); }
+        .toggle-btn.master.active { background: var(--danger); color: #fff; box-shadow: 0 0 15px rgba(255, 51, 102, 0.5); }
+
+        .key-hint { display: inline-block; background: #0f172a; border: 1px solid #334155; border-radius: 3px; padding: 2px 5px; font-size: 0.65rem; color: #94a3b8; font-family: var(--font-mono); }
+
+        /* Error States (Partial Unbound tests) */
+        .error-overlay {
+            position: absolute; top:0; left:0; right:0; bottom:0; background: rgba(0,0,0,0.8);
+            display: none; align-items: center; justify-content: center; color: var(--danger); font-family: var(--font-mono); font-size: 1.2rem; border: 2px dashed var(--danger); border-radius: 8px; z-index: 10;
+        }
+        
+        /* Layout Configurations */
+        .mode-debug .helm-dashboard { display: none !important; }
+        .mode-helm .debug-viewports { display: none !important; }
+
+    </style>
+</head>
+<body class="mode-helm" id="body-tag">
+
+<!-- TOP BAR -->
+<div class="top-bar">
+    <div style="font-family: var(--font-mono); color: var(--text-dim); font-size: 0.8rem;">
+        <span style="color:#fff;">UMG BINDING RULES:</span> Weak references, Independent Widgets, Raw Sonar ≠ Nav Logic
+    </div>
+    <div>
+        <button class="theme-btn" onclick="switchTheme('debug')">MODE: PHYSICS DEBUG</button>
+        <button class="theme-btn" onclick="switchTheme('helm')" style="background:var(--accent); color:#000;">MODE: UMG DASHBOARD</button>
+    </div>
+</div>
+
+<div class="app-container">
+
+    <!-- ========================================== -->
+    <!-- MODE 1 : DEBUG VIEWPORTS (OLD LAYOUT)      -->
+    <!-- ========================================== -->
+    <div class="viewport-col debug-viewports">
+        <div class="panel v-panel">
+            <h2>NAVIGATION (YAW & RUDDER)</h2>
+            <svg id="view-top" viewBox="-250 -150 500 300">
+                <g id="grid-top"></g>
+                <g id="sub-top"><rect x="-40" y="-8" width="80" height="16" rx="8" class="sub-body" /><line x1="-35" y1="0" x2="-45" y2="0" id="rudder-vis" stroke="#ff3366" stroke-width="3" /></g>
+            </svg>
+        </div>
+        <div class="panel v-panel">
+            <h2>DEPTH (PITCH & BALLAST)</h2>
+            <svg id="view-side" viewBox="-250 -150 500 300">
+                <rect x="-250" y="0" width="500" height="150" fill="#020a14" opacity="0.8" />
+                <line x1="-250" y1="0" x2="250" y2="0" stroke="var(--accent)" stroke-width="1" stroke-dasharray="4,4" opacity="0.5" />
+                <g id="sub-side">
+                    <rect x="-40" y="-8" width="80" height="16" rx="8" class="sub-body" />
+                    <line x1="25" y1="0" x2="35" y2="0" id="plane-vis" stroke="#ffcc00" stroke-width="3" />
+                    <rect x="-20" y="0" width="40" height="6" fill="#1e3a8a" opacity="0.8" id="ballast-vis" />
+                </g>
+            </svg>
+        </div>
+    </div>
+
+    <!-- ========================================== -->
+    <!-- MODE 2 : HELM DASHBOARD (NEW LAYOUT)       -->
+    <!-- ========================================== -->
+    
+    <!-- LEFT PANEL : NAV ASSIST & PROPULSION -->
+    <div class="helm-col helm-dashboard" style="width:300px;">
+        <div class="panel v-panel">
+            <div class="comp-tag">WBP_HelmNav</div>
+            <h2>TACTICAL NAV / LOCAL GRAPH</h2>
+            <div class="error-overlay" id="err-nav">NO LOCAL GRAPH</div>
+            
+            <div style="flex:1; border: 1px solid #1e293b; background: #020617; position:relative; overflow:hidden;">
+                <!-- Derived Nav Data Fake Vis -->
+                <svg viewBox="0 0 100 100" preserveAspectRatio="none">
+                    <path d="M 50,100 C 50,60 80,40 20,0" stroke="#0f766e" stroke-width="2" fill="none" stroke-dasharray="4,4" />
+                    <circle cx="50" cy="80" r="3" fill="#00f2ff" />
+                </svg>
+                <div style="position:absolute; bottom:5px; left:5px; font-size:10px; color:#0f766e;">TUNNEL TREND: PORT</div>
+            </div>
+            
+            <div class="flex-row" style="margin-top:10px;">
+                <div class="data-box"><div class="data-label">VELOCITY</div><div class="data-val" id="ui-spd">0.0 kn</div></div>
+                <div class="data-box"><div class="data-label">HEADING</div><div class="data-val" id="ui-hdg">000°</div></div>
+            </div>
+        </div>
+
+        <div class="panel">
+            <div class="comp-tag">WBP_Propulsion</div>
+            <h2><span class="key-hint">W / S</span> MAIN ENGINE</h2>
+            <div class="control-header"><span>REVERSE</span><span id="ui-pwr-val" style="color:var(--warning); font-weight:bold;">0%</span><span>FLANK</span></div>
+            <input type="range" id="in-power" class="power-slider" min="-50" max="100" value="0">
+            <div style="font-size:0.65rem; color:var(--text-dim); text-align:center; transition:0.3s; margin-top:5px;" id="pwr-warn">Tactical Cruising.</div>
+        </div>
+    </div>
+
+    <!-- CENTER PANEL : RAW PERCEPTION (SONAR) -->
+    <div class="v-panel helm-dashboard" style="min-width: 400px;">
+        <div class="panel v-panel" style="background:#020617;">
+            <div class="comp-tag" style="background:#000;">WBP_SonarRaw (No Nav Logic)</div>
+            <h2 style="text-align:center; border:none;">RAW PERCEPTION</h2>
+            <div class="error-overlay" id="err-sonar">SONAR OFFLINE</div>
+            
+            <div style="flex:1; display:flex; align-items:center; justify-content:center; position:relative;">
+                <svg viewBox="-100 -100 200 200" style="background:transparent; border:none; max-width: 400px; max-height:400px;">
+                    <defs>
+                        <radialGradient id="sweep-grad" cx="50%" cy="50%" r="50%">
+                            <stop offset="0%" stop-color="#2dd4bf" stop-opacity="0.8" />
+                            <stop offset="100%" stop-color="#2dd4bf" stop-opacity="0" />
+                        </radialGradient>
+                    </defs>
+                    <!-- Rings -->
+                    <circle class="sonar-circle" cx="0" cy="0" r="30" />
+                    <circle class="sonar-circle" cx="0" cy="0" r="60" />
+                    <circle class="sonar-circle" cx="0" cy="0" r="90" />
+                    <!-- Sub Center -->
+                    <polygon points="0,-5 -3,5 3,5" fill="#00f2ff" />
+                    <!-- Sweep -->
+                    <path id="sonar-sweep" d="M 0,0 L 0,-90 A 90,90 0 0,1 30,-85 Z" fill="url(#sweep-grad)" />
+                    
+                    <!-- Fake walls based on Depth to make it alive -->
+                    <path id="sonar-wall-l" d="M -40,-90 Q -30,0 -40,90" stroke="#2dd4bf" stroke-width="2" fill="none" opacity="0.5" />
+                    <path id="sonar-wall-r" d="M 60,-90 Q 50,0 60,90" stroke="#2dd4bf" stroke-width="2" fill="none" opacity="0.5" />
+                </svg>
+            </div>
+            
+            <div style="display:flex; justify-content:center; gap:10px; margin-top:10px;">
+                <button class="theme-btn" style="font-size:0.6rem; border-color:var(--danger); color:var(--danger);" onclick="toggleError('err-sonar')">TEST: KILL SONAR BINDING</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- RIGHT PANEL : STEERING & DAMPENERS -->
+    <div class="helm-col" style="width:300px;">
+        <!-- Works in both modes actually, this is the core input -->
+        <div class="panel">
+            <div class="comp-tag">WBP_Steering</div>
+            <h2>SYSTEM CONTROLS</h2>
+            
+            <div class="control-group">
+                <div class="control-header"><span><span class="key-hint">A/D</span> RUDDER</span><span id="ui-rudder-val">0°</span></div>
+                <input type="range" id="in-rudder" min="-30" max="30" value="0">
+                <div style="font-size:0.6rem; color:var(--danger); text-align:right; margin-top:2px; opacity:0;" id="rudder-warn">Requires speed</div>
+            </div>
+
+            <div class="control-group">
+                <div class="control-header"><span><span class="key-hint">Q/E</span> PLANES</span><span id="ui-plane-val">0°</span></div>
+                <input type="range" id="in-plane" min="-20" max="20" value="0">
+            </div>
+
+            <div class="control-group" style="margin-bottom:0;">
+                <div class="control-header"><span>BALLAST (DEPTH/BUOY)</span><span id="ui-ballast-val">50%</span></div>
+                <input type="range" id="in-ballast" min="0" max="100" value="50">
+            </div>
+        </div>
+
+        <div class="panel" style="background:#0b111a; flex:1;">
+            <div class="comp-tag">WBP_Dampeners</div>
+            <h2 style="color: #cbd5e1; display:flex; justify-content:space-between; align-items:center;">
+                STABILIZATION
+                <div class="toggle-btn master" id="btn-master-auto" onclick="toggleMasterAuto()">OFF</div>
+            </h2>
+            
+            <div class="data-box" style="margin-bottom:15px; text-align:left; background:transparent; border-color:#334155;">
+                <div class="data-label">ACTUAL DEPTH</div>
+                <div class="data-val" id="ui-depth" style="font-size:1.5rem;">0.0 m</div>
+            </div>
+
+            <div class="flex-row">
+                <div class="toggle-btn" id="btn-auto-spd" style="flex:1;" onclick="toggleSubAuto('speed')">AUTO-SPD</div>
+                <input type="range" id="target-spd" min="-10" max="25" value="0" disabled style="width:80px;">
+            </div>
+
+            <div class="flex-row" style="margin-bottom:0;">
+                <div class="toggle-btn" id="btn-auto-depth" style="flex:1;" onclick="toggleSubAuto('depth')">AUTO-DPTH</div>
+                <input type="range" id="target-depth" min="0" max="200" value="50" disabled style="width:80px;">
+            </div>
+            
+            <div style="margin-top:auto; padding-top:10px;">
+                <button class="theme-btn" style="width:100%; font-size:0.6rem; border-color:var(--danger); color:var(--danger);" onclick="toggleError('err-nav')">TEST: KILL NAV GRAPH</button>
+            </div>
+        </div>
+    </div>
+
+</div>
+
+<script>
+    // --- Layout Switcher ---
+    function switchTheme(mode) {
+        document.getElementById('body-tag').className = 'mode-' + mode;
+        const btns = document.querySelectorAll('.top-bar .theme-btn');
+        btns[0].style.background = mode === 'debug' ? 'var(--accent)' : 'rgba(0,242,255,0.1)';
+        btns[0].style.color = mode === 'debug' ? '#000' : 'var(--accent)';
+        btns[1].style.background = mode === 'helm' ? 'var(--accent)' : 'rgba(0,242,255,0.1)';
+        btns[1].style.color = mode === 'helm' ? '#000' : 'var(--accent)';
+    }
+
+    function toggleError(id) {
+        const el = document.getElementById(id);
+        el.style.display = (el.style.display === 'flex') ? 'none' : 'flex';
+    }
+
+    // --- PHYSICS STATE ---
+    const PHYS = {
+        mass: 2200, forwardDragFast: 0.05, forwardDragCruise: 0.01, lateralDrag: 0.8,
+        x: 0, y: 0, depth: 50, yaw: 0, pitch: 0, velFwd: 0, velLat: 0, velVert: 0,
+        powerReq: 0, rudderReq: 0, planeReq: 0, ballastFill: 50
+    };
+
+    // --- AUTO SYSTEM STATE ---
+    const AUTO = { master: false, speed: false, depth: false, tSpeed: 0, tDepth: 50, suspendSpeed: 0, suspendDepth: 0 };
+
+    const els = {
+        inPower: document.getElementById('in-power'), inRudder: document.getElementById('in-rudder'),
+        inPlane: document.getElementById('in-plane'), inBallast: document.getElementById('in-ballast'),
+        tSpd: document.getElementById('target-spd'), tDepth: document.getElementById('target-depth')
+    };
+
+    const keys = { w:false, s:false, a:false, d:false, q:false, e:false };
+    
+    window.addEventListener('keydown', e => {
+        const k = e.key.toLowerCase();
+        if(keys.hasOwnProperty(k)) { keys[k] = true; breakAutoSuspend(k); }
+    });
+    window.addEventListener('keyup', e => {
+        const k = e.key.toLowerCase();
+        if(keys.hasOwnProperty(k)) keys[k] = false;
+    });
+
+    els.inPower.addEventListener('mousedown', () => breakAutoSuspend('w')); els.inPower.addEventListener('input', () => PHYS.powerReq = parseFloat(els.inPower.value));
+    els.inRudder.addEventListener('mousedown', () => breakAutoSuspend('a')); els.inRudder.addEventListener('input', () => PHYS.rudderReq = parseFloat(els.inRudder.value));
+    els.inPlane.addEventListener('mousedown', () => breakAutoSuspend('q')); els.inPlane.addEventListener('input', () => PHYS.planeReq = parseFloat(els.inPlane.value));
+    els.inBallast.addEventListener('mousedown', () => breakAutoSuspend('q')); els.inBallast.addEventListener('input', () => PHYS.ballastFill = parseFloat(els.inBallast.value));
+    els.tSpd.addEventListener('input', () => { AUTO.tSpeed = parseFloat(els.tSpd.value); updateAutoUI(); });
+    els.tDepth.addEventListener('input', () => { AUTO.tDepth = parseFloat(els.tDepth.value); updateAutoUI(); });
+
+    function breakAutoSuspend(key) {
+        if (!AUTO.master) return;
+        if (key === 'w' || key === 's') AUTO.suspendSpeed = 100;
+        if (key === 'q' || key === 'e') AUTO.suspendDepth = 100;
+        updateAutoUI();
+    }
+
+    function toggleMasterAuto() {
+        AUTO.master = !AUTO.master;
+        if (AUTO.master) {
+            AUTO.speed = AUTO.depth = true;
+            AUTO.tSpeed = 0; AUTO.tDepth = PHYS.depth;
+            els.tSpd.value = 0; els.tDepth.value = Math.round(PHYS.depth);
+            keys.w = keys.s = keys.a = keys.d = keys.q = keys.e = false;
+        } else { AUTO.speed = AUTO.depth = false; }
+        updateAutoUI();
+    }
+
+    function toggleSubAuto(sys) {
+        if (!AUTO.master) return;
+        AUTO[sys] = !AUTO[sys];
+        if (sys === 'speed' && AUTO.speed) AUTO.tSpeed = els.tSpd.value = PHYS.velFwd;
+        if (sys === 'depth' && AUTO.depth) AUTO.tDepth = els.tDepth.value = PHYS.depth;
+        updateAutoUI();
+    }
+
+    function updateAutoUI() {
+        const mBtn = document.getElementById('btn-master-auto');
+        mBtn.className = 'toggle-btn master ' + (AUTO.master ? 'active' : ''); mBtn.innerText = AUTO.master ? 'ON' : 'OFF';
+
+        const sBtn = document.getElementById('btn-auto-spd');
+        sBtn.className = 'toggle-btn ' + ((AUTO.speed && AUTO.suspendSpeed <= 0) ? 'active' : '');
+        sBtn.style.opacity = (AUTO.suspendSpeed > 0) ? '0.5' : '1'; sBtn.innerText = `AUTO-SPD (${AUTO.tSpeed.toFixed(0)})`;
+        els.tSpd.disabled = !(AUTO.master && AUTO.speed);
+
+        const dBtn = document.getElementById('btn-auto-depth');
+        dBtn.className = 'toggle-btn ' + ((AUTO.depth && AUTO.suspendDepth <= 0) ? 'active' : '');
+        dBtn.style.opacity = (AUTO.suspendDepth > 0) ? '0.5' : '1'; dBtn.innerText = `AUTO-DPTH (${AUTO.tDepth.toFixed(0)})`;
+        els.tDepth.disabled = !(AUTO.master && AUTO.depth);
+    }
+
+    const dt = 0.016;
+    let sonarAngle = 0;
+    
+    function tick() {
+        if (keys.w) PHYS.powerReq = Math.min(100, PHYS.powerReq + 1);
+        if (keys.s) PHYS.powerReq = Math.max(-50, PHYS.powerReq - 1);
+        if (keys.d) PHYS.rudderReq = Math.min(30, PHYS.rudderReq + 1);
+        else if (keys.a) PHYS.rudderReq = Math.max(-30, PHYS.rudderReq - 1);
+        else PHYS.rudderReq *= 0.95; 
+
+        if (keys.e) PHYS.planeReq = Math.max(-20, PHYS.planeReq - 0.5);
+        if (keys.q) PHYS.planeReq = Math.min(20, PHYS.planeReq + 0.5);
+        else PHYS.planeReq *= 0.98;
+
+        if (AUTO.suspendSpeed > 0) AUTO.suspendSpeed--;
+        if (AUTO.suspendDepth > 0) AUTO.suspendDepth--;
+
+        if (AUTO.master) {
+            if (AUTO.speed && AUTO.suspendSpeed <= 0) {
+                PHYS.powerReq += (AUTO.tSpeed - PHYS.velFwd) * 0.5;
+                PHYS.powerReq = Math.max(-50, Math.min(100, PHYS.powerReq));
+            }
+            if (AUTO.depth && AUTO.suspendDepth <= 0) {
+                const err = AUTO.tDepth - PHYS.depth;
+                PHYS.ballastFill += err * 0.05; PHYS.ballastFill = Math.max(0, Math.min(100, PHYS.ballastFill));
+                if (Math.abs(PHYS.velFwd) > 2) { PHYS.planeReq = -err * 2.0; PHYS.planeReq = Math.max(-20, Math.min(20, PHYS.planeReq)); }
+            }
+            updateAutoUI();
+        }
+
+        els.inPower.value = PHYS.powerReq; els.inRudder.value = PHYS.rudderReq;
+        els.inPlane.value = PHYS.planeReq; els.inBallast.value = PHYS.ballastFill;
+
+        document.getElementById('ui-pwr-val').innerText = PHYS.powerReq.toFixed(0) + '%';
+        if (PHYS.powerReq > 50) {
+            document.getElementById('ui-pwr-val').style.color = 'var(--danger)'; els.inPower.classList.add('danger');
+            document.getElementById('pwr-warn').innerText = "AHEAD FLANK : CAVITATION RISK !"; document.getElementById('pwr-warn').style.color = 'var(--danger)';
+        } else {
+            document.getElementById('ui-pwr-val').style.color = 'var(--warning)'; els.inPower.classList.remove('danger');
+            document.getElementById('pwr-warn').innerText = "Tactical Cruising."; document.getElementById('pwr-warn').style.color = 'var(--text-dim)';
+        }
+        document.getElementById('ui-rudder-val').innerText = PHYS.rudderReq.toFixed(1) + '°';
+        document.getElementById('ui-plane-val').innerText = PHYS.planeReq.toFixed(1) + '°';
+        document.getElementById('ui-ballast-val').innerText = PHYS.ballastFill.toFixed(0) + '%';
+
+        const maxSpeed = 25.0; const thrustForce = (PHYS.powerReq / 100.0) * 10.0;
+        let dragC = PHYS.forwardDragCruise;
+        if (Math.sign(thrustForce) !== Math.sign(PHYS.velFwd) && thrustForce !== 0) dragC = PHYS.forwardDragFast; 
+        PHYS.velFwd += ((thrustForce - Math.sign(PHYS.velFwd) * Math.pow(Math.abs(PHYS.velFwd), 2) * dragC) / (PHYS.mass / 1000)) * dt;
+
+        const spdF = Math.abs(PHYS.velFwd) / maxSpeed;
+        PHYS.yaw += ((PHYS.rudderReq / 30.0) * 15.0 * spdF * Math.sign(PHYS.velFwd)) * dt;
+        document.getElementById('rudder-warn').style.opacity = (Math.abs(PHYS.rudderReq) > 5 && Math.abs(PHYS.velFwd) < 1) ? '1' : '0';
+
+        const buoyF = (50 - PHYS.ballastFill) * 0.1;
+        PHYS.pitch += (-(PHYS.planeReq * spdF) - (buoyF * 2.0) - PHYS.pitch) * 0.1;
+        PHYS.velVert += (-(PHYS.planeReq / 20.0) * spdF * 5.0 + buoyF) * dt;
+        PHYS.velVert *= 0.95; PHYS.depth = Math.max(0, PHYS.depth + PHYS.velVert);
+
+        document.getElementById('ui-spd').innerText = PHYS.velFwd.toFixed(1) + ' kn';
+        document.getElementById('ui-depth').innerText = PHYS.depth.toFixed(1) + ' m';
+        document.getElementById('ui-hdg').innerText = ((PHYS.yaw % 360 + 360) % 360).toFixed(0).padStart(3, '0') + '°';
+
+        renderViewports();
+    }
+
+    function generateGrid(id) {
+        let h = ''; for(let i=-500; i<=500; i+=50) { h += `<line x1="${i}" y1="-500" x2="${i}" y2="500" class="grid-line"/><line x1="-500" y1="${i}" x2="500" y2="${i}" class="grid-line"/>`; }
+        document.getElementById(id).innerHTML = h;
+    }
+    generateGrid('grid-top');
+
+    function renderViewports() {
+        // Debug Views
+        document.getElementById('sub-top').setAttribute('transform', `rotate(${PHYS.yaw}, -20, 0)`);
+        document.getElementById('rudder-vis').setAttribute('transform', `rotate(${PHYS.rudderReq}, -35, 0)`);
+        document.getElementById('grid-top').setAttribute('transform', `translate(${-(PHYS.x % 50)}, ${-(PHYS.y % 50)})`);
+        document.getElementById('sub-side').setAttribute('transform', `translate(0, ${Math.min(100, PHYS.depth)}) rotate(${PHYS.pitch})`);
+        document.getElementById('plane-vis').setAttribute('transform', `rotate(${PHYS.planeReq}, 30, 0)`);
+        document.getElementById('ballast-vis').setAttribute('height', (PHYS.ballastFill / 100) * 6);
+        document.getElementById('ballast-vis').setAttribute('y', -((PHYS.ballastFill / 100) * 6)/2);
+
+        // Sonar Sweep Animation
+        sonarAngle = (sonarAngle + 2) % 360;
+        document.getElementById('sonar-sweep').setAttribute('transform', `rotate(${sonarAngle}, 0, 0)`);
+        
+        // Parallax wall effect based on rudder & pitch for the fake sonar
+        document.getElementById('sonar-wall-l').setAttribute('d', `M -40,-90 Q ${-30 + PHYS.rudderReq*2},0 -40,90`);
+        document.getElementById('sonar-wall-r').setAttribute('d', `M 60,-90 Q  ${50 + PHYS.rudderReq*2},0 60,90`);
+    }
+
+    setInterval(tick, 1000/60);
+</script>
+</body>
+</html>

@@ -1,0 +1,188 @@
+{
+  "meta": {
+    "domain": "Difficulty & Economy",
+    "parentId": "domain_9",
+    "description": "Schema definition for Difficulty & Economy."
+  },
+  "tables": [
+    {
+      "id": "Difficulty_Curves",
+      "domain": 9,
+      "priority": "medium",
+      "description": "Per-parameter difficulty scaling curves — enemy HP, flood speed, repair time, etc.",
+      "columns": [
+        {
+          "name": "curve_id",
+          "type": "string",
+          "pk": true
+        },
+        {
+          "name": "preset_id",
+          "type": "string",
+          "fk": "Difficulty_Presets.preset_id"
+        },
+        {
+          "name": "parameter",
+          "type": "enum",
+          "values": [
+            "enemy_hp",
+            "enemy_damage",
+            "flood_rate",
+            "repair_time",
+            "spawn_rate",
+            "item_scarcity"
+          ]
+        },
+        {
+          "name": "multiplier",
+          "type": "float",
+          "nullable": false,
+          "default": "1.0"
+        },
+        {
+          "name": "curve_type",
+          "type": "enum",
+          "values": [
+            "flat",
+            "linear",
+            "exponential"
+          ]
+        }
+      ],
+      "relations": [
+        {
+          "target": "Difficulty_Presets",
+          "type": "N:1",
+          "label": "belongs to preset"
+        }
+      ]
+    },
+    {
+      "id": "Difficulty_Presets",
+      "domain": 9,
+      "priority": "medium",
+      "description": "Global difficulty presets — Normal, Hard, Extreme.",
+      "columns": [
+        {
+          "name": "preset_id",
+          "type": "string",
+          "pk": true
+        },
+        {
+          "name": "display_name",
+          "type": "string",
+          "nullable": false
+        },
+        {
+          "name": "order_index",
+          "type": "int",
+          "nullable": false
+        },
+        {
+          "name": "unlocked",
+          "type": "bool",
+          "nullable": false,
+          "default": "true"
+        }
+      ],
+      "relations": [
+        {
+          "target": "Difficulty_Curves",
+          "type": "1:N",
+          "label": "has curves"
+        },
+        {
+          "target": "Mission_Templates",
+          "type": "1:N",
+          "label": "applied to missions"
+        }
+      ]
+    },
+    {
+      "id": "Economy_Config",
+      "domain": 9,
+      "priority": "low",
+      "description": "Global economy parameters — base prices, inflation, credit sources.",
+      "columns": [
+        {
+          "name": "config_key",
+          "type": "string",
+          "pk": true
+        },
+        {
+          "name": "display_name",
+          "type": "string",
+          "nullable": false
+        },
+        {
+          "name": "value_float",
+          "type": "float",
+          "nullable": true
+        },
+        {
+          "name": "value_string",
+          "type": "string",
+          "nullable": true
+        },
+        {
+          "name": "notes",
+          "type": "string",
+          "nullable": true
+        }
+      ],
+      "relations": []
+    },
+    {
+      "id": "Progression_Unlocks",
+      "domain": 9,
+      "priority": "low",
+      "description": "XP-gated or progression-based unlock tree — submarines, modules, missions.",
+      "columns": [
+        {
+          "name": "unlock_id",
+          "type": "string",
+          "pk": true
+        },
+        {
+          "name": "display_name",
+          "type": "string",
+          "nullable": false
+        },
+        {
+          "name": "unlock_type",
+          "type": "enum",
+          "values": [
+            "submarine",
+            "module",
+            "mission",
+            "item",
+            "cosmetic"
+          ]
+        },
+        {
+          "name": "ref_id",
+          "type": "string",
+          "nullable": false
+        },
+        {
+          "name": "xp_required",
+          "type": "float",
+          "nullable": true
+        },
+        {
+          "name": "prereq_unlock_id",
+          "type": "string",
+          "fk": "Progression_Unlocks.unlock_id",
+          "nullable": true
+        }
+      ],
+      "relations": [
+        {
+          "target": "Progression_Unlocks",
+          "type": "N:1",
+          "label": "requires unlock"
+        }
+      ]
+    }
+  ]
+}

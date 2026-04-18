@@ -1,0 +1,235 @@
+{
+  "meta": {
+    "domain": "Breach & Flood",
+    "parentId": "domain_7",
+    "description": "Schema definition for Breach & Flood."
+  },
+  "tables": [
+    {
+      "id": "Breach_Definitions",
+      "domain": 7,
+      "priority": "high",
+      "description": "Breach types — cause, geometry, and initial severity.",
+      "columns": [
+        {
+          "name": "breach_id",
+          "type": "string",
+          "pk": true
+        },
+        {
+          "name": "display_name",
+          "type": "string",
+          "nullable": false
+        },
+        {
+          "name": "cause",
+          "type": "enum",
+          "values": [
+            "impact",
+            "explosion",
+            "structural_failure",
+            "torpedo",
+            "creature",
+            "corrosion"
+          ]
+        },
+        {
+          "name": "default_severity",
+          "type": "string",
+          "fk": "Breach_Severity_Levels.severity_id"
+        },
+        {
+          "name": "size_class",
+          "type": "enum",
+          "values": [
+            "pinhole",
+            "small",
+            "medium",
+            "large",
+            "critical"
+          ]
+        },
+        {
+          "name": "repairable",
+          "type": "bool",
+          "nullable": false,
+          "default": "true"
+        }
+      ],
+      "relations": [
+        {
+          "target": "Breach_Severity_Levels",
+          "type": "N:1",
+          "label": "default severity"
+        },
+        {
+          "target": "Repair_Action_Definitions",
+          "type": "N:N",
+          "label": "repaired by"
+        }
+      ]
+    },
+    {
+      "id": "Breach_Severity_Levels",
+      "domain": 7,
+      "priority": "high",
+      "description": "Severity levels for breaches — defines flood rate and repair difficulty.",
+      "columns": [
+        {
+          "name": "severity_id",
+          "type": "string",
+          "pk": true
+        },
+        {
+          "name": "display_name",
+          "type": "string",
+          "nullable": false
+        },
+        {
+          "name": "flood_rate_mult",
+          "type": "float",
+          "nullable": false
+        },
+        {
+          "name": "repair_time_mult",
+          "type": "float",
+          "nullable": false
+        },
+        {
+          "name": "auto_worsen",
+          "type": "bool",
+          "nullable": false,
+          "default": "false"
+        },
+        {
+          "name": "fatal_threshold",
+          "type": "bool",
+          "nullable": false,
+          "default": "false"
+        }
+      ],
+      "relations": [
+        {
+          "target": "Breach_Definitions",
+          "type": "1:N",
+          "label": "applied to breaches"
+        },
+        {
+          "target": "Repair_Action_Definitions",
+          "type": "N:N",
+          "label": "determines repair actions"
+        }
+      ]
+    },
+    {
+      "id": "Flood_Compartment_Config",
+      "domain": 7,
+      "priority": "high",
+      "description": "Flood propagation config per compartment type — capacity and propagation resistance.",
+      "columns": [
+        {
+          "name": "config_id",
+          "type": "string",
+          "pk": true
+        },
+        {
+          "name": "room_tag_id",
+          "type": "string",
+          "fk": "Room_Tag_Catalog.room_tag_id",
+          "nullable": true
+        },
+        {
+          "name": "volume_m3",
+          "type": "float",
+          "nullable": true
+        },
+        {
+          "name": "flood_rate_base",
+          "type": "float",
+          "nullable": false
+        },
+        {
+          "name": "propagation_resistance",
+          "type": "float",
+          "nullable": true
+        },
+        {
+          "name": "critical_level_pct",
+          "type": "float",
+          "nullable": false,
+          "default": "0.8"
+        }
+      ],
+      "relations": [
+        {
+          "target": "Room_Tag_Catalog",
+          "type": "N:1",
+          "label": "config for room type"
+        }
+      ]
+    },
+    {
+      "id": "Repair_Action_Definitions",
+      "domain": 7,
+      "priority": "high",
+      "description": "Repair action types — seal, patch, weld, pump.",
+      "columns": [
+        {
+          "name": "repair_id",
+          "type": "string",
+          "pk": true
+        },
+        {
+          "name": "display_name",
+          "type": "string",
+          "nullable": false
+        },
+        {
+          "name": "kind",
+          "type": "enum",
+          "values": [
+            "seal",
+            "patch",
+            "weld",
+            "pump",
+            "reinforce"
+          ]
+        },
+        {
+          "name": "base_duration_s",
+          "type": "float",
+          "nullable": false
+        },
+        {
+          "name": "required_item",
+          "type": "string",
+          "fk": "Items_Stats.item_id",
+          "nullable": true
+        },
+        {
+          "name": "perm_fix",
+          "type": "bool",
+          "nullable": false,
+          "default": "false"
+        }
+      ],
+      "relations": [
+        {
+          "target": "Items_Stats",
+          "type": "N:1",
+          "label": "consumes item"
+        },
+        {
+          "target": "Breach_Definitions",
+          "type": "N:N",
+          "label": "repairs breaches"
+        },
+        {
+          "target": "Breach_Severity_Levels",
+          "type": "N:N",
+          "label": "applicable to severities"
+        }
+      ]
+    }
+  ]
+}

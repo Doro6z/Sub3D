@@ -2,43 +2,22 @@
 
 #include "DrawDebugHelpers.h"
 #include "Components/PrimitiveComponent.h"
-#include "Engine/StaticMeshActor.h"
 #include "Net/UnrealNetwork.h"
-#include "SubMovementComponent.h"
 #include "SubmarineBase.h"
-#include "SubmarineCompartmentComponent.h"
 #include "SubmarineLayoutAsset.h"
-
-DEFINE_LOG_CATEGORY_STATIC(LogSubHullWater, Log, All);
+#include "Data/CompiledSubmarineRuntimeAsset.h"
 
 namespace
 {
-constexpr float KPaPerAtm = 101.325f;
-
-void BuildExportedCompartmentState(const FCompartmentRuntimeState& Comp, FCompartmentState& OutState)
+bool HasAuthoritativeOwner(const UActorComponent* Component)
 {
-	OutState.CompartmentId = Comp.CompartmentId;
-	OutState.FloodLevel01 = Comp.WaterLevelNormalized;
-	OutState.WaterMassLiters = Comp.CurrentWaterLiters;
-	OutState.WaterHeightCm = Comp.WaterHeightCm;
-	OutState.InternalPressureKPa = Comp.InternalPressureKPa;
-	OutState.ExternalPressureKPa = Comp.ExternalReferencePressureKPa;
-	OutState.PressureDeltaKPa = Comp.PressureDeltaKPa;
-	OutState.bCritical = Comp.WaterLevelNormalized >= 0.8f || Comp.bPressureCritical;
-	OutState.bElectricalsWet = Comp.WaterLevelNormalized >= 0.15f;
-}
+	const AActor* Owner = Component ? Component->GetOwner() : nullptr;
+	if (!Owner)
+	{
+		return false;
+	}
 
-void ExpandBoundsWithSheet(FBox& InOutBounds, const FStructuralSheetDef& Sheet)
-{
-	const FVector TangentX = Sheet.LocalTangentX.GetSafeNormal();
-	const FVector TangentY = Sheet.LocalTangentY.GetSafeNormal();
-	const FVector HalfX = TangentX * (Sheet.SizeCm.X * 0.5f);
-	const FVector HalfY = TangentY * (Sheet.SizeCm.Y * 0.5f);
-
-	InOutBounds += Sheet.LocalOrigin + HalfX + HalfY;
-	InOutBounds += Sheet.LocalOrigin + HalfX - HalfY;
-	InOutBounds += Sheet.LocalOrigin - HalfX + HalfY;
-	InOutBounds += Sheet.LocalOrigin - HalfX - HalfY;
+	return Owner->GetLocalRole() == ROLE_Authority;
 }
 }
 
@@ -52,7 +31,7 @@ void USubHullComponent::BeginPlay()
 {
 	Super::BeginPlay();
 
-	if (GetOwner() && GetOwner()->HasAuthority())
+	if (HasAuthoritativeOwner(this))
 	{
 		InitializeFromLayout(LayoutAsset);
 		EnsureFallbackLayout();
@@ -61,17 +40,17 @@ void USubHullComponent::BeginPlay()
 
 void USubHullComponent::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
 {
-	Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
+	if (GetOwner() && GetOwner()->GetLevel())
+	{
+		Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
+	}
 
-	if (!GetOwner() || !GetOwner()->HasAuthority())
+	if (!HasAuthoritativeOwner(this))
 	{
 		return;
 	}
 
-	UpdateCompartmentDerivedState(0.f);
 	UpdateFlowFields();
-	AdvanceFlooding(DeltaTime);
-	MaybeLogWaterLevels(DeltaTime);
 
 	if (!bDrawDebug || !GetWorld())
 	{
@@ -101,7 +80,86 @@ void USubHullComponent::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& Ou
 	DOREPLIFETIME(USubHullComponent, SheetStates);
 	DOREPLIFETIME(USubHullComponent, BreachClusters);
 	DOREPLIFETIME(USubHullComponent, FlowFields);
-	DOREPLIFETIME(USubHullComponent, CompartmentStates);
+}
+
+void USubHullComponent::InitializeFromCompiledHull(const UCompiledSubmarineRuntimeAsset* Asset)
+{
+	StructuralSheets.Reset();
+	SheetStates.Reset();
+	BreachClusters.Reset();
+	FlowFields.Reset();
+
+	if (!Asset)
+	{
+		return;
+	}
+
+	// Resolve the first compartment ID from the flood graph for sheet parenting.
+	FName MainCompId = NAME_None;
+	for (const FDerivedFloodVolume& Volume : Asset->FloodGraph.Volumes)
+	{
+		if (!Volume.VolumeId.IsNone())
+		{
+			MainCompId = Volume.VolumeId;
+			break;
+		}
+	}
+
+	// Create fallback sheets for impact projection.
+	if (!MainCompId.IsNone())
+	{
+		const float HullLength = FMath::Max(100.f, Asset->HullLengthCm);
+		
+		float MaxWidth = 100.f;
+		float MaxHeight = 100.f;
+		for (const FSub3DCompiledHullSection& Section : Asset->HullData.Sections)
+		{
+			MaxWidth = FMath::Max(MaxWidth, Section.HalfWidthCm * 2.f);
+			MaxHeight = FMath::Max(MaxHeight, Section.HalfHeightCm * 2.f);
+		}
+
+		auto AddProceduralSheet = [&](const TCHAR* Name, const FVector& Origin, const FVector& Normal, const FVector& TangentX, const FVector& TangentY, const FVector2D& Size)
+		{
+			FStructuralSheetDef Sheet;
+			Sheet.SheetId = FName(Name);
+			Sheet.ParentCompartmentId = MainCompId;
+			Sheet.LocalOrigin = Origin;
+			Sheet.LocalNormal = Normal;
+			Sheet.LocalTangentX = TangentX;
+			Sheet.LocalTangentY = TangentY;
+			Sheet.SizeCm = Size;
+			Sheet.GridResolutionX = 20;
+			Sheet.GridResolutionY = 20;
+			Sheet.bCanOpenToExterior = true;
+			Sheet.bSupportsVisualRupture = true;
+			Sheet.MaterialStrength = 1.0f;
+			Sheet.ThicknessCm = 15.0f;
+			StructuralSheets.Add(Sheet);
+		};
+
+		const float HalfW = MaxWidth * 0.5f;
+		const float HalfH = MaxHeight * 0.5f;
+
+		AddProceduralSheet(TEXT("Hull_Port"),      FVector(0.f, -HalfW, 0.f), FVector(0.f, -1.f, 0.f), FVector(1.f, 0.f, 0.f), FVector(0.f, 0.f, 1.f), FVector2D(HullLength, MaxHeight));
+		AddProceduralSheet(TEXT("Hull_Starboard"), FVector(0.f, HalfW, 0.f),  FVector(0.f, 1.f, 0.f),  FVector(1.f, 0.f, 0.f), FVector(0.f, 0.f, 1.f), FVector2D(HullLength, MaxHeight));
+		AddProceduralSheet(TEXT("Hull_Top"),       FVector(0.f, 0.f, HalfH),  FVector(0.f, 0.f, 1.f),  FVector(1.f, 0.f, 0.f), FVector(0.f, 1.f, 0.f), FVector2D(HullLength, MaxWidth));
+		AddProceduralSheet(TEXT("Hull_Bottom"),    FVector(0.f, 0.f, -HalfH), FVector(0.f, 0.f, -1.f), FVector(1.f, 0.f, 0.f), FVector(0.f, 1.f, 0.f), FVector2D(HullLength, MaxWidth));
+
+		for (const FStructuralSheetDef& Sheet : StructuralSheets)
+		{
+			const int32 NumCells = Sheet.GridResolutionX * Sheet.GridResolutionY;
+			FStructuralSheetRuntimeState Runtime;
+			Runtime.SheetId = Sheet.SheetId;
+			Runtime.Cells.SetNum(NumCells);
+			for (int32 CellIndex = 0; CellIndex < NumCells; ++CellIndex)
+			{
+				Runtime.Cells[CellIndex].CellIndex = static_cast<uint16>(CellIndex);
+				Runtime.Cells[CellIndex].ThicknessRemaining = Sheet.ThicknessCm;
+			}
+			SheetStates.Add(Runtime);
+		}
+	}
+
 }
 
 void USubHullComponent::InitializeFromLayout(const USubmarineLayoutAsset* InLayout)
@@ -110,7 +168,6 @@ void USubHullComponent::InitializeFromLayout(const USubmarineLayoutAsset* InLayo
 	SheetStates.Reset();
 	BreachClusters.Reset();
 	FlowFields.Reset();
-	CompartmentStates.Reset();
 
 	if (!InLayout)
 	{
@@ -118,23 +175,6 @@ void USubHullComponent::InitializeFromLayout(const USubmarineLayoutAsset* InLayo
 	}
 
 	StructuralSheets = InLayout->StructuralSheets;
-
-	for (const FSubCompartmentDef& CompDef : InLayout->Compartments)
-	{
-		if (CompDef.CompartmentId.IsNone())
-		{
-			continue;
-		}
-
-		FCompartmentRuntimeState Runtime;
-		Runtime.CompartmentId = CompDef.CompartmentId;
-		Runtime.CapacityLiters = FMath::Max(1.f, CompDef.CapacityLiters);
-		Runtime.FreeAirLiters = Runtime.CapacityLiters;
-		Runtime.MaxWaterHeightCm = ComputeCompartmentMaxWaterHeightCm(CompDef.CompartmentId);
-		Runtime.InternalPressureKPa = NominalInternalPressureAtm * KPaPerAtm;
-		Runtime.ExternalReferencePressureKPa = Runtime.InternalPressureKPa;
-		CompartmentStates.Add(Runtime);
-	}
 
 	for (const FStructuralSheetDef& Sheet : StructuralSheets)
 	{
@@ -146,12 +186,11 @@ void USubHullComponent::InitializeFromLayout(const USubmarineLayoutAsset* InLayo
 		{
 			FStructuralCellState Cell;
 			Cell.CellIndex = static_cast<uint16>(CellIndex);
+			Cell.ThicknessRemaining = Sheet.ThicknessCm;
 			Runtime.Cells.Add(Cell);
 		}
 		SheetStates.Add(Runtime);
 	}
-
-	UpdateCompartmentDerivedState(0.f);
 }
 
 void USubHullComponent::EnsureFallbackLayout()
@@ -181,22 +220,14 @@ void USubHullComponent::EnsureFallbackLayout()
 	const FVector Extent = Bounds.BoxExtent;
 	const FVector LocalCenter = GetOwner()->GetActorTransform().InverseTransformPosition(Bounds.Origin);
 
-	CompartmentStates.Reset();
-	FCompartmentRuntimeState MainCompartment;
-	MainCompartment.CompartmentId = FName(TEXT("HullMain"));
-	MainCompartment.CapacityLiters = 15000.f;
-	MainCompartment.FreeAirLiters = MainCompartment.CapacityLiters;
-	MainCompartment.MaxWaterHeightCm = FMath::Max(MinCompartmentHeightCm, Extent.Z * 2.f);
-	MainCompartment.InternalPressureKPa = NominalInternalPressureAtm * KPaPerAtm;
-	MainCompartment.ExternalReferencePressureKPa = MainCompartment.InternalPressureKPa;
-	CompartmentStates.Add(MainCompartment);
+	const FName MainCompId = FName(TEXT("HullMain"));
 
 	StructuralSheets.Reset();
 	auto AddFallbackSheet = [&](const TCHAR* Name, const FVector& Origin, const FVector& Normal, const FVector& TangentX, const FVector& TangentY, const FVector2D& Size, bool bExterior)
 	{
 		FStructuralSheetDef Sheet;
 		Sheet.SheetId = FName(Name);
-		Sheet.ParentCompartmentId = MainCompartment.CompartmentId;
+		Sheet.ParentCompartmentId = MainCompId;
 		Sheet.LocalOrigin = Origin;
 		Sheet.LocalNormal = Normal;
 		Sheet.LocalTangentX = TangentX;
@@ -205,6 +236,14 @@ void USubHullComponent::EnsureFallbackLayout()
 		Sheet.GridResolutionX = 20;
 		Sheet.GridResolutionY = 20;
 		Sheet.bCanOpenToExterior = bExterior;
+		Sheet.bSupportsVisualRupture = bExterior;
+		Sheet.ExteriorVisualMaterialSlot = 0;
+		Sheet.VisualLocalOrigin = Origin;
+		Sheet.VisualLocalTangentX = TangentX;
+		Sheet.VisualLocalTangentY = TangentY;
+		Sheet.VisualProjectionSizeCm = Size;
+		Sheet.MaxVisibleRuptureRadiusCm = bExterior ? FMath::Max(40.f, 0.35f * FMath::Min(Size.X, Size.Y)) : 0.f;
+		Sheet.PreferredRuptureBorderScale = 1.f;
 		StructuralSheets.Add(Sheet);
 	};
 
@@ -224,16 +263,16 @@ void USubHullComponent::EnsureFallbackLayout()
 		for (int32 CellIndex = 0; CellIndex < NumCells; ++CellIndex)
 		{
 			Runtime.Cells[CellIndex].CellIndex = static_cast<uint16>(CellIndex);
+			Runtime.Cells[CellIndex].ThicknessRemaining = Sheet.ThicknessCm;
 		}
 		SheetStates.Add(Runtime);
 	}
 
-	UpdateCompartmentDerivedState(0.f);
 }
 
 void USubHullComponent::ApplyHullImpact(const FVector& LocalHitPosition, float Damage, float RadiusCm)
 {
-	if (!GetOwner() || !GetOwner()->HasAuthority() || Damage <= 0.f || StructuralSheets.Num() == 0)
+	if (!HasAuthoritativeOwner(this) || Damage <= 0.f || StructuralSheets.Num() == 0)
 	{
 		return;
 	}
@@ -252,7 +291,7 @@ void USubHullComponent::ApplyHullImpact(const FVector& LocalHitPosition, float D
 
 bool USubHullComponent::RepairAtLocalPoint(const FVector& LocalRepairPosition, float RepairStrength, float RadiusCm)
 {
-	if (!GetOwner() || !GetOwner()->HasAuthority() || RepairStrength <= 0.f || StructuralSheets.Num() == 0)
+	if (!HasAuthoritativeOwner(this) || RepairStrength <= 0.f || StructuralSheets.Num() == 0)
 	{
 		return false;
 	}
@@ -322,176 +361,6 @@ bool USubHullComponent::RepairAtWorldPoint(const FVector& WorldRepairPosition, f
 
 	const FVector LocalRepairPosition = GetOwner()->GetActorTransform().InverseTransformPosition(WorldRepairPosition);
 	return RepairAtLocalPoint(LocalRepairPosition, RepairStrength, RadiusCm);
-}
-
-void USubHullComponent::SetCompartmentPumpState(FName CompartmentId, bool bActive, float PumpRateOutLitersPerSec)
-{
-	if (!GetOwner() || !GetOwner()->HasAuthority())
-	{
-		return;
-	}
-
-	FCompartmentRuntimeState* Comp = FindCompartmentState(CompartmentId);
-	if (!Comp)
-	{
-		return;
-	}
-
-	Comp->bPumpActive = bActive;
-	Comp->PumpRateOut = bActive ? FMath::Max(0.f, PumpRateOutLitersPerSec) : 0.f;
-}
-
-void USubHullComponent::SetAllPumpsActive(bool bActive, float PumpRateOutLitersPerSec, FName PreferredCompartmentId)
-{
-	if (!GetOwner() || !GetOwner()->HasAuthority())
-	{
-		return;
-	}
-
-	bool bAppliedPreferred = false;
-	if (!PreferredCompartmentId.IsNone())
-	{
-		if (FCompartmentRuntimeState* Preferred = FindCompartmentState(PreferredCompartmentId))
-		{
-			Preferred->bPumpActive = bActive;
-			Preferred->PumpRateOut = bActive ? FMath::Max(0.f, PumpRateOutLitersPerSec) : 0.f;
-			bAppliedPreferred = true;
-		}
-	}
-
-	if (bAppliedPreferred)
-	{
-		for (FCompartmentRuntimeState& Comp : CompartmentStates)
-		{
-			if (Comp.CompartmentId == PreferredCompartmentId)
-			{
-				continue;
-			}
-
-			Comp.bPumpActive = false;
-			Comp.PumpRateOut = 0.f;
-			Comp.FloodRateOut = 0.f;
-		}
-		return;
-	}
-
-	for (FCompartmentRuntimeState& Comp : CompartmentStates)
-	{
-		Comp.bPumpActive = bActive;
-		Comp.PumpRateOut = bActive ? FMath::Max(0.f, PumpRateOutLitersPerSec) : 0.f;
-	}
-}
-
-float USubHullComponent::GetTotalWaterLiters() const
-{
-	float Total = 0.f;
-	for (const FCompartmentRuntimeState& Comp : CompartmentStates)
-	{
-		Total += FMath::Max(0.f, Comp.CurrentWaterLiters);
-	}
-	return Total;
-}
-
-void USubHullComponent::ExportCompartmentStates(TArray<FCompartmentState>& OutStates) const
-{
-	OutStates.Reset();
-	OutStates.Reserve(CompartmentStates.Num());
-
-	for (const FCompartmentRuntimeState& Comp : CompartmentStates)
-	{
-		FCompartmentState State;
-		BuildExportedCompartmentState(Comp, State);
-		OutStates.Add(State);
-	}
-}
-
-bool USubHullComponent::GetCompartmentLocalBounds(FName CompartmentId, FBox& OutBounds) const
-{
-	if (LayoutAsset)
-	{
-		if (const FSubCompartmentDef* CompartmentDef = LayoutAsset->Compartments.FindByPredicate([CompartmentId](const FSubCompartmentDef& Candidate)
-		{
-			return Candidate.CompartmentId == CompartmentId;
-		}))
-		{
-			const FBox HydroBounds(CompartmentDef->HydroBoundsMin, CompartmentDef->HydroBoundsMax);
-			if (HydroBounds.IsValid)
-			{
-				OutBounds = HydroBounds;
-				return true;
-			}
-		}
-	}
-
-	OutBounds = FBox(EForceInit::ForceInit);
-	bool bFoundAnySheet = false;
-
-	for (const FStructuralSheetDef& Sheet : StructuralSheets)
-	{
-		if (Sheet.ParentCompartmentId != CompartmentId && Sheet.AdjacentCompartmentId != CompartmentId)
-		{
-			continue;
-		}
-
-		ExpandBoundsWithSheet(OutBounds, Sheet);
-		bFoundAnySheet = true;
-	}
-
-	return bFoundAnySheet && OutBounds.IsValid;
-}
-
-bool USubHullComponent::SampleCompartmentStateAtLocalLocation(const FVector& LocalLocation, FCompartmentState& OutState, FBox* OutLocalBounds) const
-{
-	const FCompartmentRuntimeState* BestCompartment = nullptr;
-	FBox BestBounds(EForceInit::ForceInit);
-	float BestVolume = TNumericLimits<float>::Max();
-
-	for (const FCompartmentRuntimeState& Compartment : CompartmentStates)
-	{
-		FBox CompartmentBounds(EForceInit::ForceInit);
-		if (!GetCompartmentLocalBounds(Compartment.CompartmentId, CompartmentBounds))
-		{
-			continue;
-		}
-
-		const FBox ExpandedBounds = CompartmentBounds.ExpandBy(25.f);
-		if (!ExpandedBounds.IsInsideOrOn(LocalLocation))
-		{
-			continue;
-		}
-
-		const float BoundsVolume = FMath::Max(1.f, ExpandedBounds.GetVolume());
-		if (BoundsVolume < BestVolume)
-		{
-			BestVolume = BoundsVolume;
-			BestCompartment = &Compartment;
-			BestBounds = CompartmentBounds;
-		}
-	}
-
-	if (!BestCompartment)
-	{
-		return false;
-	}
-
-	BuildExportedCompartmentState(*BestCompartment, OutState);
-	if (OutLocalBounds)
-	{
-		*OutLocalBounds = BestBounds;
-	}
-
-	return true;
-}
-
-bool USubHullComponent::SampleCompartmentStateAtWorldLocation(const FVector& WorldLocation, FCompartmentState& OutState, FBox* OutLocalBounds) const
-{
-	if (!GetOwner())
-	{
-		return false;
-	}
-
-	const FVector LocalLocation = GetOwner()->GetActorTransform().InverseTransformPosition(WorldLocation);
-	return SampleCompartmentStateAtLocalLocation(LocalLocation, OutState, OutLocalBounds);
 }
 
 bool USubHullComponent::SampleSuctionAtWorldLocation(const FVector& WorldLocation, FVector& OutWorldDirection, float& OutForceScale, EBreachPassageState& OutPassageState) const
@@ -751,7 +620,7 @@ void USubHullComponent::UpdateFlowFields()
 		Flow.Direction = -Cluster.LocalNormal.GetSafeNormal();
 		Flow.InnerRadiusCm = FMath::Clamp(Cluster.InscribedRadiusCm * 0.6f, 20.f, 300.f);
 		Flow.OuterRadiusCm = BaseSuctionRadiusCm + Cluster.InscribedRadiusCm * 1.8f;
-		Flow.ForceScale = Cluster.OpenAreaCm2 * BaseLeakFlowLitersPerSec;
+		Flow.ForceScale = FMath::Min(Cluster.OpenAreaCm2 * BaseLeakFlowLitersPerSec, 50000.f);
 
 		if (Cluster.InscribedRadiusCm >= CreatureEnterRadiusCm)
 		{
@@ -776,247 +645,109 @@ void USubHullComponent::UpdateFlowFields()
 	BroadcastFlowFieldsUpdated();
 }
 
-void USubHullComponent::AdvanceFlooding(float DeltaTime)
-{
-	const ASubmarineBase* SubBase = Cast<ASubmarineBase>(GetOwner());
-
-	for (FCompartmentRuntimeState& Comp : CompartmentStates)
-	{
-		Comp.FloodRateIn = 0.f;
-		Comp.FloodRateOut = 0.f;
-		Comp.PumpRateOut = 0.f;
-	}
-
-	for (int32 ClusterIndex = 0; ClusterIndex < BreachClusters.Num(); ++ClusterIndex)
-	{
-		const FBreachClusterState& Cluster = BreachClusters[ClusterIndex];
-		const FStructuralSheetDef* Sheet = StructuralSheets.FindByPredicate([&](const FStructuralSheetDef& S)
-		{
-			return S.SheetId == Cluster.SheetId;
-		});
-
-		if (!Sheet)
-		{
-			continue;
-		}
-
-		FCompartmentRuntimeState* ParentComp = FindCompartmentState(Sheet->ParentCompartmentId);
-		if (!ParentComp)
-		{
-			continue;
-		}
-
-		if (Cluster.bTouchesExterior)
-		{
-			const float AreaScale = FMath::Max(0.f, Cluster.OpenAreaCm2 / FMath::Max(1.f, ExteriorFloodAreaDivisorCm2));
-			const float Inflow = FMath::Clamp(
-				BaseLeakFlowLitersPerSec * AreaScale,
-				0.f,
-				FMath::Max(0.f, MaxExteriorFloodInLitersPerSec));
-			ParentComp->FloodRateIn += Inflow;
-		}
-	}
-
-	for (const FStructuralSheetDef& Sheet : StructuralSheets)
-	{
-		if (Sheet.AdjacentCompartmentId.IsNone())
-		{
-			continue;
-		}
-
-		const FCompartmentRuntimeState* CompARead = FindCompartmentState(Sheet.ParentCompartmentId);
-		const FCompartmentRuntimeState* CompBRead = FindCompartmentState(Sheet.AdjacentCompartmentId);
-		if (!CompARead || !CompBRead)
-		{
-			continue;
-		}
-
-		bool bConnectionOpen = false;
-		if (SubBase && SubBase->Compartments)
-		{
-			FDoorState DoorState;
-			if (SubBase->Compartments->TryGetDoorState(Sheet.SheetId, DoorState))
-			{
-				bConnectionOpen = !DoorState.bClosed;
-			}
-		}
-
-		if (!bConnectionOpen)
-		{
-			continue;
-		}
-
-		FCompartmentRuntimeState* CompA = FindCompartmentState(Sheet.ParentCompartmentId);
-		FCompartmentRuntimeState* CompB = FindCompartmentState(Sheet.AdjacentCompartmentId);
-		if (!CompA || !CompB)
-		{
-			continue;
-		}
-
-		const float ConnectionAreaScale = FMath::Clamp(
-			(Sheet.SizeCm.X * Sheet.SizeCm.Y) / FMath::Max(1.f, InternalConnectionAreaDivisorCm2),
-			0.f,
-			8.f);
-		const float HeightDeltaCm = CompA->WaterHeightCm - CompB->WaterHeightCm;
-		if (FMath::IsNearlyZero(HeightDeltaCm, KINDA_SMALL_NUMBER))
-		{
-			continue;
-		}
-
-		FCompartmentRuntimeState* SourceComp = HeightDeltaCm > 0.f ? CompA : CompB;
-		FCompartmentRuntimeState* DestComp = HeightDeltaCm > 0.f ? CompB : CompA;
-		const float SourceLitersPerCm = SourceComp->MaxWaterHeightCm > KINDA_SMALL_NUMBER
-			? SourceComp->CapacityLiters / SourceComp->MaxWaterHeightCm
-			: 0.f;
-		const float DestLitersPerCm = DestComp->MaxWaterHeightCm > KINDA_SMALL_NUMBER
-			? DestComp->CapacityLiters / DestComp->MaxWaterHeightCm
-			: 0.f;
-		const float HeightResponsePerLiter = (SourceLitersPerCm > KINDA_SMALL_NUMBER ? 1.f / SourceLitersPerCm : 0.f)
-			+ (DestLitersPerCm > KINDA_SMALL_NUMBER ? 1.f / DestLitersPerCm : 0.f);
-		if (HeightResponsePerLiter <= KINDA_SMALL_NUMBER)
-		{
-			continue;
-		}
-
-		const float DesiredTransferLiters = FMath::Abs(HeightDeltaCm) / HeightResponsePerLiter;
-		const float MaxTransferLiters = FMath::Min(
-			SourceComp->CurrentWaterLiters,
-			FMath::Max(0.f, DestComp->CapacityLiters - DestComp->CurrentWaterLiters));
-		const float FlowMagnitude = FMath::Clamp(
-			(DesiredTransferLiters / FMath::Max(KINDA_SMALL_NUMBER, DeltaTime)) * ConnectionAreaScale,
-			0.f,
-			FMath::Min(FMath::Max(0.f, MaxInternalConnectionFlowLitersPerSec), MaxTransferLiters / FMath::Max(KINDA_SMALL_NUMBER, DeltaTime)));
-		if (FlowMagnitude <= KINDA_SMALL_NUMBER)
-		{
-			continue;
-		}
-		SourceComp->FloodRateOut += FlowMagnitude;
-		DestComp->FloodRateIn += FlowMagnitude;
-	}
-
-	for (FCompartmentRuntimeState& Comp : CompartmentStates)
-	{
-		const float DeltaLiters = (Comp.FloodRateIn - Comp.FloodRateOut) * DeltaTime;
-		Comp.CurrentWaterLiters = FMath::Clamp(Comp.CurrentWaterLiters + DeltaLiters, 0.f, Comp.CapacityLiters);
-	}
-
-	UpdateCompartmentDerivedState(DeltaTime);
-	BroadcastCompartmentFloodUpdated();
-}
-
-void USubHullComponent::UpdateCompartmentDerivedState(float DeltaTime)
-{
-	(void)DeltaTime;
-	const float NominalPressureKPa = NominalInternalPressureAtm * KPaPerAtm;
-
-	for (FCompartmentRuntimeState& Comp : CompartmentStates)
-	{
-		Comp.WaterLevelNormalized = Comp.CapacityLiters > 0.f
-			? FMath::Clamp(Comp.CurrentWaterLiters / Comp.CapacityLiters, 0.f, 1.f)
-			: 0.f;
-		Comp.MaxWaterHeightCm = FMath::Max(MinCompartmentHeightCm, Comp.MaxWaterHeightCm);
-		Comp.WaterHeightCm = Comp.WaterLevelNormalized * Comp.MaxWaterHeightCm;
-		Comp.FreeAirLiters = FMath::Max(0.f, Comp.CapacityLiters - Comp.CurrentWaterLiters);
-		Comp.ExternalReferencePressureKPa = NominalPressureKPa;
-		Comp.bFullyFlooded = Comp.WaterLevelNormalized >= (1.f - KINDA_SMALL_NUMBER);
-		Comp.InternalPressureKPa = NominalPressureKPa;
-		Comp.PressureDeltaKPa = 0.f;
-		Comp.bPressureCritical = false;
-	}
-}
-
-void USubHullComponent::MaybeLogWaterLevels(float DeltaTime)
-{
-	if (!bLogWaterLevels || CompartmentStates.Num() == 0)
-	{
-		WaterLevelLogAccumulatorSeconds = 0.f;
-		return;
-	}
-
-	WaterLevelLogAccumulatorSeconds += DeltaTime;
-	if (WaterLevelLogAccumulatorSeconds < FMath::Max(0.1f, WaterLevelLogIntervalSeconds))
-	{
-		return;
-	}
-
-	WaterLevelLogAccumulatorSeconds = 0.f;
-
-	FString Summary;
-	Summary.Reserve(CompartmentStates.Num() * 48);
-	for (int32 Index = 0; Index < CompartmentStates.Num(); ++Index)
-	{
-		const FCompartmentRuntimeState& Comp = CompartmentStates[Index];
-		if (Index > 0)
-		{
-			Summary += TEXT(" | ");
-		}
-
-		Summary += FString::Printf(
-			TEXT("%s H=%.1fcm L=%.2f W=%.0fL"),
-			*Comp.CompartmentId.ToString(),
-			Comp.WaterHeightCm,
-			Comp.WaterLevelNormalized,
-			Comp.CurrentWaterLiters);
-	}
-
-	UE_LOG(LogSubHullWater, Log, TEXT("WaterLevels | Sub=%s | %s"), *GetOwner()->GetName(), *Summary);
-}
-
-float USubHullComponent::ComputeCompartmentMaxWaterHeightCm(FName CompartmentId) const
-{
-	if (LayoutAsset)
-	{
-		if (const FSubCompartmentDef* CompartmentDef = LayoutAsset->Compartments.FindByPredicate([CompartmentId](const FSubCompartmentDef& Candidate)
-		{
-			return Candidate.CompartmentId == CompartmentId;
-		}))
-		{
-			const float HydroHeight = CompartmentDef->HydroBoundsMax.Z - CompartmentDef->HydroBoundsMin.Z;
-			if (HydroHeight > KINDA_SMALL_NUMBER)
-			{
-				return FMath::Max(MinCompartmentHeightCm, HydroHeight);
-			}
-		}
-	}
-
-	FBox Bounds(ForceInit);
-	for (const FStructuralSheetDef& Sheet : StructuralSheets)
-	{
-		if (Sheet.ParentCompartmentId != CompartmentId)
-		{
-			continue;
-		}
-
-		ExpandBoundsWithSheet(Bounds, Sheet);
-	}
-
-	if (!Bounds.IsValid)
-	{
-		return MinCompartmentHeightCm;
-	}
-
-	return FMath::Max(MinCompartmentHeightCm, Bounds.Max.Z - Bounds.Min.Z);
-}
-
-FCompartmentRuntimeState* USubHullComponent::FindCompartmentState(FName CompartmentId)
-{
-	return CompartmentStates.FindByPredicate([&](const FCompartmentRuntimeState& C)
-	{
-		return C.CompartmentId == CompartmentId;
-	});
-}
-
-const FCompartmentRuntimeState* USubHullComponent::FindCompartmentState(FName CompartmentId) const
-{
-	return CompartmentStates.FindByPredicate([&](const FCompartmentRuntimeState& C)
-	{
-		return C.CompartmentId == CompartmentId;
-	});
-}
-
 void USubHullComponent::BroadcastHullDamageUpdated()
 {
 	OnHullDamageUpdated.Broadcast();
+}
+
+int32 USubHullComponent::ClearAllBreaches()
+{
+	const int32 Removed = BreachClusters.Num();
+	if (Removed == 0 && SheetStates.Num() == 0)
+	{
+		return 0;
+	}
+
+	// Durable repair: reset sheet-level damage so the next RebuildBreachClusters()
+	// cannot resurrect the clusters from per-cell bLeaking / bOpen flags.
+	for (FStructuralSheetRuntimeState& Sheet : SheetStates)
+	{
+		for (FStructuralCellState& Cell : Sheet.Cells)
+		{
+			Cell.Damage01 = 0.f;
+			Cell.ThicknessRemaining = 1.f;
+			Cell.bLeaking = false;
+			Cell.bOpen = false;
+		}
+	}
+
+	BreachClusters.Reset();
+	FlowFields.Reset();
+
+	BroadcastHullDamageUpdated();
+	BroadcastBreachesUpdated();
+	BroadcastFlowFieldsUpdated();
+	return Removed;
+}
+
+int32 USubHullComponent::ClearBreachNearLocation(const FVector& WorldLocation, float Radius)
+{
+	if (BreachClusters.Num() == 0 || Radius <= 0.f)
+	{
+		return 0;
+	}
+
+	const AActor* Owner = GetOwner();
+	if (!Owner)
+	{
+		return 0;
+	}
+
+	const FTransform ActorTransform = Owner->GetActorTransform();
+	const FVector LocalQuery = ActorTransform.InverseTransformPosition(WorldLocation);
+	const float RadiusSq = Radius * Radius;
+
+	// First pass: remove clusters within radius and record affected sheet ids.
+	// We heal the whole sheet (not just the cluster cells) so the heal is
+	// guaranteed durable against the next RebuildBreachClusters pass; sheets
+	// far from the query location are left untouched.
+	TSet<FName> AffectedSheetIds;
+	int32 Removed = 0;
+	for (int32 i = BreachClusters.Num() - 1; i >= 0; --i)
+	{
+		const FVector Delta = BreachClusters[i].LocalCenter - LocalQuery;
+		if (Delta.SizeSquared() <= RadiusSq)
+		{
+			AffectedSheetIds.Add(BreachClusters[i].SheetId);
+			BreachClusters.RemoveAt(i);
+			++Removed;
+		}
+	}
+
+	if (Removed == 0)
+	{
+		return 0;
+	}
+
+	// Heal cells of affected sheets.
+	for (FStructuralSheetRuntimeState& Sheet : SheetStates)
+	{
+		if (!AffectedSheetIds.Contains(Sheet.SheetId))
+		{
+			continue;
+		}
+		for (FStructuralCellState& Cell : Sheet.Cells)
+		{
+			Cell.Damage01 = 0.f;
+			Cell.ThicknessRemaining = 1.f;
+			Cell.bLeaking = false;
+			Cell.bOpen = false;
+		}
+	}
+
+	// Drop stale flow fields associated with healed sheets.
+	for (int32 i = FlowFields.Num() - 1; i >= 0; --i)
+	{
+		if (AffectedSheetIds.Contains(FlowFields[i].SheetId))
+		{
+			FlowFields.RemoveAt(i);
+		}
+	}
+
+	BroadcastHullDamageUpdated();
+	BroadcastBreachesUpdated();
+	BroadcastFlowFieldsUpdated();
+	return Removed;
 }
 
 void USubHullComponent::BroadcastBreachesUpdated()
@@ -1027,11 +758,6 @@ void USubHullComponent::BroadcastBreachesUpdated()
 void USubHullComponent::BroadcastFlowFieldsUpdated()
 {
 	OnFlowFieldsUpdated.Broadcast(FlowFields);
-}
-
-void USubHullComponent::BroadcastCompartmentFloodUpdated()
-{
-	OnCompartmentFloodUpdated.Broadcast(CompartmentStates);
 }
 
 void USubHullComponent::OnRep_SheetStates()
@@ -1049,7 +775,3 @@ void USubHullComponent::OnRep_FlowFields()
 	BroadcastFlowFieldsUpdated();
 }
 
-void USubHullComponent::OnRep_CompartmentStates()
-{
-	BroadcastCompartmentFloodUpdated();
-}

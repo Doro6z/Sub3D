@@ -10,6 +10,7 @@ class ASubmarineAlarmBeacon;
 class ASubmarineBase;
 class ASubmarineFloodAudioAnchor;
 class UAudioComponent;
+class USubFloodComponent;
 class USubHullComponent;
 class USubmarineFeedbackProfile;
 
@@ -22,6 +23,7 @@ public:
 	USubmarineFeedbackDirectorComponent();
 
 	virtual void BeginPlay() override;
+	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
 
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Submarine|Feedback")
 	TObjectPtr<USubmarineFeedbackProfile> FeedbackProfile = nullptr;
@@ -50,7 +52,10 @@ public:
 
 private:
 	UFUNCTION()
-	void HandleCompartmentFloodUpdated(const TArray<FCompartmentRuntimeState>& CompartmentStates);
+	void HandleSubFloodUpdated(const TArray<FCompartmentState>& InStates);
+
+	UFUNCTION()
+	void HandleFloodInitialized();
 
 	UFUNCTION()
 	void HandleBreachesUpdated(const TArray<FBreachClusterState>& Breaches);
@@ -58,18 +63,22 @@ private:
 	UFUNCTION()
 	void HandleFlowFieldsUpdated(const TArray<FBreachFlowField>& FlowFields);
 
+	void ActivateSubFloodPath();
 	void EnsureFallbackAlarmAudio();
 	void EnsureLeakAudioPoolSize(int32 DesiredCount);
-	void UpdateFloodAlarm(const TArray<FCompartmentRuntimeState>& CompartmentStates);
+	void UpdateFloodAlarmFromStates(const TArray<FCompartmentState>& States);
 	void UpdateAlarmBeacons(bool bAlarmActive, float Severity01);
 	void UpdateLeakAudioRuntime();
-	void UpdateFloodInteriorAudioAnchors(const TArray<FCompartmentRuntimeState>& CompartmentStates);
+	void UpdateFloodInteriorAudioAnchorsFromStates(const TArray<FCompartmentState>& States);
 	ASubmarineBase* GetOwningSubmarine() const;
 	USubHullComponent* GetOwningHull() const;
 	bool IsControllerEligible(const APlayerController* PlayerController) const;
 	FName FindCompartmentIdForSheet(FName SheetId) const;
 
 private:
+	UPROPERTY(Transient)
+	TObjectPtr<USubFloodComponent> SubFlood = nullptr;
+
 	UPROPERTY(Transient)
 	TObjectPtr<UAudioComponent> FallbackAlarmAudio = nullptr;
 

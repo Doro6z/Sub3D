@@ -8,6 +8,7 @@
 
 class UNiagaraComponent;
 class UNiagaraSystem;
+class USubFloodComponent;
 class USubHullComponent;
 class USubmarineCompartmentComponent;
 class ASubmarineBase;
@@ -49,9 +50,14 @@ public:
 
 protected:
 	UFUNCTION()
-	void HandleCompartmentFloodUpdated(const TArray<FCompartmentRuntimeState>& CompartmentStates);
+	void HandleSubFloodUpdated(const TArray<FCompartmentState>& InStates);
+
+	UFUNCTION()
+	void HandleFloodInitialized();
 
 private:
+	void ActivateSubFloodPath();
+
 	struct FDoorCascadeCandidate
 	{
 		FName DoorId;
@@ -60,15 +66,17 @@ private:
 		FVector FlowDirection;
 	};
 
-	void GatherCascadeCandidates(const TArray<FCompartmentRuntimeState>& CompartmentStates, TArray<FDoorCascadeCandidate>& OutCandidates) const;
 	UNiagaraComponent* GetOrCreateCascadeComponent(int32 CascadeIndex);
 	void ApplyCascadeParameters(UNiagaraComponent* Component, const FDoorCascadeCandidate& Candidate) const;
 	void DeactivateUnusedCascades(int32 FirstUnusedIndex);
 	void DestroyPooledCascades();
 
-	float GetCompartmentWaterHeightCm(const TArray<FCompartmentRuntimeState>& States, FName CompartmentId) const;
+	float GetCompartmentWaterHeightCmFromStates(const TArray<FCompartmentState>& States, FName CompartmentId) const;
 
 private:
+	UPROPERTY(Transient)
+	TObjectPtr<USubFloodComponent> SubFlood = nullptr;
+
 	UPROPERTY(Transient)
 	TObjectPtr<USubHullComponent> SubHull = nullptr;
 

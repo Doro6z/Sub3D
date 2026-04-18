@@ -1,0 +1,3 @@
+Name,display_name,context,rolls_min,rolls_max
+---,string,string (enum),int32,int32
+ROW_EXAMPLE,,,1,3

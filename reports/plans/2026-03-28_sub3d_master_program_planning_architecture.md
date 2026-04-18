@@ -66,7 +66,7 @@ Source of truth for what the game is:
 - [GDD_03_Gameplay.md](c:/ACC/Projects/Sub3D/Source/GDD_03_Gameplay.md)
 - [GDD_04_IA_Multijoueur.md](c:/ACC/Projects/Sub3D/Source/GDD_04_IA_Multijoueur.md)
 - [GDD_05_Art_Audio.md](c:/ACC/Projects/Sub3D/Source/GDD_05_Art_Audio.md)
-- [GDD_06_Technical_Roadmap.md](c:/ACC/Projects/Sub3D/Source/GDD_06_Technical_Roadmap.md)
+
 
 ### Layer 1 - Program Canon
 

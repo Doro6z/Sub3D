@@ -1,8 +1,7 @@
 #include "SubmarineCompartmentComponent.h"
 
 #include "Net/UnrealNetwork.h"
-#include "StructuralHullTypes.h"
-#include "SubHullComponent.h"
+#include "SubFloodComponent.h"
 #include "SubmarineBase.h"
 
 USubmarineCompartmentComponent::USubmarineCompartmentComponent()
@@ -22,9 +21,17 @@ void USubmarineCompartmentComponent::TickComponent(float DeltaTime, ELevelTick T
 
 	if (const ASubmarineBase* Sub = Cast<ASubmarineBase>(GetOwner()))
 	{
-		if (Sub->SubHull)
+		if (Sub->SubFlood && Sub->SubFlood->IsInitialized())
 		{
-			SyncFromHullComponent(Sub->SubHull);
+			TArray<FCompartmentState> NewCompartments;
+			Sub->SubFlood->ExportCompartmentStates(NewCompartments);
+			Compartments = MoveTemp(NewCompartments);
+			TotalWaterMassLiters = 0.f;
+
+			for (const FCompartmentState& State : Compartments)
+			{
+				TotalWaterMassLiters += FMath::Max(0.f, State.WaterMassLiters);
+			}
 		}
 	}
 }
@@ -35,24 +42,6 @@ void USubmarineCompartmentComponent::GetLifetimeReplicatedProps(TArray<FLifetime
 	DOREPLIFETIME(USubmarineCompartmentComponent, Compartments);
 	DOREPLIFETIME(USubmarineCompartmentComponent, Doors);
 	DOREPLIFETIME(USubmarineCompartmentComponent, TotalWaterMassLiters);
-}
-
-void USubmarineCompartmentComponent::SyncFromHullComponent(const USubHullComponent* HullComponent)
-{
-	if (!HullComponent)
-	{
-		return;
-	}
-
-	TArray<FCompartmentState> NewCompartments;
-	HullComponent->ExportCompartmentStates(NewCompartments);
-	Compartments = MoveTemp(NewCompartments);
-	TotalWaterMassLiters = 0.f;
-
-	for (const FCompartmentState& State : Compartments)
-	{
-		TotalWaterMassLiters += FMath::Max(0.f, State.WaterMassLiters);
-	}
 }
 
 void USubmarineCompartmentComponent::RegisterDoor(const FDoorState& DoorState)

@@ -1,0 +1,3 @@
+Name,display_name,kind,stackable
+---,string,string (enum),bool
+ROW_EXAMPLE,,,true

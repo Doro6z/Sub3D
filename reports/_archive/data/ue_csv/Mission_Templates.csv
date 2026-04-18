@@ -1,0 +1,3 @@
+Name,display_name,biome_id,objective_id,difficulty_id,time_limit_s,coop_max
+---,string,string,string,string,float,int32
+ROW_EXAMPLE,,,,,,4

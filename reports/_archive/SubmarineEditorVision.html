@@ -1,0 +1,482 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Sub3D - Submarine Editor Ultimate Vision V1.0</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;700&family=JetBrains+Mono:wght@300;400;700&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --bg: #020406;
+            --panel: rgba(10, 15, 25, 0.95);
+            --accent: #00f2ff;
+            --struct: #ff8c00;
+            --wall: #eab308;
+            --frame: #3b82f6; 
+            --danger: #ef4444;
+            --success: #22c55e;
+            --text: #f8fafc;
+            --text-dim: #94a3b8;
+            --border: rgba(255, 255, 255, 0.1);
+            --glass: rgba(255, 255, 255, 0.03);
+        }
+
+        * { box-sizing: border-box; }
+        body { margin: 0; padding: 0; font-family: 'Outfit', sans-serif; background: var(--bg); color: var(--text); overflow: hidden; display: flex; height: 100vh; }
+
+        /* UI Structure */
+        #sidebar { width: 450px; background: var(--panel); border-right: 1px solid var(--border); display: flex; flex-direction: column; z-index: 100; backdrop-filter: blur(20px); box-shadow: 20px 0 50px rgba(0,0,0,0.5); }
+        #viewport { flex: 1; position: relative; background: radial-gradient(circle at center, #0a1322 0%, #020406 100%); }
+
+        header { padding: 40px; border-bottom: 1px solid var(--border); background: linear-gradient(135deg, rgba(0, 242, 255, 0.05) 0%, transparent 100%); }
+        h1 { margin: 0; font-size: 1.2rem; font-weight: 700; letter-spacing: 3px; color: #fff; text-transform: uppercase; font-family: 'JetBrains Mono', monospace; }
+        .version-badge { font-size: 0.6rem; color: var(--accent); border: 1px solid var(--accent); padding: 2px 8px; border-radius: 2px; vertical-align: middle; margin-left: 10px; font-weight: 400; }
+
+        #stages-nav { display: flex; padding: 20px 40px; gap: 30px; background: rgba(0,0,0,0.3); border-bottom: 1px solid var(--border); }
+        .stage-item { display: flex; align-items: center; gap: 12px; font-size: 0.75rem; color: var(--text-dim); transition: 0.3s; letter-spacing: 1px; font-family: 'JetBrains Mono'; }
+        .stage-item.active { color: var(--accent); font-weight: 700; }
+        .stage-dot { width: 6px; height: 6px; border-radius: 50%; background: currentColor; box-shadow: 0 0 10px currentColor; }
+
+        .controls-section { flex: 1; overflow-y: auto; padding: 40px; }
+        .stage-box { display: none; }
+        .stage-box.active { display: block; animation: fadeInUp 0.4s ease-out; }
+
+        h2 { font-size: 0.75rem; text-transform: uppercase; color: var(--accent); margin-bottom: 30px; border-left: 3px solid var(--accent); padding-left: 15px; font-weight: 700; letter-spacing: 1px; }
+
+        .control-group { margin-bottom: 30px; }
+        label { display: block; font-size: 0.7rem; margin-bottom: 12px; color: #94a3b8; text-transform: uppercase; letter-spacing: 1px; }
+        input[type="range"] { width: 100%; accent-color: var(--accent); height: 2px; transition: 0.2s; cursor: pointer; border: none; background: rgba(255,255,255,0.1); border-radius: 2px; }
+        .val-display { float: right; font-size: 0.75rem; color: var(--accent); font-weight: 700; font-family: 'JetBrains Mono'; }
+
+        .btn { background: rgba(255, 255, 255, 0.02); border: 1px solid rgba(255,255,255,0.1); color: #fff; padding: 16px 25px; font-family: 'JetBrains Mono'; font-size: 0.7rem; cursor: pointer; width: 100%; transition: 0.3s; text-transform: uppercase; letter-spacing: 2px; position: relative; overflow: hidden; }
+        .btn:hover { background: var(--accent); color: var(--bg); border-color: var(--accent); box-shadow: 0 0 30px rgba(0, 242, 255, 0.4); }
+        .btn.primary { border-color: var(--accent); color: var(--accent); }
+        .btn.danger { border-color: var(--danger); color: var(--danger); }
+        .btn.danger:hover { background: var(--danger); color: #fff; box-shadow: 0 0 30px rgba(239, 68, 68, 0.4); }
+
+        .primitive-selector { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px; margin-bottom: 20px; }
+        .prim-btn { font-size: 0.6rem; padding: 10px; border: 1px solid var(--border); text-align: center; cursor: pointer; transition: 0.2s; opacity: 0.6; }
+        .prim-btn.active { opacity: 1; border-color: currentColor; background: rgba(255,255,255,0.05); }
+
+        /* Dashboard & Overlays */
+        #data-dashboard { position: absolute; bottom: 40px; right: 40px; width: 320px; z-index: 10; }
+        .analyt-card { background: var(--panel); border: 1px solid var(--border); padding: 25px; border-radius: 4px; backdrop-filter: blur(10px); }
+        .stat-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+        .stat-box { border-left: 1px solid rgba(255,255,255,0.05); padding-left: 15px; }
+        .stat-label { font-size: 0.55rem; color: var(--text-dim); text-transform: uppercase; letter-spacing: 1px; margin-bottom: 5px; }
+        .stat-value { font-size: 1rem; font-weight: 700; color: #fff; font-family: 'JetBrains Mono'; }
+
+        #area-graph { width: 100%; height: 60px; margin-top: 20px; border-top: 1px solid var(--border); padding-top: 15px; position: relative; }
+        .graph-bar { position: absolute; bottom: 0; background: var(--accent); width: 2px; opacity: 0.3; }
+
+        #debug-console { position: absolute; top: 40px; right: 40px; width: 400px; background: rgba(0,0,0,0.8); border: 1px solid var(--border); padding: 15px 25px; font-family: 'JetBrains Mono'; font-size: 0.65rem; color: var(--success); border-left: 4px solid var(--success); }
+
+        @keyframes fadeInUp { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+    </style>
+</head>
+<body>
+
+<div id="editor-container">
+    <aside id="sidebar">
+        <header>
+            <h1>SUB3D VISION <span class="version-badge">V1.0 ULTIMATE</span></h1>
+            <p style="font-size: 0.65rem; color: var(--text-dim); margin-top: 8px; font-family: 'JetBrains Mono'; letter-spacing: 1px;">ANALYTICAL GEOMETRY & TRIPLE-PRIMITIVES</p>
+        </header>
+
+        <nav id="stages-nav">
+            <div class="stage-item active" id="nav-a"><span class="stage-dot"></span> BAKE A</div>
+            <div class="stage-item" id="nav-b"><span class="stage-dot"></span> BAKE B</div>
+            <div class="stage-item" id="nav-c"><span class="stage-dot"></span> MISSION</div>
+        </nav>
+
+        <section class="controls-section">
+            <div id="stage-a" class="stage-box active">
+                <h2>STAGE A: ANALYTICAL HULL</h2>
+                <div class="control-group">
+                    <label>LONGITUDINAL SCALE (m) <span class="val-display" id="val-length">45.00</span></label>
+                    <input type="range" id="param-length" min="20" max="120" step="1" value="45">
+                </div>
+                <div class="control-group">
+                    <label>PRESSURE RADIUS (m) <span class="val-display" id="val-radius">4.20</span></label>
+                    <input type="range" id="param-radius" min="2" max="8" step="0.1" value="4.2">
+                </div>
+                <div class="control-group">
+                    <label>FEEBLE FINESSE RATIO <span class="val-display" id="val-taper">0.40</span></label>
+                    <input type="range" id="param-taper" min="0" max="0.7" step="0.05" value="0.4">
+                </div>
+                <div class="control-group">
+                    <label>STRUCTURAL DECKS <span class="val-display" id="val-decks">2</span></label>
+                    <input type="range" id="param-decks" min="1" max="4" value="2">
+                </div>
+                <button class="btn primary" id="btn-lock-hull">INSTANTIATE ANALYTICAL HULL</button>
+            </div>
+
+            <div id="stage-b" class="stage-box">
+                <h2>STAGE B: TRIPLE-PRIMITIVES</h2>
+                <div class="primitive-selector">
+                    <div class="prim-btn active" id="prim-frame" style="color: var(--frame);">FRAME</div>
+                    <div class="prim-btn" id="prim-bulkhead" style="color: var(--struct);">BULKHEAD</div>
+                    <div class="prim-btn" id="prim-wall" style="color: var(--wall);">WALL</div>
+                </div>
+                <div class="control-group">
+                    <button class="btn" id="btn-add-primitive">+ PLACE SELECTED PRIMITIVE</button>
+                </div>
+                <div id="partition-stats" style="font-size: 0.6rem; color: var(--text-dim); margin-bottom: 30px; letter-spacing: 1px;">
+                    NODES: 1 | PORTALS: 0
+                </div>
+                <button class="btn primary" id="btn-lock-partitions">BAKE MISSION GRAPH</button>
+                <button class="btn secondary" style="font-size: 0.5rem; margin-top: 15px;" onclick="location.reload()">RESET AUTHORING PIPELINE</button>
+            </div>
+
+            <div id="stage-c" class="stage-box">
+                <h2>STAGE C: GRAPH MISSION</h2>
+                <div class="stat-grid" style="margin-bottom: 25px;">
+                    <div class="stat-box">
+                        <div class="stat-label">HULL INTEGRITY</div>
+                        <div class="stat-value" style="color: var(--success);">NOMINAL</div>
+                    </div>
+                </div>
+                <div class="control-group">
+                    <button class="btn danger" id="btn-flood">INITIATE LOCALIZED BREACH</button>
+                </div>
+                <div class="control-group">
+                    <button class="btn" id="btn-toggle-hatches">TOGGLE ALL HATCHES</button>
+                </div>
+            </div>
+        </section>
+    </aside>
+
+    <main id="viewport">
+        <div id="debug-console">// SYSTEM INITIALIZED. WAITING FOR KERNEL BAKE...</div>
+        
+        <div id="data-dashboard">
+            <div class="analyt-card">
+                <div class="stat-grid">
+                    <div class="stat-box">
+                        <div class="stat-label">DISPLACEMENT</div>
+                        <div class="stat-value" id="stat-disp">--</div>
+                    </div>
+                    <div class="stat-box">
+                        <div class="stat-label">DRAG COEFF.</div>
+                        <div class="stat-value" id="stat-drag">--</div>
+                    </div>
+                    <div class="stat-box">
+                        <div class="stat-label">ADDED MASS</div>
+                        <div class="stat-value" id="stat-amass">--</div>
+                    </div>
+                    <div class="stat-box">
+                        <div class="stat-label">PERMISSION</div>
+                        <div class="stat-value" id="stat-perm">85%</div>
+                    </div>
+                </div>
+                <div id="area-graph"></div>
+            </div>
+        </div>
+    </main>
+</div>
+
+<script type="module">
+    import * as THREE from 'https://esm.sh/three@0.150.1';
+    import { OrbitControls } from 'https://esm.sh/three@0.150.1/examples/jsm/controls/OrbitControls';
+
+    const debug = (msg) => { console.log(msg); document.getElementById('debug-console').innerText = `// ${msg.toUpperCase()}`; };
+
+    // --- ANALYTICAL SOLVER ---
+    class AnalyticalSub {
+        constructor() {
+            this.L = 45;
+            this.R = 4.2;
+            this.T = 0.4;
+            this.sections = 50;
+        }
+
+        getRadiusAt(x) {
+            const hL = this.L / 2;
+            const normX = Math.abs(x) / hL;
+            if (normX < 0.5) return this.R;
+            const tRatio = (normX - 0.5) / 0.5;
+            return this.R * (1 - tRatio * this.T);
+        }
+
+        getAreaAt(x) {
+            const r = this.getRadiusAt(x);
+            return Math.PI * r * r; 
+        }
+
+        calculatePhysics() {
+            let volume = 0;
+            const dx = this.L / this.sections;
+            const areaArray = [];
+            for(let i=0; i<=this.sections; i++) {
+                const x = -this.L/2 + i*dx;
+                const area = this.getAreaAt(x);
+                areaArray.push(area);
+                volume += area * dx;
+            }
+            
+            const displacement = volume * 1.025; // Seawater density
+            const slenderness = this.L / (this.R * 2);
+            const dragCoeff = (0.003 + 0.001 / slenderness).toFixed(4);
+            const addedMass = (displacement * 0.2).toFixed(1); // Stylized approx
+
+            return { displacement, dragCoeff, addedMass, areaArray, volume };
+        }
+    }
+
+    const sub = new AnalyticalSub();
+
+    // --- THREE.JS ENGINE ---
+    const viewport = document.getElementById('viewport');
+    const scene = new THREE.Scene();
+    const camera = new THREE.PerspectiveCamera(45, viewport.clientWidth / viewport.clientHeight, 0.1, 1000);
+    camera.position.set(60, 40, 60);
+    
+    const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+    renderer.setSize(viewport.clientWidth, viewport.clientHeight);
+    renderer.setPixelRatio(window.devicePixelRatio);
+    renderer.localClippingEnabled = true;
+    viewport.appendChild(renderer.domElement);
+
+    const controls = new OrbitControls(camera, renderer.domElement);
+    controls.enableDamping = true;
+
+    // Lights
+    scene.add(new THREE.AmbientLight(0xffffff, 0.2));
+    const mainLight = new THREE.DirectionalLight(0xffffff, 0.8);
+    mainLight.position.set(50, 100, 50);
+    scene.add(mainLight);
+    const blueFill = new THREE.PointLight(0x00f2ff, 1, 200);
+    blueFill.position.set(-50, 20, 0);
+    scene.add(blueFill);
+
+    // Groups
+    const hullGroup = new THREE.Group();
+    const partitionsGroup = new THREE.Group();
+    const fluidGroup = new THREE.Group();
+    scene.add(hullGroup, partitionsGroup, fluidGroup);
+
+    // Materials
+    const matHull = new THREE.MeshPhongMaterial({ color: 0x0f172a, transparent: true, opacity: 0.15, wireframe: true });
+    const matInner = new THREE.MeshPhongMaterial({ color: 0x020408, side: THREE.BackSide, transparent: true, opacity: 0.9 });
+    const matDeck = new THREE.MeshPhongMaterial({ color: 0x00f2ff, transparent: true, opacity: 0.1, side: THREE.DoubleSide });
+    const matFrame = new THREE.MeshPhongMaterial({ color: 0x3b82f6, transparent: true, opacity: 0.4 });
+    const matBulkhead = new THREE.MeshPhongMaterial({ color: 0xff8c00, transparent: true, opacity: 0.8, side: THREE.DoubleSide });
+    const matWall = new THREE.MeshPhongMaterial({ color: 0xead308, transparent: true, opacity: 0.3, side: THREE.DoubleSide });
+    const matWater = new THREE.MeshPhongMaterial({ color: 0x00f2ff, transparent: true, opacity: 0.6 });
+
+    // --- REBUILD LOGIC ---
+
+    function buildHull() {
+        while(hullGroup.children.length) hullGroup.remove(hullGroup.children[0]);
+        
+        const geo = new THREE.CylinderGeometry(1, 1, sub.L, 32, 50, true);
+        geo.rotateZ(Math.PI/2);
+        const pos = geo.attributes.position;
+        for(let i=0; i<pos.count; i++) {
+            const x = pos.getX(i);
+            const r = sub.getRadiusAt(x);
+            pos.setY(i, pos.getY(i) * r);
+            pos.setZ(i, pos.getZ(i) * r);
+        }
+        geo.computeVertexNormals();
+
+        hullGroup.add(new THREE.Mesh(geo, matHull));
+        hullGroup.add(new THREE.Mesh(geo, matInner));
+
+        // Analytical Decks
+        const deckCount = parseInt(document.getElementById('param-decks').value);
+        const startY = -sub.R * 0.6;
+        const step = (sub.R * 1.2) / (deckCount + 1);
+        for(let i=1; i<=deckCount; i++) {
+            const y = startY + i * step;
+            const deckGeo = new THREE.PlaneGeometry(sub.L, 1, 50, 1);
+            deckGeo.rotateX(-Math.PI/2);
+            const dPos = deckGeo.attributes.position;
+            for(let j=0; j<dPos.count; j++) {
+                const x = dPos.getX(j);
+                const r = sub.getRadiusAt(x);
+                const w = Math.sqrt(Math.max(0, r*r - y*y)) * 0.98;
+                dPos.setZ(j, dPos.getZ(j) > 0 ? w : -w);
+            }
+            const dMesh = new THREE.Mesh(deckGeo, matDeck);
+            dMesh.position.y = y;
+            hullGroup.add(dMesh);
+        }
+
+        updateDashboard();
+    }
+
+    function updateDashboard() {
+        const stats = sub.calculatePhysics();
+        document.getElementById('stat-disp').innerText = stats.displacement.toFixed(0) + ' T';
+        document.getElementById('stat-drag').innerText = stats.dragCoeff;
+        document.getElementById('stat-amass').innerText = stats.addedMass + ' T';
+
+        // Area Graph
+        const graph = document.getElementById('area-graph');
+        graph.innerHTML = '';
+        const maxArea = Math.max(...stats.areaArray);
+        stats.areaArray.forEach((a, i) => {
+            const h = (a / maxArea) * 100;
+            const bar = document.createElement('div');
+            bar.className = 'graph-bar';
+            bar.style.left = (i / stats.sections * 100) + '%';
+            bar.style.height = h + '%';
+            graph.appendChild(bar);
+        });
+    }
+
+    // --- UI INTERACTION ---
+    const bind = (id, field) => {
+        document.getElementById(id).oninput = (e) => {
+            sub[field] = parseFloat(e.target.value);
+            document.getElementById('val-'+id.split('-')[1]).innerText = sub[field].toFixed(2);
+            buildHull();
+        };
+    };
+    bind('param-length', 'L');
+    bind('param-radius', 'R');
+    bind('param-taper', 'T');
+    document.getElementById('param-decks').oninput = (e) => {
+        document.getElementById('val-decks').innerText = e.target.value;
+        buildHull();
+    };
+
+    let currentPrim = 'frame';
+    const primBtns = ['prim-frame', 'prim-bulkhead', 'prim-wall'];
+    primBtns.forEach(id => {
+        document.getElementById(id).onclick = () => {
+            primBtns.forEach(b => document.getElementById(b).classList.remove('active'));
+            document.getElementById(id).classList.add('active');
+            currentPrim = id.split('-')[1];
+        };
+    });
+
+    let currentStage = 'A';
+    document.getElementById('btn-lock-hull').onclick = () => {
+        currentStage = 'B';
+        debug("HULL BAKE NOMINAL. PROCEEDING TO OUTFITTING.");
+        document.getElementById('nav-a').classList.remove('active');
+        document.getElementById('nav-b').classList.add('active');
+        document.getElementById('stage-a').style.display = 'none';
+        document.getElementById('stage-b').style.display = 'block';
+    };
+
+    let partitionList = [];
+    document.getElementById('btn-add-primitive').onclick = () => {
+        const x = (Math.random() - 0.5) * sub.L * 0.9;
+        partitionList.push({ type: currentPrim, x: x });
+        partitionList.sort((a,b) => a.x - b.x);
+        renderPartitions();
+    };
+
+    function renderPartitions() {
+        while(partitionsGroup.children.length) partitionsGroup.remove(partitionsGroup.children[0]);
+        let bulkheads = partitionList.filter(p => p.type === 'bulkhead').length;
+        document.getElementById('partition-stats').innerText = `NODES: ${bulkheads + 1} | PORTALS: ${bulkheads}`;
+
+        partitionList.forEach(p => {
+            const r = sub.getRadiusAt(p.x);
+            let mesh;
+            if(p.type === 'frame') {
+                const geo = new THREE.TorusGeometry(r * 0.98, 0.08, 16, 32);
+                geo.rotateY(Math.PI/2);
+                mesh = new THREE.Mesh(geo, matFrame);
+            } else {
+                const geo = new THREE.CircleGeometry(r * 0.98, 32);
+                mesh = new THREE.Mesh(geo, p.type === 'bulkhead' ? matBulkhead : matWall);
+                mesh.rotateY(Math.PI/2);
+            }
+            mesh.position.x = p.x;
+            partitionsGroup.add(mesh);
+        });
+    }
+
+    document.getElementById('btn-lock-partitions').onclick = () => {
+        currentStage = 'C';
+        debug("GRAPH COMPILED. SHIP READY FOR DEPLOYMENT.");
+        document.getElementById('nav-b').classList.remove('active');
+        document.getElementById('nav-c').classList.add('active');
+        document.getElementById('stage-b').style.display = 'none';
+        document.getElementById('stage-c').style.display = 'block';
+        matHull.opacity = 0.05;
+    };
+
+    // --- GRAPH MISSION SIMULATION ---
+    let sim = { active: false, breachNode: 0, levels: [], hatchesOpen: true };
+    document.getElementById('btn-flood').onclick = () => {
+        const bulkheads = partitionList.filter(p => p.type === 'bulkhead').map(p => p.x);
+        sim.levels = new Array(bulkheads.length + 1).fill(0);
+        sim.breachNode = Math.floor(Math.random() * sim.levels.length);
+        sim.active = true;
+        debug(`!!! BREACH AT NODE ${sim.breachNode} !!!`);
+    };
+
+    document.getElementById('btn-toggle-hatches').onclick = () => {
+        sim.hatchesOpen = !sim.hatchesOpen;
+        debug(`HATCHES ${sim.hatchesOpen ? 'OPENED' : 'SEALED'}`);
+    };
+
+    function updateSim() {
+        if(!sim.active) return;
+        while(fluidGroup.children.length) fluidGroup.remove(fluidGroup.children[0]);
+        
+        const bulkheads = partitionList.filter(p => p.type === 'bulkhead').map(p => p.x);
+        const xMarkers = [-sub.L/2, ...bulkheads, sub.L/2];
+        
+        // Flow simulation (simplified orifice flow / equalization)
+        sim.levels[sim.breachNode] += 0.015; // Influx
+        
+        if(sim.hatchesOpen) {
+            for(let i=0; i<sim.levels.length-1; i++) {
+                const diff = sim.levels[i] - sim.levels[i+1];
+                const flow = diff * 0.05; // Equalization speed
+                sim.levels[i] -= flow;
+                sim.levels[i+1] += flow;
+            }
+        }
+
+        // Render water zones
+        sim.levels.forEach((lv, i) => {
+            if(lv <= 0) return;
+            const x1 = xMarkers[i];
+            const x2 = xMarkers[i+1];
+            const w = x2 - x1;
+            const mid = (x1 + x2) / 2;
+            const h = Math.min(lv, sub.R * 1.5);
+            
+            const waterGeo = new THREE.BoxGeometry(w * 0.99, h, sub.R * 1.8);
+            const waterMesh = new THREE.Mesh(waterGeo, matWater);
+            waterMesh.position.set(mid, -sub.R + h/2, 0);
+            
+            // Local clipping for better taper look
+            const planePos = new THREE.Plane(new THREE.Vector3(1, 0, 0), -x1);
+            const planeNeg = new THREE.Plane(new THREE.Vector3(-1, 0, 0), x2);
+            waterMesh.material.clippingPlanes = [planePos, planeNeg];
+            
+            fluidGroup.add(waterMesh);
+        });
+    }
+
+    // --- MAIN LOOP ---
+    function animate() {
+        requestAnimationFrame(animate);
+        controls.update();
+        if(sim.active) updateSim();
+        renderer.render(scene, camera);
+    }
+
+    buildHull();
+    animate();
+
+    window.onresize = () => {
+        camera.aspect = viewport.clientWidth / viewport.clientHeight;
+        camera.updateProjectionMatrix();
+        renderer.setSize(viewport.clientWidth, viewport.clientHeight);
+    };
+
+</script>
+</body>
+</html>

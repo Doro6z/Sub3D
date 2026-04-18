@@ -1,0 +1,3 @@
+Name,display_name,order_index,unlocked
+---,string,int32,bool
+ROW_EXAMPLE,,,true

@@ -12,6 +12,86 @@ enum class EBreachPassageState : uint8
 	CreatureEnterable UMETA(DisplayName = "CreatureEnterable")
 };
 
+UENUM(BlueprintType)
+enum class ESheetSide : uint8
+{
+	Unknown   UMETA(DisplayName = "Unknown"),
+	Port      UMETA(DisplayName = "Port"),
+	Starboard UMETA(DisplayName = "Starboard"),
+	Top       UMETA(DisplayName = "Top"),
+	Bottom    UMETA(DisplayName = "Bottom"),
+	Bulkhead  UMETA(DisplayName = "Bulkhead")
+};
+
+USTRUCT(BlueprintType)
+struct FCompiledHullRegionRange
+{
+	GENERATED_BODY()
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Compiled")
+	int32 SectionIndexStart = INDEX_NONE;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Compiled")
+	int32 SectionIndexEnd = INDEX_NONE;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Compiled")
+	int32 ExteriorVertexStart = INDEX_NONE;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Compiled")
+	int32 ExteriorVertexCount = 0;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Compiled")
+	int32 ExteriorTriangleStart = INDEX_NONE;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Compiled")
+	int32 ExteriorTriangleCount = 0;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Compiled")
+	int32 InteriorVertexStart = INDEX_NONE;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Compiled")
+	int32 InteriorVertexCount = 0;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Compiled")
+	int32 InteriorTriangleStart = INDEX_NONE;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Compiled")
+	int32 InteriorTriangleCount = 0;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Compiled")
+	FVector LocalCenter = FVector::ZeroVector;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Compiled")
+	FVector LocalNormal = FVector::ForwardVector;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Compiled")
+	FBox LocalBounds = FBox(EForceInit::ForceInit);
+};
+
+USTRUCT(BlueprintType)
+struct FStructuralSheetCompiledBinding
+{
+	GENERATED_BODY()
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Compiled")
+	FName SheetId = NAME_None;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Compiled")
+	int32 CompartmentIndex = INDEX_NONE;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Compiled")
+	ESheetSide Side = ESheetSide::Unknown;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Compiled")
+	FCompiledHullRegionRange MeshRange;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Compiled")
+	FVector2D ChartMin = FVector2D(0.f, 0.f);
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Compiled")
+	FVector2D ChartMax = FVector2D(1.f, 1.f);
+};
+
 USTRUCT(BlueprintType)
 struct FSubCompartmentDef
 {
@@ -81,6 +161,30 @@ struct FStructuralSheetDef
 
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Sheet")
 	bool bCanOpenToExterior = false;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Sheet|Visual")
+	bool bSupportsVisualRupture = false;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Sheet|Visual", meta = (ClampMin = "0"))
+	int32 ExteriorVisualMaterialSlot = 0;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Sheet|Visual")
+	FVector VisualLocalOrigin = FVector::ZeroVector;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Sheet|Visual")
+	FVector VisualLocalTangentX = FVector::RightVector;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Sheet|Visual")
+	FVector VisualLocalTangentY = FVector::UpVector;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Sheet|Visual")
+	FVector2D VisualProjectionSizeCm = FVector2D(200.f, 200.f);
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Sheet|Visual", meta = (ClampMin = "0.0"))
+	float MaxVisibleRuptureRadiusCm = 80.f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Sheet|Visual", meta = (ClampMin = "0.1"))
+	float PreferredRuptureBorderScale = 1.f;
 };
 
 USTRUCT(BlueprintType)

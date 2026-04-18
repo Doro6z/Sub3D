@@ -1,0 +1,3 @@
+Name,display_name,fauna_type,hostile,flock_size_min,flock_size_max
+---,string,string (enum),bool,int32,int32
+ROW_EXAMPLE,,,false,,

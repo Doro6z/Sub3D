@@ -28,6 +28,10 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Interact")
 	float InteractRange = 200.f;
 
+	// Text shown in the HUD when looking at this interactable (e.g. "Take Helm", "Open Door")
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Interact")
+	FText InteractionActionText = NSLOCTEXT("SubInteraction", "DefaultAction", "Interact");
+
 	// Fired on the owning Actor when a crew member interacts
 	UPROPERTY(BlueprintAssignable, Category = "Interact")
 	FOnInteract OnInteract;

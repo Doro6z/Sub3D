@@ -4,10 +4,17 @@
 #include "SubSonarComponent.h"
 #include "SubSonarSystemComponent.h"
 #include "SubDoorActor.h"
+#include "SubFloodComponent.h"
+#include "SubHullComponent.h"
 #include "SubmarineSystemsComponent.h"
 #include "SubmarineCompartmentComponent.h"
 #include "SubMovementComponent.h"
 #include "SubCrewCharacter.h"
+#include "SubPlayerHUDWidget.h"
+#include "SubCrewAnimInstance.h"
+#include "Components/SkeletalMeshComponent.h"
+#include "Generator/SubmarineDefinition.h"
+#include "Generator/SubmarineDefinitionTypes.h"
 #include "Net/UnrealNetwork.h"
 
 DEFINE_LOG_CATEGORY_STATIC(LogSubController, Log, All);
@@ -18,6 +25,22 @@ void ASubPlayerController::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>&
 	DOREPLIFETIME(ASubPlayerController, CurrentControlMode);
 	DOREPLIFETIME(ASubPlayerController, CurrentStation);
 	DOREPLIFETIME(ASubPlayerController, CurrentStationType);
+}
+
+void ASubPlayerController::BeginPlay()
+{
+	Super::BeginPlay();
+
+	// Create the HUD widget if we are the local player and a class is provided
+	if (IsLocalController() && HUDWidgetClass)
+	{
+		HUDWidget = CreateWidget<USubPlayerHUDWidget>(this, HUDWidgetClass);
+		if (HUDWidget)
+		{
+			HUDWidget->AddToViewport();
+			UE_LOG(LogSubController, Log, TEXT("[%s] HUD created and added to viewport."), *GetName());
+		}
+	}
 }
 
 void ASubPlayerController::ServerEnterStation_Implementation(AActor* Station)
@@ -225,6 +248,35 @@ void ASubPlayerController::ServerRouteHelmThrust_Implementation(float Value)
 	}
 }
 
+void ASubPlayerController::ServerRouteHelmThrottleRamp_Implementation(float Intent)
+{
+	UE_LOG(
+		LogSubController,
+		Verbose,
+		TEXT("[%s] ServerRouteHelmThrottleRamp | Intent=%.3f | Mode=%d"),
+		*GetName(),
+		Intent,
+		static_cast<int32>(CurrentControlMode)
+	);
+
+	if (CurrentControlMode != ECrewControlMode::HelmDriving)
+	{
+		return;
+	}
+
+	if (ASubmarineBase* Submarine = ResolveCurrentSubmarine())
+	{
+		if (Submarine->Systems)
+		{
+			Submarine->Systems->SetThrottleRampIntent(Intent);
+		}
+	}
+	else
+	{
+		UE_LOG(LogSubController, Warning, TEXT("[%s] HelmThrottleRamp failed: no submarine resolved."), *GetName());
+	}
+}
+
 void ASubPlayerController::ServerRouteHelmSteer_Implementation(float Value)
 {
 	UE_LOG(
@@ -261,6 +313,64 @@ void ASubPlayerController::ServerRouteHelmSteer_Implementation(float Value)
 	}
 }
 
+void ASubPlayerController::ServerRouteHelmRudderRamp_Implementation(float Intent)
+{
+	UE_LOG(
+		LogSubController,
+		Verbose,
+		TEXT("[%s] ServerRouteHelmRudderRamp | Intent=%.3f | Mode=%d"),
+		*GetName(),
+		Intent,
+		static_cast<int32>(CurrentControlMode)
+	);
+
+	if (CurrentControlMode != ECrewControlMode::HelmDriving)
+	{
+		return;
+	}
+
+	if (ASubmarineBase* Submarine = ResolveCurrentSubmarine())
+	{
+		if (Submarine->Systems)
+		{
+			Submarine->Systems->SetRudderRampIntent(Intent);
+		}
+	}
+	else
+	{
+		UE_LOG(LogSubController, Warning, TEXT("[%s] HelmRudderRamp failed: no submarine resolved."), *GetName());
+	}
+}
+
+void ASubPlayerController::ServerRouteHelmDivePlaneRamp_Implementation(float Intent)
+{
+	UE_LOG(
+		LogSubController,
+		Verbose,
+		TEXT("[%s] ServerRouteHelmDivePlaneRamp | Intent=%.3f | Mode=%d"),
+		*GetName(),
+		Intent,
+		static_cast<int32>(CurrentControlMode)
+	);
+
+	if (CurrentControlMode != ECrewControlMode::HelmDriving)
+	{
+		return;
+	}
+
+	if (ASubmarineBase* Submarine = ResolveCurrentSubmarine())
+	{
+		if (Submarine->Systems)
+		{
+			Submarine->Systems->SetDivePlaneRampIntent(Intent);
+		}
+	}
+	else
+	{
+		UE_LOG(LogSubController, Warning, TEXT("[%s] HelmDivePlaneRamp failed: no submarine resolved."), *GetName());
+	}
+}
+
 void ASubPlayerController::ServerRouteHelmDive_Implementation(float Value)
 {
 	UE_LOG(
@@ -294,6 +404,150 @@ void ASubPlayerController::ServerRouteHelmDive_Implementation(float Value)
 	else
 	{
 		UE_LOG(LogSubController, Warning, TEXT("[%s] HelmDive failed: no submarine resolved."), *GetName());
+	}
+}
+
+void ASubPlayerController::ServerRouteRudderHoldEnabled_Implementation(bool bEnabled)
+{
+	if (CurrentControlMode == ECrewControlMode::OnFoot)
+	{
+		return;
+	}
+
+	if (ASubmarineBase* Submarine = ResolveCurrentSubmarine())
+	{
+		if (Submarine->Systems)
+		{
+			Submarine->Systems->SetRudderHoldEnabled(bEnabled);
+		}
+	}
+}
+
+void ASubPlayerController::ServerRoutePlaneHoldEnabled_Implementation(bool bEnabled)
+{
+	if (CurrentControlMode == ECrewControlMode::OnFoot)
+	{
+		return;
+	}
+
+	if (ASubmarineBase* Submarine = ResolveCurrentSubmarine())
+	{
+		if (Submarine->Systems)
+		{
+			Submarine->Systems->SetPlaneHoldEnabled(bEnabled);
+		}
+	}
+}
+
+void ASubPlayerController::ServerRouteStabilizationMaster_Implementation(bool bEnabled)
+{
+	if (CurrentControlMode == ECrewControlMode::OnFoot)
+	{
+		return;
+	}
+
+	if (ASubmarineBase* Submarine = ResolveCurrentSubmarine())
+	{
+		if (Submarine->Systems)
+		{
+			Submarine->Systems->SetStabilizationMasterEnabled(bEnabled);
+		}
+	}
+}
+
+void ASubPlayerController::ServerRouteAutoSpeedEnabled_Implementation(bool bEnabled)
+{
+	if (CurrentControlMode == ECrewControlMode::OnFoot)
+	{
+		return;
+	}
+
+	if (ASubmarineBase* Submarine = ResolveCurrentSubmarine())
+	{
+		if (Submarine->Systems)
+		{
+			Submarine->Systems->SetAutoSpeedEnabled(bEnabled);
+		}
+	}
+}
+
+void ASubPlayerController::ServerRouteAutoDepthEnabled_Implementation(bool bEnabled)
+{
+	if (CurrentControlMode == ECrewControlMode::OnFoot)
+	{
+		return;
+	}
+
+	if (ASubmarineBase* Submarine = ResolveCurrentSubmarine())
+	{
+		if (Submarine->Systems)
+		{
+			Submarine->Systems->SetAutoDepthEnabled(bEnabled);
+		}
+	}
+}
+
+void ASubPlayerController::ServerRouteAutoPitchEnabled_Implementation(bool bEnabled)
+{
+	if (CurrentControlMode == ECrewControlMode::OnFoot)
+	{
+		return;
+	}
+
+	if (ASubmarineBase* Submarine = ResolveCurrentSubmarine())
+	{
+		if (Submarine->Systems)
+		{
+			Submarine->Systems->SetAutoPitchEnabled(bEnabled);
+		}
+	}
+}
+
+void ASubPlayerController::ServerRouteTargetSpeedCmS_Implementation(float SpeedCmS)
+{
+	if (CurrentControlMode == ECrewControlMode::OnFoot)
+	{
+		return;
+	}
+
+	if (ASubmarineBase* Submarine = ResolveCurrentSubmarine())
+	{
+		if (Submarine->Systems)
+		{
+			Submarine->Systems->SetTargetSpeedCmS(SpeedCmS);
+		}
+	}
+}
+
+void ASubPlayerController::ServerRouteTargetDepthMeters_Implementation(float DepthMeters)
+{
+	if (CurrentControlMode == ECrewControlMode::OnFoot)
+	{
+		return;
+	}
+
+	if (ASubmarineBase* Submarine = ResolveCurrentSubmarine())
+	{
+		if (Submarine->Systems)
+		{
+			Submarine->Systems->SetTargetDepthMeters(DepthMeters);
+		}
+	}
+}
+
+void ASubPlayerController::ServerRouteTargetPitchDeg_Implementation(float PitchDeg)
+{
+	if (CurrentControlMode == ECrewControlMode::OnFoot)
+	{
+		return;
+	}
+
+	if (ASubmarineBase* Submarine = ResolveCurrentSubmarine())
+	{
+		if (Submarine->Systems)
+		{
+			Submarine->Systems->SetTargetPitchDeg(PitchDeg);
+		}
 	}
 }
 
@@ -657,4 +911,249 @@ ASubmarineBase* ASubPlayerController::ResolveCurrentSubmarine() const
 
 	UE_LOG(LogSubController, Warning, TEXT("[%s] ResolveCurrentSubmarine failed (station and crew are null)."), *GetName());
 	return nullptr;
+}
+
+// ── Dev cheats ────────────────────────────────────────────────────────────────
+
+void ASubPlayerController::DevCheat_CreateBreach(FName CompartmentId, float RateLps)
+{
+	ASubmarineBase* Sub = ResolveCurrentSubmarine();
+	if (!Sub || !Sub->SubFlood)
+	{
+		UE_LOG(LogSubController, Warning, TEXT("[DevCheat_CreateBreach] No submarine or SubFlood resolved."));
+		return;
+	}
+
+	Sub->SubFlood->CreateBreach(CompartmentId, RateLps);
+	UE_LOG(LogSubController, Log,
+		TEXT("[DevCheat_CreateBreach] %s: created breach on '%s' at %.1f L/s"),
+		*Sub->GetName(), *CompartmentId.ToString(), RateLps);
+}
+
+void ASubPlayerController::DevCheat_SetDoorClosed(FName ConnectionId, bool bClosed)
+{
+	ASubmarineBase* Sub = ResolveCurrentSubmarine();
+	if (!Sub || !Sub->SubFlood)
+	{
+		UE_LOG(LogSubController, Warning, TEXT("[DevCheat_SetDoorClosed] No submarine or SubFlood resolved."));
+		return;
+	}
+
+	Sub->SubFlood->SetDoorState(ConnectionId, bClosed);
+	UE_LOG(LogSubController, Log,
+		TEXT("[DevCheat_SetDoorClosed] %s: set door '%s' closed=%d"),
+		*Sub->GetName(), *ConnectionId.ToString(), bClosed ? 1 : 0);
+}
+
+void ASubPlayerController::DevCheat_SetFloodLevel(FName CompartmentId, float Level01)
+{
+	ASubmarineBase* Sub = ResolveCurrentSubmarine();
+	if (!Sub || !Sub->SubFlood)
+	{
+		UE_LOG(LogSubController, Warning, TEXT("[DevCheat_SetFloodLevel] No submarine or SubFlood resolved."));
+		return;
+	}
+
+	Sub->SubFlood->SetCompartmentFloodDirect(CompartmentId, Level01);
+	UE_LOG(LogSubController, Log,
+		TEXT("[DevCheat_SetFloodLevel] %s: set '%s' to %.2f"),
+		*Sub->GetName(), *CompartmentId.ToString(), Level01);
+}
+
+void ASubPlayerController::DevCheat_RepairAllBreaches()
+{
+	ASubmarineBase* Sub = ResolveCurrentSubmarine();
+	if (!Sub || !Sub->SubFlood || !Sub->GeneratedDefinition)
+	{
+		UE_LOG(LogSubController, Warning, TEXT("[DevCheat_RepairAllBreaches] No submarine / SubFlood / Definition resolved."));
+		return;
+	}
+
+	int32 Count = 0;
+	for (const FGeneratedCompartmentDef& Comp : Sub->GeneratedDefinition->Compartments)
+	{
+		Sub->SubFlood->RemoveBreach(Comp.CompartmentId);
+		++Count;
+	}
+
+	// Also clear the hull side if available so the breach bridge does not
+	// re-open the flood inflow on the next tick.
+	if (Sub->SubHull)
+	{
+		Sub->SubHull->ClearAllBreaches();
+	}
+
+	UE_LOG(LogSubController, Log,
+		TEXT("[DevCheat_RepairAllBreaches] %s: cleared breaches across %d compartments"),
+		*Sub->GetName(), Count);
+}
+
+void ASubPlayerController::DevCheat_TeleportToCompartment(FName CompartmentId)
+{
+	ASubmarineBase* Sub = ResolveCurrentSubmarine();
+	if (!Sub || !Sub->GeneratedDefinition)
+	{
+		UE_LOG(LogSubController, Warning, TEXT("[DevCheat_TeleportToCompartment] No submarine or Definition resolved."));
+		return;
+	}
+
+	const FGeneratedCompartmentDef* Comp = Sub->GeneratedDefinition->FindCompartment(CompartmentId);
+	if (!Comp)
+	{
+		UE_LOG(LogSubController, Warning,
+			TEXT("[DevCheat_TeleportToCompartment] Compartment '%s' not found."),
+			*CompartmentId.ToString());
+		return;
+	}
+
+	APawn* ControlledPawn = GetPawn();
+	if (!ControlledPawn)
+	{
+		UE_LOG(LogSubController, Warning, TEXT("[DevCheat_TeleportToCompartment] No pawn possessed."));
+		return;
+	}
+
+	// Compartment center in sub local space, lifted to floor level + 100cm crew clearance.
+	const FVector LocalCenter(
+		(Comp->HydroBoundsMin.X + Comp->HydroBoundsMax.X) * 0.5f,
+		(Comp->HydroBoundsMin.Y + Comp->HydroBoundsMax.Y) * 0.5f,
+		Comp->WalkableFloorZCm + 100.f);
+	const FVector WorldCenter = Sub->GetActorTransform().TransformPosition(LocalCenter);
+
+	ControlledPawn->SetActorLocation(WorldCenter, false, nullptr, ETeleportType::TeleportPhysics);
+	UE_LOG(LogSubController, Log,
+		TEXT("[DevCheat_TeleportToCompartment] %s -> '%s' at world %s"),
+		*ControlledPawn->GetName(), *CompartmentId.ToString(), *WorldCenter.ToString());
+}
+
+void ASubPlayerController::DevCheat_ListCompartments()
+{
+	ASubmarineBase* Sub = ResolveCurrentSubmarine();
+	if (!Sub || !Sub->GeneratedDefinition)
+	{
+		UE_LOG(LogSubController, Warning, TEXT("[DevCheat_ListCompartments] No submarine or Definition resolved."));
+		return;
+	}
+
+	UE_LOG(LogSubController, Log,
+		TEXT("[DevCheat_ListCompartments] %s: %d compartments"),
+		*Sub->GetName(), Sub->GeneratedDefinition->Compartments.Num());
+
+	for (const FGeneratedCompartmentDef& Comp : Sub->GeneratedDefinition->Compartments)
+	{
+		const float Level = Sub->SubFlood ? Sub->SubFlood->GetCompartmentFloodLevel01(Comp.CompartmentId) : 0.f;
+		UE_LOG(LogSubController, Log,
+			TEXT("  %s (type=%d) capacity=%.0fL flood=%.2f"),
+			*Comp.CompartmentId.ToString(),
+			static_cast<int32>(Comp.SemanticType),
+			Comp.CapacityLiters,
+			Level);
+	}
+}
+
+static USubCrewAnimInstance* GetLocalAnimInstance(ASubPlayerController* PC)
+{
+	APawn* Pawn = PC ? PC->GetPawn() : nullptr;
+	if (!Pawn) return nullptr;
+	USkeletalMeshComponent* Mesh = Pawn->FindComponentByClass<USkeletalMeshComponent>();
+	return Mesh ? Cast<USubCrewAnimInstance>(Mesh->GetAnimInstance()) : nullptr;
+}
+
+void ASubPlayerController::Anim(const FString& ParamName, float Value)
+{
+	USubCrewAnimInstance* AI = GetLocalAnimInstance(this);
+	if (!AI)
+	{
+		UE_LOG(LogSubController, Warning, TEXT("Anim: No SubCrewAnimInstance found"));
+		return;
+	}
+
+	const FString P = ParamName.ToLower();
+
+	// Axes
+	if      (P == "legaxis")        AI->LegSwingAxis = FMath::RoundToInt(Value);
+	else if (P == "armaxis")        AI->ArmSwingAxis = FMath::RoundToInt(Value);
+	else if (P == "elbowaxis")      AI->ElbowBendAxis = FMath::RoundToInt(Value);
+	else if (P == "spinebendaxis")  AI->SpineBendAxis = FMath::RoundToInt(Value);
+	else if (P == "spinetwistaxis") AI->SpineTwistAxis = FMath::RoundToInt(Value);
+	else if (P == "negleg")         AI->bNegateLegSwing = Value > 0.5f;
+	else if (P == "negarm")         AI->bNegateArmSwing = Value > 0.5f;
+	else if (P == "negspine")       AI->bNegateSpineBend = Value > 0.5f;
+	// Arm rest FRotator per arm (P/Y/R)
+	else if (P == "armrestr_p")     AI->ArmRestR.Pitch = Value;
+	else if (P == "armrestr_y")     AI->ArmRestR.Yaw = Value;
+	else if (P == "armrestr_r")     AI->ArmRestR.Roll = Value;
+	else if (P == "armrestl_p")     AI->ArmRestL.Pitch = Value;
+	else if (P == "armrestl_y")     AI->ArmRestL.Yaw = Value;
+	else if (P == "armrestl_r")     AI->ArmRestL.Roll = Value;
+	else if (P == "forearmr_p")     AI->ForearmRestR.Pitch = Value;
+	else if (P == "forearmr_y")     AI->ForearmRestR.Yaw = Value;
+	else if (P == "forearmr_r")     AI->ForearmRestR.Roll = Value;
+	else if (P == "forearml_p")     AI->ForearmRestL.Pitch = Value;
+	else if (P == "forearml_y")     AI->ForearmRestL.Yaw = Value;
+	else if (P == "forearml_r")     AI->ForearmRestL.Roll = Value;
+	// Walk
+	else if (P == "legswing")       AI->WalkLegSwingDeg = Value;
+	else if (P == "armswing")       AI->WalkArmSwingDeg = Value;
+	else if (P == "bob")            AI->WalkPelvisBobCm = Value;
+	else if (P == "rate")           AI->WalkCycleRate = Value;
+	else if (P == "calfbend")       AI->WalkCalfBendMultiplier = Value;
+	// Body
+	else if (P == "lowerbodyyaw")   AI->MaxLowerBodyYawDeg = Value;
+	// Idle
+	else if (P == "breathamp")      AI->BreathingAmplitudeDeg = Value;
+	else if (P == "breathrate")     AI->BreathingRate = Value;
+	else if (P == "posturebend")    AI->MaxPostureBendDeg = Value;
+	// Sub motion
+	else if (P == "sublean")        AI->SubLeanMultiplier = Value;
+	else if (P == "substumble")     AI->SubStumbleMultiplier = Value;
+	else if (P == "debug")          AI->bShowDebugHUD = Value > 0.5f;
+	else
+	{
+		UE_LOG(LogSubController, Warning, TEXT("Anim: Unknown param '%s'. Use AnimList for list."), *ParamName);
+		return;
+	}
+
+	UE_LOG(LogSubController, Log, TEXT("Anim: %s = %.2f"), *ParamName, Value);
+
+	if (GEngine)
+	{
+		GEngine->AddOnScreenDebugMessage(-1, 3.f, FColor::Cyan,
+			FString::Printf(TEXT("Anim: %s = %.2f"), *ParamName, Value));
+	}
+}
+
+void ASubPlayerController::AnimList()
+{
+	USubCrewAnimInstance* AI = GetLocalAnimInstance(this);
+	if (!AI)
+	{
+		UE_LOG(LogSubController, Warning, TEXT("AnimList: No SubCrewAnimInstance found"));
+		return;
+	}
+
+	UE_LOG(LogSubController, Log, TEXT("=== CREW ANIM PARAMS ==="));
+	UE_LOG(LogSubController, Log, TEXT("-- Axes --"));
+	UE_LOG(LogSubController, Log, TEXT("  legaxis        %d"), AI->LegSwingAxis);
+	UE_LOG(LogSubController, Log, TEXT("  armaxis        %d"), AI->ArmSwingAxis);
+	UE_LOG(LogSubController, Log, TEXT("  elbowaxis      %d"), AI->ElbowBendAxis);
+	UE_LOG(LogSubController, Log, TEXT("  spinebendaxis  %d"), AI->SpineBendAxis);
+	UE_LOG(LogSubController, Log, TEXT("  spinetwistaxis %d"), AI->SpineTwistAxis);
+	UE_LOG(LogSubController, Log, TEXT("  negleg:%d negarm:%d negspine:%d"),
+		AI->bNegateLegSwing ? 1 : 0, AI->bNegateArmSwing ? 1 : 0, AI->bNegateSpineBend ? 1 : 0);
+	UE_LOG(LogSubController, Log, TEXT("-- Arm Rest (FRotator per arm) --"));
+	UE_LOG(LogSubController, Log, TEXT("  armrestr       P%.1f Y%.1f R%.1f"), AI->ArmRestR.Pitch, AI->ArmRestR.Yaw, AI->ArmRestR.Roll);
+	UE_LOG(LogSubController, Log, TEXT("  armrestl       P%.1f Y%.1f R%.1f"), AI->ArmRestL.Pitch, AI->ArmRestL.Yaw, AI->ArmRestL.Roll);
+	UE_LOG(LogSubController, Log, TEXT("  forearmr       P%.1f Y%.1f R%.1f"), AI->ForearmRestR.Pitch, AI->ForearmRestR.Yaw, AI->ForearmRestR.Roll);
+	UE_LOG(LogSubController, Log, TEXT("  forearml       P%.1f Y%.1f R%.1f"), AI->ForearmRestL.Pitch, AI->ForearmRestL.Yaw, AI->ForearmRestL.Roll);
+	UE_LOG(LogSubController, Log, TEXT("-- Walk --"));
+	UE_LOG(LogSubController, Log, TEXT("  legswing %.1f  armswing %.1f  bob %.1f  rate %.3f  calfbend %.1f"),
+		AI->WalkLegSwingDeg, AI->WalkArmSwingDeg, AI->WalkPelvisBobCm, AI->WalkCycleRate, AI->WalkCalfBendMultiplier);
+	UE_LOG(LogSubController, Log, TEXT("-- Body --"));
+	UE_LOG(LogSubController, Log, TEXT("  lowerbodyyaw   %.1f"), AI->MaxLowerBodyYawDeg);
+	UE_LOG(LogSubController, Log, TEXT("  posturebend    %.1f"), AI->MaxPostureBendDeg);
+	UE_LOG(LogSubController, Log, TEXT("  breathamp %.1f  breathrate %.2f"), AI->BreathingAmplitudeDeg, AI->BreathingRate);
+	UE_LOG(LogSubController, Log, TEXT("  sublean %.2f  substumble %.3f"), AI->SubLeanMultiplier, AI->SubStumbleMultiplier);
+	UE_LOG(LogSubController, Log, TEXT("  debug %d"), AI->bShowDebugHUD ? 1 : 0);
+	UE_LOG(LogSubController, Log, TEXT("Usage: Anim <param> <value>  (e.g. Anim armrestr_r -85)"));
 }

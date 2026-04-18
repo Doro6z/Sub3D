@@ -1,0 +1,3 @@
+Name,display_name,category,flood_priority,notes
+---,string,string (enum),int32,string
+ROW_EXAMPLE,,,,

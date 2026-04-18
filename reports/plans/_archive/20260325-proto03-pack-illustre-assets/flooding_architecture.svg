@@ -1,0 +1,77 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 600" font-family="sans-serif">
+    <!-- Background -->
+    <rect width="900" height="600" fill="#1e1e1e" rx="10"/>
+
+    <!-- Title -->
+    <text x="450" y="40" fill="#fff" font-size="20" font-weight="bold" text-anchor="middle">Flooding Architecture (Tick Simulation)</text>
+
+    <!-- Lifelines -->
+    <text x="150" y="90" fill="#fab1a0" font-size="16" font-weight="bold" text-anchor="middle">USubHullComponent</text>
+    <text x="150" y="110" fill="#dfe6e9" font-size="12" text-anchor="middle">(Damage Only)</text>
+    <line x1="150" y1="120" x2="150" y2="550" stroke="#636e72" stroke-width="2" stroke-dasharray="8,4"/>
+
+    <text x="450" y="90" fill="#0984e3" font-size="16" font-weight="bold" text-anchor="middle">USubFloodComponent</text>
+    <text x="450" y="110" fill="#dfe6e9" font-size="12" text-anchor="middle">(Simulation Authority)</text>
+    <line x1="450" y1="120" x2="450" y2="550" stroke="#636e72" stroke-width="2" stroke-dasharray="8,4"/>
+
+    <text x="750" y="90" fill="#55efc4" font-size="16" font-weight="bold" text-anchor="middle">Graph Connections</text>
+    <text x="750" y="110" fill="#dfe6e9" font-size="12" text-anchor="middle">(Doors / Hatches)</text>
+    <line x1="750" y1="120" x2="750" y2="550" stroke="#636e72" stroke-width="2" stroke-dasharray="8,4"/>
+
+    <!-- Flow -->
+    <rect x="-10" y="150" width="100" height="30" fill="#d63031" rx="5"/>
+    <text x="40" y="170" fill="#fff" font-size="12" font-weight="bold" text-anchor="middle">Impact!</text>
+
+    <!-- Arrow 1 -->
+    <path d="M 90 165 L 145 165" stroke="#ff7675" stroke-width="2" marker-end="url(#arrowRed)"/>
+    
+    <rect x="140" y="180" width="20" height="40" fill="#fab1a0"/>
+    <text x="170" y="200" fill="#fab1a0" font-size="14">Rebuild Breach Clusters</text>
+
+    <!-- Arrow 2 -->
+    <path d="M 160 220 L 440 240" stroke="#74b9ff" stroke-width="2" marker-end="url(#arrowBlue)" fill="none" stroke-dasharray="5,5"/>
+    <text x="300" y="225" fill="#74b9ff" font-size="14" text-anchor="middle">OnBreachesUpdated()</text>
+    
+    <rect x="440" y="240" width="20" height="250" fill="#0984e3"/>
+    
+    <!-- Self actions -->
+    <path d="M 460 260 L 500 260 L 500 290 L 465 290" stroke="#0984e3" stroke-width="2" marker-end="url(#arrowBlue)" fill="none"/>
+    <text x="510" y="280" fill="#fff" font-size="14">1. Apply Breach Inflow to Compartments</text>
+
+    <!-- To Doors -->
+    <path d="M 460 320 L 740 320" stroke="#0984e3" stroke-width="2" marker-end="url(#arrowBlue)" fill="none"/>
+    <text x="600" y="315" fill="#fff" font-size="14" text-anchor="middle">2. Check Open Connections (Edges)</text>
+
+    <rect x="740" y="320" width="20" height="40" fill="#55efc4"/>
+    
+    <!-- Return from doors -->
+    <path d="M 740 360 L 465 360" stroke="#55efc4" stroke-width="2" marker-end="url(#arrowGreen)" fill="none" stroke-dasharray="5,5"/>
+    <text x="600" y="355" fill="#55efc4" font-size="14" text-anchor="middle">Transfer Water (Height Delta)</text>
+
+    <!-- Self actions 2 -->
+    <path d="M 460 390 L 500 390 L 500 420 L 465 420" stroke="#0984e3" stroke-width="2" marker-end="url(#arrowBlue)" fill="none"/>
+    <text x="510" y="410" fill="#fff" font-size="14">3. Apply Pump Outflow</text>
+
+    <path d="M 460 440 L 500 440 L 500 470 L 465 470" stroke="#0984e3" stroke-width="2" marker-end="url(#arrowBlue)" fill="none"/>
+    <text x="510" y="460" fill="#fff" font-size="14">4. Update Water Heights</text>
+
+    <!-- Broadcast -->
+    <path d="M 460 520 L 850 520" stroke="#fdcb6e" stroke-width="3" marker-end="url(#arrowYellow)" fill="none"/>
+    <text x="650" y="510" fill="#fdcb6e" font-size="14" font-weight="bold" text-anchor="middle">5. Broadcast OnCompartmentFloodUpdated</text>
+
+    <!-- Defs -->
+    <defs>
+        <marker id="arrowRed" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto" markerUnits="strokeWidth">
+            <path d="M0,0 L0,6 L9,3 z" fill="#ff7675" />
+        </marker>
+        <marker id="arrowBlue" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto" markerUnits="strokeWidth">
+            <path d="M0,0 L0,6 L9,3 z" fill="#74b9ff" />
+        </marker>
+        <marker id="arrowGreen" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto" markerUnits="strokeWidth">
+            <path d="M0,0 L0,6 L9,3 z" fill="#55efc4" />
+        </marker>
+        <marker id="arrowYellow" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto" markerUnits="strokeWidth">
+            <path d="M0,0 L0,6 L9,3 z" fill="#fdcb6e" />
+        </marker>
+    </defs>
+</svg>

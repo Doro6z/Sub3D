@@ -131,6 +131,7 @@ void ConfigureDeterministicSonar(USubSonarComponent* Sonar)
 	Sonar->PingRayCountVertical = 12;
 	Sonar->PingHalfAngleDeg = 18.f;
 	Sonar->PingMaxRangeCm = 12000.f;
+	Sonar->bOmnidirectionalPing = false;
 	Sonar->PropagationSpeedCmS = 3000.f;
 	Sonar->MinAcceptedHitDistanceCm = 50.f;
 	Sonar->PointPeakDurationS = 2.f;

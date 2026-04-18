@@ -1,0 +1,3 @@
+Name,display_name,kind,flood_barrier,destructible,base_resistance
+---,string,string (enum),bool,bool,float
+ROW_EXAMPLE,,,true,false,

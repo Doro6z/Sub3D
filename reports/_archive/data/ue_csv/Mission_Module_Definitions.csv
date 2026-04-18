@@ -1,0 +1,3 @@
+Name,display_name,mission_type_tag,one_time_use
+---,string,string,bool
+ROW_EXAMPLE,,,false

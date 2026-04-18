@@ -1,0 +1,189 @@
+{
+  "meta": {
+    "domain": "Mission & Rewards",
+    "parentId": "domain_8",
+    "description": "Schema definition for Mission & Rewards."
+  },
+  "tables": [
+    {
+      "id": "Mission_Templates",
+      "domain": 8,
+      "priority": "medium",
+      "description": "Mission definitions — objective type, biome, constraints.",
+      "columns": [
+        {
+          "name": "mission_id",
+          "type": "string",
+          "pk": true
+        },
+        {
+          "name": "display_name",
+          "type": "string",
+          "nullable": false
+        },
+        {
+          "name": "biome_id",
+          "type": "string",
+          "fk": "Biome_Definitions.biome_id",
+          "nullable": true
+        },
+        {
+          "name": "objective_id",
+          "type": "string",
+          "fk": "Objective_Definitions.objective_id"
+        },
+        {
+          "name": "difficulty_id",
+          "type": "string",
+          "fk": "Difficulty_Presets.preset_id",
+          "nullable": true
+        },
+        {
+          "name": "time_limit_s",
+          "type": "float",
+          "nullable": true
+        },
+        {
+          "name": "coop_max",
+          "type": "int",
+          "nullable": true,
+          "default": "4"
+        }
+      ],
+      "relations": [
+        {
+          "target": "Biome_Definitions",
+          "type": "N:1",
+          "label": "takes place in biome"
+        },
+        {
+          "target": "Objective_Definitions",
+          "type": "N:1",
+          "label": "has objective type"
+        },
+        {
+          "target": "Mission_Rewards",
+          "type": "1:N",
+          "label": "grants rewards"
+        },
+        {
+          "target": "Mission_Module_Definitions",
+          "type": "N:N",
+          "label": "requires modules"
+        }
+      ]
+    },
+    {
+      "id": "Mission_Rewards",
+      "domain": 8,
+      "priority": "medium",
+      "description": "Rewards granted on mission completion — items, XP, unlocks.",
+      "columns": [
+        {
+          "name": "reward_id",
+          "type": "string",
+          "pk": true
+        },
+        {
+          "name": "mission_id",
+          "type": "string",
+          "fk": "Mission_Templates.mission_id"
+        },
+        {
+          "name": "reward_type",
+          "type": "enum",
+          "values": [
+            "item",
+            "xp",
+            "credits",
+            "unlock",
+            "catalog_entry"
+          ]
+        },
+        {
+          "name": "ref_id",
+          "type": "string",
+          "nullable": true
+        },
+        {
+          "name": "qty",
+          "type": "int",
+          "nullable": false,
+          "default": "1"
+        },
+        {
+          "name": "on_condition",
+          "type": "enum",
+          "values": [
+            "completion",
+            "perfect",
+            "bonus",
+            "first_time"
+          ],
+          "nullable": true
+        }
+      ],
+      "relations": [
+        {
+          "target": "Mission_Templates",
+          "type": "N:1",
+          "label": "reward for mission"
+        },
+        {
+          "target": "Items_Stats",
+          "type": "N:1",
+          "label": "item reward"
+        }
+      ]
+    },
+    {
+      "id": "Objective_Definitions",
+      "domain": 8,
+      "priority": "medium",
+      "description": "Mission objective type definitions — destroy, retrieve, escort, survive.",
+      "columns": [
+        {
+          "name": "objective_id",
+          "type": "string",
+          "pk": true
+        },
+        {
+          "name": "display_name",
+          "type": "string",
+          "nullable": false
+        },
+        {
+          "name": "kind",
+          "type": "enum",
+          "values": [
+            "destroy",
+            "retrieve",
+            "escort",
+            "survive",
+            "investigate",
+            "defend",
+            "reach"
+          ]
+        },
+        {
+          "name": "timed",
+          "type": "bool",
+          "nullable": false,
+          "default": "false"
+        },
+        {
+          "name": "notes",
+          "type": "string",
+          "nullable": true
+        }
+      ],
+      "relations": [
+        {
+          "target": "Mission_Templates",
+          "type": "1:N",
+          "label": "used by missions"
+        }
+      ]
+    }
+  ]
+}

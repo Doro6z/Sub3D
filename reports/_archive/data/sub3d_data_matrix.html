@@ -1,0 +1,2595 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Sub3D — Authoring Studio | PIXEL PERFECT</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;700;900&family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/cytoscape/3.28.1/cytoscape.min.js"></script>
+<script src="https://unpkg.com/layout-base/layout-base.js"></script>
+<script src="https://unpkg.com/cose-base/cose-base.js"></script>
+<script src="https://unpkg.com/cytoscape-fcose/cytoscape-fcose.js"></script>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  :root {
+    --bg-deep: #020408; --bg-surface: #0a0e16; --bg-glass: rgba(15, 23, 42, 0.7);
+    --border: rgba(51, 65, 85, 0.4); --border-bright: rgba(56, 189, 248, 0.3);
+    --text-primary: #f8fafc; --text-secondary: #94a3b8; --text-dim: #475569;
+    --cyan: #06b6d4; --cyan-bright: #22d3ee; --ruby: #ef4444; --emerald: #10b981; --amber: #f59e0b;
+    --sidebar-w: 280px; --panel-w: 480px; --topbar-h: 60px;
+  }
+  html, body { height: 100%; overflow: hidden; font-family: 'Outfit', sans-serif; background: var(--bg-deep); color: var(--text-primary); }
+  .mono { font-family: 'JetBrains Mono', monospace; font-size: 11px; }
+  .glass { background: var(--bg-glass); backdrop-filter: blur(12px); border: 1px solid var(--border); }
+  
+  .btn {
+    font-size: 10px; font-weight: 800; padding: 10px 18px; border: 1px solid var(--border);
+    background: rgba(30, 41, 59, 0.5); color: var(--text-secondary); cursor: pointer;
+    text-transform: uppercase; letter-spacing: 0.15em; border-radius: 4px; transition: all 0.2s;
+  }
+  .btn:hover { border-color: var(--cyan); color: var(--text-primary); background: rgba(56, 189, 248, 0.1); }
+  .btn.primary { background: var(--cyan); color: #000; border-color: var(--cyan); }
+  .btn.danger { color: var(--ruby); border-color: rgba(239, 68, 68, 0.3); }
+
+  #topbar {
+    position: fixed; top: 0; left: 0; right: 0; height: var(--topbar-h);
+    background: var(--bg-surface); border-bottom: 1px solid var(--border);
+    display: flex; align-items: center; padding: 0 24px; z-index: 1000;
+  }
+  .logo { font-size: 16px; font-weight: 900; color: var(--cyan); letter-spacing: 0.3em; text-transform: uppercase; margin-right: 40px; }
+  #app-root { position: fixed; top: var(--topbar-h); left: 0; right: 0; bottom: 0; display: flex; }
+
+  #sidebar { width: var(--sidebar-w); flex-shrink: 0; background: var(--bg-surface); border-right: 1px solid var(--border); overflow-y: auto; }
+  .sb-header { padding: 16px 20px 8px; font-size: 10px; font-weight: 900; color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.2em; display: flex; align-items: center; justify-content: space-between; }
+  .sb-item { padding: 8px 20px 8px 36px; font-size: 12px; font-weight: 500; color: var(--text-secondary); cursor: pointer; display: flex; align-items: center; gap: 10px; }
+  .sb-item.selected { background: rgba(56, 189, 248, 0.08); color: var(--cyan-bright); font-weight: 700; border-left: 3px solid var(--cyan); }
+  .sb-dot { width: 6px; height: 6px; border-radius: 50%; }
+
+  #viewport { position: relative; flex: 1; background: var(--bg-deep); overflow: hidden; }
+  #cy { 
+    width: 100%; height: 100%; outline: none;
+    background-image: radial-gradient(circle, rgba(56, 189, 248, 0.05) 1px, transparent 1px);
+    background-size: 40px 40px;
+  }
+
+  #panel { width: var(--panel-w); flex-shrink: 0; border-left: 1px solid var(--border); display: flex; flex-direction: column; }
+  .panel-hdr { padding: 40px 30px 30px; }
+  .panel-tabs { display: flex; background: #000; padding: 4px; margin: 0 30px; border-radius: 6px; }
+  .tab-btn { flex: 1; border: none; background: transparent; padding: 12px; font-size: 10px; font-weight: 800; color: var(--text-dim); cursor: pointer; text-transform: uppercase; }
+  .tab-btn.active { background: var(--cyan); color: #000; border-radius: 4px; }
+  .panel-content { flex: 1; overflow-y: auto; padding: 30px; }
+
+  /* EXCEL VIEW */
+  #excel-view { position: absolute; inset: 0; background: var(--bg-deep); z-index: 500; display: none; overflow-y: auto; padding: 60px; }
+  .spreadsheet { width: 100%; border-collapse: collapse; font-size: 12px; border: 1px solid var(--border); }
+  .spreadsheet th { background: #000; color: var(--text-dim); padding: 14px; border: 1px solid var(--border); text-transform: uppercase; font-size: 9px; }
+  .spreadsheet input { width: 100%; height: 40px; border: none; background: transparent; color: var(--text-primary); padding: 0 14px; outline: none; }
+
+  ::-webkit-scrollbar { width: 6px; height: 6px; }
+  ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+</style>
+</head>
+<body>
+<div id="topbar">
+  <div class="logo">Sub3D <span style="font-weight:300; opacity:0.6">Authoring Studio</span></div>
+  <div style="display:flex; gap: 12px;">
+    <button class="btn active" id="btn-graph" onclick="setView('graph')">Graph</button>
+    <button class="btn" id="btn-excel" onclick="setView('excel')">Total Editor</button>
+  </div>
+  <div style="margin-left:auto; display:flex; gap: 16px;">
+    <button class="btn" onclick="exportSchema()">Download Archive</button>
+    <button class="btn primary" onclick="openNewTableModal()">+ Data Table</button>
+  </div>
+</div>
+<div id="app-root">
+  <div id="sidebar"><div id="sidebar-content"></div></div>
+  <div id="viewport">
+    <div id="cy"></div>
+    <div id="excel-view"></div>
+  </div>
+  <div id="panel" class="glass">
+    <div id="panel-hdr-area"></div>
+    <div id="panel-tabs-area" class="panel-tabs">
+      <button class="tab-btn active" onclick="setPanelTab('schema')">Structure</button>
+      <button class="tab-btn" onclick="setPanelTab('links')">Relations</button>
+      <button class="tab-btn" onclick="setPanelTab('data')">Raw Data</button>
+    </div>
+    <div id="panel-content-area" class="panel-content"></div>
+  </div>
+</div>
+<div id="modal-mask"><div id="modal" style="background:var(--bg-surface); padding:40px; border:1px solid var(--cyan)"></div></div>
+
+<script>
+const RAW_SCHEMA = {
+  "domains": [
+    {
+      "id": 1,
+      "name": "Hull & Authoring",
+      "color": "#4E9AF1"
+    },
+    {
+      "id": 2,
+      "name": "Modules & Stations",
+      "color": "#A855F7"
+    },
+    {
+      "id": 3,
+      "name": "Catalog & Product",
+      "color": "#06B6D4"
+    },
+    {
+      "id": 4,
+      "name": "Enemies & Fauna",
+      "color": "#EF4444"
+    },
+    {
+      "id": 5,
+      "name": "Items & Loot",
+      "color": "#F59E0B"
+    },
+    {
+      "id": 6,
+      "name": "World & Spawning",
+      "color": "#10B981"
+    },
+    {
+      "id": 7,
+      "name": "Breach & Flood",
+      "color": "#F97316"
+    },
+    {
+      "id": 8,
+      "name": "Mission & Rewards",
+      "color": "#8B5CF6"
+    },
+    {
+      "id": 9,
+      "name": "Difficulty & Economy",
+      "color": "#6B7280"
+    }
+  ],
+  "tables": [
+    {
+      "id": "Submarine_Archetypes",
+      "domain": 1,
+      "priority": "high",
+      "description": "Defines the available submarine classes — size envelope, style, capacity constraints.",
+      "columns": [
+        {
+          "name": "archetype_id",
+          "type": "string",
+          "pk": true
+        },
+        {
+          "name": "display_name",
+          "type": "string",
+          "nullable": false
+        },
+        {
+          "name": "length_m",
+          "type": "float",
+          "nullable": false
+        },
+        {
+          "name": "max_diameter_m",
+          "type": "float",
+          "nullable": false
+        },
+        {
+          "name": "max_deck_count",
+          "type": "int",
+          "nullable": false
+        },
+        {
+          "name": "section_family_id",
+          "type": "string",
+          "fk": "Hull_Section_Families.section_family_id"
+        },
+        {
+          "name": "style_tag",
+          "type": "string",
+          "nullable": true
+        },
+        {
+          "name": "notes",
+          "type": "string",
+          "nullable": true
+        }
+      ],
+      "relations": [
+        {
+          "target": "Hull_Section_Families",
+          "type": "N:1",
+          "label": "uses section family"
+        },
+        {
+          "target": "Structural_Bay_Configs",
+          "type": "1:N",
+          "label": "has bays"
+        },
+        {
+          "target": "Station_Definitions",
+          "type": "N:N",
+          "label": "supports stations"
+        },
+        {
+          "target": "Submarine_Catalog",
+          "type": "1:N",
+          "label": "catalogued as"
+        }
+      ],
+      "parentId": "domain_1"
+    },
+    {
+      "id": "Hull_Section_Families",
+      "domain": 1,
+      "priority": "high",
+      "description": "Hull cross-section profiles available to archetypes (circular, oval, rectangular, etc.).",
+      "columns": [
+        {
+          "name": "section_family_id",
+          "type": "string",
+          "pk": true
+        },
+        {
+          "name": "display_name",
+          "type": "string",
+          "nullable": false
+        },
+        {
+          "name": "roundness_range",
+          "type": "string",
+          "nullable": true
+        },
+        {
+          "name": "aspect_ratio_hint",
+          "type": "float",
+          "nullable": true
+        },
+        {
+          "name": "notes",
+          "type": "string",
+          "nullable": true
+        }
+      ],
+      "relations": [
+        {
+          "target": "Submarine_Archetypes",
+          "type": "1:N",
+          "label": "used by archetypes"
+        },
+        {
+          "target": "Control_Ring_Presets",
+          "type": "1:N",
+          "label": "constrains ring presets"
+        }
+      ],
+      "parentId": "domain_1"
+    },
+    {
+      "id": "Control_Ring_Presets",
+      "domain": 1,
+      "priority": "high",
+      "description": "Reusable Control Ring configurations for hull shape authoring.",
+      "columns": [
+        {
+          "name": "preset_id",
+          "type": "string",
+          "pk": true
+        },
+        {
+          "name": "display_name",
+          "type": "string",
+          "nullable": false
+        },
+        {
+          "name": "section_family_id",
+          "type": "string",
+          "fk": "Hull_Section_Families.section_family_id"
+        },
+        {
+          "name": "diameter_m",
+          "type": "float",
+          "nullable": false
+        },
+        {
+          "name": "width_height_ratio",
+          "type": "float",
+          "nullable": true
+        },
+        {
+          "name": "roundness",
+          "type": "float",
+          "nullable": true
+        },
+        {
+          "name": "thickness_m",
+          "type": "float",
+          "nullable": true
+        },
+        {
+          "name": "locked",
+          "type": "bool",
+          "nullable": false,
+          "default": "false"
+        }
+      ],
+      "relations": [
+        {
+          "target": "Hull_Section_Families",
+          "type": "N:1",
+          "label": "belongs to section family"
+        }
+      ],
+      "parentId": "domain_1"
+    },
+    {
+      "id": "Structural_Bay_Configs",
+      "domain": 1,
+      "priority": "high",
+      "description": "Structural bay configurations within a submarine archetype — spatial envelope and floor capacity.",
+      "columns": [
+        {
+          "name": "bay_config_id",
+          "type": "string",
+          "pk": true
+        },
+        {
+          "name": "archetype_id",
+          "type": "string",
+          "fk": "Submarine_Archetypes.archetype_id"
+        },
+        {
+          "name": "display_name",
+          "type": "string",
+          "nullable": false
+        },
+        {
+          "name": "length_m",
+          "type": "float",
+          "nullable": false
+        },
+        {
+          "name": "usable_height_m",
+          "type": "float",
+          "nullable": false
+        },
+        {
+          "name": "usable_width_m",
+          "type": "float",
+          "nullable": false
+        },
+        {
+          "name": "max_floor_count",
+          "type": "int",
+          "nullable": false
+        },
+        {
+          "name": "order_index",
+          "type": "int",
+          "nullable": false
+        }
+      ],
+      "relations": [
+        {
+          "target": "Submarine_Archetypes",
+          "type": "N:1",
+          "label": "belongs to archetype"
+        },
+        {
+          "target": "Floor_Region_Types",
+          "type": "1:N",
+          "label": "contains floor regions"
+        }
+      ],
+      "parentId": "domain_1"
+    },
+    {
+      "id": "Floor_Region_Types",
+      "domain": 1,
+      "priority": "high",
+      "description": "Types of walkable floor regions within a structural bay.",
+      "columns": [
+        {
+          "name": "region_type_id",
+          "type": "string",
+          "pk": true
+        },
+        {
+          "name": "display_name",
+          "type": "string",
+          "nullable": false
+        },
+        {
+          "name": "kind",
+          "type": "enum",
+          "values": [
+            "main_band",
+            "side_corridor",
+            "mezzanine",
+            "platform",
+            "half_level",
+            "technical"
+          ]
+        },
+        {
+          "name": "min_width_m",
+          "type": "float",
+          "nullable": true
+        },
+        {
+          "name": "min_headroom_m",
+          "type": "float",
+          "nullable": true
+        },
+        {
+          "name": "walkable",
+          "type": "bool",
+          "nullable": false,
+          "default": "true"
+        }
+      ],
+      "relations": [
+        {
+          "target": "Structural_Bay_Configs",
+          "type": "N:1",
+          "label": "scoped by bay config"
+        }
+      ],
+      "parentId": "domain_1"
+    },
+    {
+      "id": "Opening_Definitions",
+      "domain": 1,
+      "priority": "high",
+      "description": "Geometric opening types (doorway, hatch, shaft, deck cutout).",
+      "columns": [
+        {
+          "name": "opening_id",
+          "type": "string",
+          "pk": true
+        },
+        {
+          "name": "display_name",
+          "type": "string",
+          "nullable": false
+        },
+        {
+          "name": "kind",
+          "type": "enum",
+          "values": [
+            "doorway",
+            "hatch_opening",
+            "shaft",
+            "deck_cutout",
+            "airlock"
+          ]
+        },
+        {
+          "name": "min_width_m",
+          "type": "float",
+          "nullable": true
+        },
+        {
+          "name": "min_height_m",
+          "type": "float",
+          "nullable": true
+        },
+        {
+          "name": "vertical",
+          "type": "bool",
+          "nullable": false,
+          "default": "false"
+        }
+      ],
+      "relations": [
+        {
+          "target": "Connector_Definitions",
+          "type": "N:N",
+          "label": "used by connectors"
+        },
+        {
+          "target": "Closure_Definitions",
+          "type": "N:N",
+          "label": "closable by"
+        }
+      ],
+      "parentId": "domain_1"
+    },
+    {
+      "id": "Connector_Definitions",
+      "domain": 1,
+      "priority": "high",
+      "description": "Circulation element types (ramp, ladder, passage, trunk).",
+      "columns": [
+        {
+          "name": "connector_id",
+          "type": "string",
+          "pk": true
+        },
+        {
+          "name": "display_name",
+          "type": "string",
+          "nullable": false
+        },
+        {
+          "name": "kind",
+          "type": "enum",
+          "values": [
+            "ramp",
+            "ladder",
+            "passage",
+            "trunk",
+            "hatch_connector"
+          ]
+        },
+        {
+          "name": "traversal_cost",
+          "type": "float",
+          "nullable": true
+        },
+        {
+          "name": "vertical",
+          "type": "bool",
+          "nullable": false,
+          "default": "false"
+        }
+      ],
+      "relations": [
+        {
+          "target": "Opening_Definitions",
+          "type": "N:N",
+          "label": "uses openings"
+        }
+      ],
+      "parentId": "domain_1"
+    },
+    {
+      "id": "Closure_Definitions",
+      "domain": 1,
+      "priority": "high",
+      "description": "Closable elements (door, hatch, valve) — controls flood propagation.",
+      "columns": [
+        {
+          "name": "closure_id",
+          "type": "string",
+          "pk": true
+        },
+        {
+          "name": "display_name",
+          "type": "string",
+          "nullable": false
+        },
+        {
+          "name": "kind",
+          "type": "enum",
+          "values": [
+            "door",
+            "hatch",
+            "valve",
+            "blast_door"
+          ]
+        },
+        {
+          "name": "flood_stops",
+          "type": "bool",
+          "nullable": false,
+          "default": "true"
+        },
+        {
+          "name": "breakable",
+          "type": "bool",
+          "nullable": false,
+          "default": "false"
+        },
+        {
+          "name": "default_open",
+          "type": "bool",
+          "nullable": false,
+          "default": "false"
+        }
+      ],
+      "relations": [
+        {
+          "target": "Opening_Definitions",
+          "type": "N:N",
+          "label": "closes openings"
+        }
+      ],
+      "parentId": "domain_1"
+    },
+    {
+      "id": "Partition_Definitions",
+      "domain": 1,
+      "priority": "high",
+      "description": "Interior partition types — pressure bulkheads and internal walls.",
+      "columns": [
+        {
+          "name": "partition_id",
+          "type": "string",
+          "pk": true
+        },
+        {
+          "name": "display_name",
+          "type": "string",
+          "nullable": false
+        },
+        {
+          "name": "kind",
+          "type": "enum",
+          "values": [
+            "pressure_bulkhead",
+            "internal_wall"
+          ]
+        },
+        {
+          "name": "flood_barrier",
+          "type": "bool",
+          "nullable": false,
+          "default": "true"
+        },
+        {
+          "name": "destructible",
+          "type": "bool",
+          "nullable": false,
+          "default": "false"
+        },
+        {
+          "name": "base_resistance",
+          "type": "float",
+          "nullable": true
+        }
+      ],
+      "relations": [],
+      "parentId": "domain_1"
+    },
+    {
+      "id": "Outer_Envelope_Presets",
+      "domain": 1,
+      "priority": "medium",
+      "description": "Secondary envelope presets — Kiosk/Sail and similar integrated superstructures.",
+      "columns": [
+        {
+          "name": "envelope_id",
+          "type": "string",
+          "pk": true
+        },
+        {
+          "name": "display_name",
+          "type": "string",
+          "nullable": false
+        },
+        {
+          "name": "kind",
+          "type": "enum",
+          "values": [
+            "kiosk",
+            "sail",
+            "pod",
+            "sponson"
+          ]
+        },
+        {
+          "name": "has_trunk",
+          "type": "bool",
+          "nullable": false,
+          "default": "false"
+        },
+        {
+          "name": "modifies_silhouette",
+          "type": "bool",
+          "nullable": false,
+          "default": "true"
+        }
+      ],
+      "relations": [],
+      "parentId": "domain_1"
+    },
+    {
+      "id": "Station_Definitions",
+      "domain": 2,
+      "priority": "high",
+      "description": "Interior crew stations — Helm, Engine, Pump, Repair, Storage, etc.",
+      "columns": [
+        {
+          "name": "station_id",
+          "type": "string",
+          "pk": true
+        },
+        {
+          "name": "display_name",
+          "type": "string",
+          "nullable": false
+        },
+        {
+          "name": "kind",
+          "type": "enum",
+          "values": [
+            "helm",
+            "engine",
+            "pump",
+            "repair",
+            "sonar",
+            "storage",
+            "airlock_ctrl",
+            "generic"
+          ]
+        },
+        {
+          "name": "room_tag_id",
+          "type": "string",
+          "fk": "Room_Tag_Catalog.room_tag_id",
+          "nullable": true
+        },
+        {
+          "name": "interact_range",
+          "type": "float",
+          "nullable": true
+        },
+        {
+          "name": "requires_power",
+          "type": "bool",
+          "nullable": false,
+          "default": "true"
+        }
+      ],
+      "relations": [
+        {
+          "target": "Room_Tag_Catalog",
+          "type": "N:1",
+          "label": "tagged as"
+        },
+        {
+          "target": "Submarine_Archetypes",
+          "type": "N:N",
+          "label": "compatible with archetypes"
+        }
+      ],
+      "parentId": "domain_2"
+    },
+    {
+      "id": "Room_Tag_Catalog",
+      "domain": 2,
+      "priority": "high",
+      "description": "Functional room role tags — Navigation, Machine, Habitat, Ballast, Storage, etc.",
+      "columns": [
+        {
+          "name": "room_tag_id",
+          "type": "string",
+          "pk": true
+        },
+        {
+          "name": "display_name",
+          "type": "string",
+          "nullable": false
+        },
+        {
+          "name": "category",
+          "type": "enum",
+          "values": [
+            "navigation",
+            "machinery",
+            "habitat",
+            "ballast",
+            "storage",
+            "mission",
+            "access",
+            "technical"
+          ]
+        },
+        {
+          "name": "flood_priority",
+          "type": "int",
+          "nullable": true
+        },
+        {
+          "name": "notes",
+          "type": "string",
+          "nullable": true
+        }
+      ],
+      "relations": [
+        {
+          "target": "Station_Definitions",
+          "type": "1:N",
+          "label": "associated stations"
+        }
+      ],
+      "parentId": "domain_2"
+    },
+    {
+      "id": "External_Module_Definitions",
+      "domain": 2,
+      "priority": "medium",
+      "description": "External modules — propulsion, hydroplanes, rudders, stern pods.",
+      "columns": [
+        {
+          "name": "module_id",
+          "type": "string",
+          "pk": true
+        },
+        {
+          "name": "display_name",
+          "type": "string",
+          "nullable": false
+        },
+        {
+          "name": "kind",
+          "type": "enum",
+          "values": [
+            "propulsion",
+            "hydroplane",
+            "rudder",
+            "stern_pod",
+            "airlock",
+            "sonar_array"
+          ]
+        },
+        {
+          "name": "mass_kg",
+          "type": "float",
+          "nullable": true
+        },
+        {
+          "name": "drag_modifier",
+          "type": "float",
+          "nullable": true
+        },
+        {
+          "name": "destructible",
+          "type": "bool",
+          "nullable": false,
+          "default": "true"
+        }
+      ],
+      "relations": [],
+      "parentId": "domain_2"
+    },
+    {
+      "id": "Equipment_Module_Definitions",
+      "domain": 2,
+      "priority": "medium",
+      "description": "Internal equipment modules — ballast systems, pumps, machinery.",
+      "columns": [
+        {
+          "name": "equip_id",
+          "type": "string",
+          "pk": true
+        },
+        {
+          "name": "display_name",
+          "type": "string",
+          "nullable": false
+        },
+        {
+          "name": "kind",
+          "type": "enum",
+          "values": [
+            "ballast",
+            "pump",
+            "generator",
+            "o2_scrubber",
+            "reactor",
+            "misc"
+          ]
+        },
+        {
+          "name": "power_draw_kw",
+          "type": "float",
+          "nullable": true
+        },
+        {
+          "name": "repairable",
+          "type": "bool",
+          "nullable": false,
+          "default": "true"
+        }
+      ],
+      "relations": [],
+      "parentId": "domain_2"
+    },
+    {
+      "id": "Mission_Module_Definitions",
+      "domain": 2,
+      "priority": "low",
+      "description": "Mission-specific modules installed before or during gameplay.",
+      "columns": [
+        {
+          "name": "mission_module_id",
+          "type": "string",
+          "pk": true
+        },
+        {
+          "name": "display_name",
+          "type": "string",
+          "nullable": false
+        },
+        {
+          "name": "mission_type_tag",
+          "type": "string",
+          "nullable": true
+        },
+        {
+          "name": "one_time_use",
+          "type": "bool",
+          "nullable": false,
+          "default": "false"
+        }
+      ],
+      "relations": [
+        {
+          "target": "Mission_Templates",
+          "type": "N:N",
+          "label": "required by missions"
+        }
+      ],
+      "parentId": "domain_2"
+    },
+    {
+      "id": "Submarine_Catalog",
+      "domain": 3,
+      "priority": "medium",
+      "description": "Submarine offers available for unlock or purchase — links archetype to product layer.",
+      "columns": [
+        {
+          "name": "catalog_id",
+          "type": "string",
+          "pk": true
+        },
+        {
+          "name": "archetype_id",
+          "type": "string",
+          "fk": "Submarine_Archetypes.archetype_id"
+        },
+        {
+          "name": "display_name",
+          "type": "string",
+          "nullable": false
+        },
+        {
+          "name": "base_cost",
+          "type": "float",
+          "nullable": true
+        },
+        {
+          "name": "currency_type",
+          "type": "string",
+          "nullable": true
+        },
+        {
+          "name": "available_at",
+          "type": "enum",
+          "values": [
+            "lobby",
+            "shipyard",
+            "mission_reward",
+            "unlock"
+          ]
+        }
+      ],
+      "relations": [
+        {
+          "target": "Submarine_Archetypes",
+          "type": "N:1",
+          "label": "based on archetype"
+        },
+        {
+          "target": "Submarine_Unlock_Conditions",
+          "type": "1:N",
+          "label": "has unlock conditions"
+        }
+      ],
+      "parentId": "domain_3"
+    },
+    {
+      "id": "Submarine_Unlock_Conditions",
+      "domain": 3,
+      "priority": "low",
+      "description": "Conditions required to unlock a submarine catalog entry.",
+      "columns": [
+        {
+          "name": "condition_id",
+          "type": "string",
+          "pk": true
+        },
+        {
+          "name": "catalog_id",
+          "type": "string",
+          "fk": "Submarine_Catalog.catalog_id"
+        },
+        {
+          "name": "condition_type",
+          "type": "enum",
+          "values": [
+            "mission_complete",
+            "level_reached",
+            "item_owned",
+            "purchase"
+          ]
+        },
+        {
+          "name": "condition_ref",
+          "type": "string",
+          "nullable": true
+        },
+        {
+          "name": "notes",
+          "type": "string",
+          "nullable": true
+        }
+      ],
+      "relations": [
+        {
+          "target": "Submarine_Catalog",
+          "type": "N:1",
+          "label": "unlocks catalog entry"
+        }
+      ],
+      "parentId": "domain_3"
+    },
+    {
+      "id": "Owned_Submarine_States",
+      "domain": 3,
+      "priority": "low",
+      "description": "Per-player submarine ownership and customisation state. Post-Proto03.",
+      "columns": [
+        {
+          "name": "owned_id",
+          "type": "string",
+          "pk": true
+        },
+        {
+          "name": "player_id",
+          "type": "string",
+          "nullable": false
+        },
+        {
+          "name": "catalog_id",
+          "type": "string",
+          "fk": "Submarine_Catalog.catalog_id"
+        },
+        {
+          "name": "nickname",
+          "type": "string",
+          "nullable": true
+        },
+        {
+          "name": "damage_state",
+          "type": "float",
+          "nullable": true
+        },
+        {
+          "name": "last_mission_id",
+          "type": "string",
+          "nullable": true
+        }
+      ],
+      "relations": [
+        {
+          "target": "Submarine_Catalog",
+          "type": "N:1",
+          "label": "owns catalog entry"
+        }
+      ],
+      "parentId": "domain_3"
+    },
+    {
+      "id": "Enemy_Stats",
+      "domain": 4,
+      "priority": "high",
+      "description": "Base stats per enemy type — health, damage, speed, perception.",
+      "columns": [
+        {
+          "name": "enemy_id",
+          "type": "string",
+          "pk": true
+        },
+        {
+          "name": "display_name",
+          "type": "string",
+          "nullable": false
+        },
+        {
+          "name": "enemy_class",
+          "type": "enum",
+          "values": [
+            "surface",
+            "submarine",
+            "creature",
+            "drone",
+            "boss"
+          ]
+        },
+        {
+          "name": "base_hp",
+          "type": "float",
+          "nullable": false
+        },
+        {
+          "name": "base_damage",
+          "type": "float",
+          "nullable": false
+        },
+        {
+          "name": "base_speed",
+          "type": "float",
+          "nullable": false
+        },
+        {
+          "name": "detect_range_m",
+          "type": "float",
+          "nullable": true
+        },
+        {
+          "name": "breach_capable",
+          "type": "bool",
+          "nullable": false,
+          "default": "false"
+        }
+      ],
+      "relations": [
+        {
+          "target": "Enemy_Variants",
+          "type": "1:N",
+          "label": "has variants"
+        },
+        {
+          "target": "Enemy_Loot_Weights",
+          "type": "1:N",
+          "label": "drops loot"
+        }
+      ],
+      "parentId": "domain_4"
+    },
+    {
+      "id": "Enemy_Variants",
+      "domain": 4,
+      "priority": "high",
+      "description": "Variants of base enemy types — elite, patrol, boss, ambush, etc.",
+      "columns": [
+        {
+          "name": "variant_id",
+          "type": "string",
+          "pk": true
+        },
+        {
+          "name": "enemy_id",
+          "type": "string",
+          "fk": "Enemy_Stats.enemy_id"
+        },
+        {
+          "name": "variant_tag",
+          "type": "enum",
+          "values": [
+            "standard",
+            "elite",
+            "patrol",
+            "ambush",
+            "boss",
+            "escort"
+          ]
+        },
+        {
+          "name": "hp_mult",
+          "type": "float",
+          "nullable": false,
+          "default": "1.0"
+        },
+        {
+          "name": "damage_mult",
+          "type": "float",
+          "nullable": false,
+          "default": "1.0"
+        },
+        {
+          "name": "speed_mult",
+          "type": "float",
+          "nullable": false,
+          "default": "1.0"
+        },
+        {
+          "name": "xp_reward",
+          "type": "float",
+          "nullable": true
+        }
+      ],
+      "relations": [
+        {
+          "target": "Enemy_Stats",
+          "type": "N:1",
+          "label": "variant of"
+        }
+      ],
+      "parentId": "domain_4"
+    },
+    {
+      "id": "Enemy_Loot_Weights",
+      "domain": 4,
+      "priority": "medium",
+      "description": "Loot table assignment per enemy type with weight.",
+      "columns": [
+        {
+          "name": "entry_id",
+          "type": "string",
+          "pk": true
+        },
+        {
+          "name": "enemy_id",
+          "type": "string",
+          "fk": "Enemy_Stats.enemy_id"
+        },
+        {
+          "name": "loot_table_id",
+          "type": "string",
+          "fk": "Loot_Tables.loot_table_id"
+        },
+        {
+          "name": "weight",
+          "type": "float",
+          "nullable": false,
+          "default": "1.0"
+        }
+      ],
+      "relations": [
+        {
+          "target": "Enemy_Stats",
+          "type": "N:1",
+          "label": "assigned to enemy"
+        },
+        {
+          "target": "Loot_Tables",
+          "type": "N:1",
+          "label": "references loot table"
+        }
+      ],
+      "parentId": "domain_4"
+    },
+    {
+      "id": "Fauna_Definitions",
+      "domain": 4,
+      "priority": "high",
+      "description": "Non-hostile fauna — Hunter, Follower, FishSchool, Plankton. Identity layer.",
+      "columns": [
+        {
+          "name": "fauna_id",
+          "type": "string",
+          "pk": true
+        },
+        {
+          "name": "display_name",
+          "type": "string",
+          "nullable": false
+        },
+        {
+          "name": "fauna_type",
+          "type": "enum",
+          "values": [
+            "hunter",
+            "follower",
+            "fish_school",
+            "plankton",
+            "ambient"
+          ]
+        },
+        {
+          "name": "hostile",
+          "type": "bool",
+          "nullable": false,
+          "default": "false"
+        },
+        {
+          "name": "flock_size_min",
+          "type": "int",
+          "nullable": true
+        },
+        {
+          "name": "flock_size_max",
+          "type": "int",
+          "nullable": true
+        }
+      ],
+      "relations": [
+        {
+          "target": "Fauna_Behavior_Params",
+          "type": "1:N",
+          "label": "has behavior params"
+        }
+      ],
+      "parentId": "domain_4"
+    },
+    {
+      "id": "Fauna_Behavior_Params",
+      "domain": 4,
+      "priority": "high",
+      "description": "Movement and behavior tuning per fauna type.",
+      "columns": [
+        {
+          "name": "param_id",
+          "type": "string",
+          "pk": true
+        },
+        {
+          "name": "fauna_id",
+          "type": "string",
+          "fk": "Fauna_Definitions.fauna_id"
+        },
+        {
+          "name": "cruise_speed",
+          "type": "float",
+          "nullable": false
+        },
+        {
+          "name": "flee_speed",
+          "type": "float",
+          "nullable": true
+        },
+        {
+          "name": "detection_range_m",
+          "type": "float",
+          "nullable": true
+        },
+        {
+          "name": "flee_threshold",
+          "type": "float",
+          "nullable": true
+        },
+        {
+          "name": "depth_min_m",
+          "type": "float",
+          "nullable": true
+        },
+        {
+          "name": "depth_max_m",
+          "type": "float",
+          "nullable": true
+        }
+      ],
+      "relations": [
+        {
+          "target": "Fauna_Definitions",
+          "type": "N:1",
+          "label": "params for fauna"
+        }
+      ],
+      "parentId": "domain_4"
+    },
+    {
+      "id": "Items_Stats",
+      "domain": 5,
+      "priority": "high",
+      "description": "All game items — stats, category, weight, stack size.",
+      "columns": [
+        {
+          "name": "item_id",
+          "type": "string",
+          "pk": true
+        },
+        {
+          "name": "display_name",
+          "type": "string",
+          "nullable": false
+        },
+        {
+          "name": "category_id",
+          "type": "string",
+          "fk": "Item_Categories.category_id"
+        },
+        {
+          "name": "weight_kg",
+          "type": "float",
+          "nullable": true
+        },
+        {
+          "name": "stack_size",
+          "type": "int",
+          "nullable": false,
+          "default": "1"
+        },
+        {
+          "name": "consumable",
+          "type": "bool",
+          "nullable": false,
+          "default": "false"
+        },
+        {
+          "name": "base_value",
+          "type": "float",
+          "nullable": true
+        },
+        {
+          "name": "mission_item",
+          "type": "bool",
+          "nullable": false,
+          "default": "false"
+        }
+      ],
+      "relations": [
+        {
+          "target": "Item_Categories",
+          "type": "N:1",
+          "label": "belongs to category"
+        },
+        {
+          "target": "Loot_Table_Entries",
+          "type": "1:N",
+          "label": "appears in loot"
+        }
+      ],
+      "parentId": "domain_5"
+    },
+    {
+      "id": "Item_Categories",
+      "domain": 5,
+      "priority": "high",
+      "description": "Item category definitions — Repair, Ammo, Consumable, Mission, Upgrade.",
+      "columns": [
+        {
+          "name": "category_id",
+          "type": "string",
+          "pk": true
+        },
+        {
+          "name": "display_name",
+          "type": "string",
+          "nullable": false
+        },
+        {
+          "name": "kind",
+          "type": "enum",
+          "values": [
+            "repair",
+            "ammo",
+            "consumable",
+            "mission",
+            "upgrade",
+            "resource",
+            "key"
+          ]
+        },
+        {
+          "name": "stackable",
+          "type": "bool",
+          "nullable": false,
+          "default": "true"
+        }
+      ],
+      "relations": [
+        {
+          "target": "Items_Stats",
+          "type": "1:N",
+          "label": "categorizes items"
+        }
+      ],
+      "parentId": "domain_5"
+    },
+    {
+      "id": "Loot_Tables",
+      "domain": 5,
+      "priority": "high",
+      "description": "Named loot tables — referenced by enemies, containers, wrecks.",
+      "columns": [
+        {
+          "name": "loot_table_id",
+          "type": "string",
+          "pk": true
+        },
+        {
+          "name": "display_name",
+          "type": "string",
+          "nullable": false
+        },
+        {
+          "name": "context",
+          "type": "enum",
+          "values": [
+            "enemy_drop",
+            "container",
+            "wreck",
+            "mission_reward",
+            "biome_ambient"
+          ]
+        },
+        {
+          "name": "rolls_min",
+          "type": "int",
+          "nullable": false,
+          "default": "1"
+        },
+        {
+          "name": "rolls_max",
+          "type": "int",
+          "nullable": false,
+          "default": "3"
+        }
+      ],
+      "relations": [
+        {
+          "target": "Loot_Table_Entries",
+          "type": "1:N",
+          "label": "contains entries"
+        },
+        {
+          "target": "Enemy_Loot_Weights",
+          "type": "1:N",
+          "label": "assigned to enemies"
+        }
+      ],
+      "parentId": "domain_5"
+    },
+    {
+      "id": "Loot_Table_Entries",
+      "domain": 5,
+      "priority": "high",
+      "description": "Individual entries in a loot table — item, weight, quantity range.",
+      "columns": [
+        {
+          "name": "entry_id",
+          "type": "string",
+          "pk": true
+        },
+        {
+          "name": "loot_table_id",
+          "type": "string",
+          "fk": "Loot_Tables.loot_table_id"
+        },
+        {
+          "name": "item_id",
+          "type": "string",
+          "fk": "Items_Stats.item_id"
+        },
+        {
+          "name": "weight",
+          "type": "float",
+          "nullable": false,
+          "default": "1.0"
+        },
+        {
+          "name": "qty_min",
+          "type": "int",
+          "nullable": false,
+          "default": "1"
+        },
+        {
+          "name": "qty_max",
+          "type": "int",
+          "nullable": false,
+          "default": "1"
+        },
+        {
+          "name": "conditional",
+          "type": "string",
+          "nullable": true
+        }
+      ],
+      "relations": [
+        {
+          "target": "Loot_Tables",
+          "type": "N:1",
+          "label": "part of loot table"
+        },
+        {
+          "target": "Items_Stats",
+          "type": "N:1",
+          "label": "references item"
+        }
+      ],
+      "parentId": "domain_5"
+    },
+    {
+      "id": "Biome_Definitions",
+      "domain": 6,
+      "priority": "high",
+      "description": "World biome types — abyssal, thermocline, reef, trench, etc.",
+      "columns": [
+        {
+          "name": "biome_id",
+          "type": "string",
+          "pk": true
+        },
+        {
+          "name": "display_name",
+          "type": "string",
+          "nullable": false
+        },
+        {
+          "name": "kind",
+          "type": "enum",
+          "values": [
+            "abyssal",
+            "thermocline",
+            "reef",
+            "trench",
+            "open_ocean",
+            "coastal",
+            "tunnel"
+          ]
+        },
+        {
+          "name": "depth_min_m",
+          "type": "float",
+          "nullable": true
+        },
+        {
+          "name": "depth_max_m",
+          "type": "float",
+          "nullable": true
+        }
+      ],
+      "relations": [
+        {
+          "target": "Biome_Parameters",
+          "type": "1:N",
+          "label": "has parameters"
+        },
+        {
+          "target": "Spawn_Tables",
+          "type": "1:N",
+          "label": "has spawn tables"
+        },
+        {
+          "target": "Mission_Templates",
+          "type": "1:N",
+          "label": "hosts missions"
+        }
+      ],
+      "parentId": "domain_6"
+    },
+    {
+      "id": "Biome_Parameters",
+      "domain": 6,
+      "priority": "high",
+      "description": "Per-biome environmental parameters — visibility, currents, ambient danger.",
+      "columns": [
+        {
+          "name": "param_id",
+          "type": "string",
+          "pk": true
+        },
+        {
+          "name": "biome_id",
+          "type": "string",
+          "fk": "Biome_Definitions.biome_id"
+        },
+        {
+          "name": "visibility_m",
+          "type": "float",
+          "nullable": false
+        },
+        {
+          "name": "current_speed",
+          "type": "float",
+          "nullable": true
+        },
+        {
+          "name": "ambient_pressure",
+          "type": "float",
+          "nullable": true
+        },
+        {
+          "name": "danger_level",
+          "type": "int",
+          "nullable": false,
+          "default": "1"
+        },
+        {
+          "name": "sonar_noise",
+          "type": "float",
+          "nullable": true
+        }
+      ],
+      "relations": [
+        {
+          "target": "Biome_Definitions",
+          "type": "N:1",
+          "label": "parameters of biome"
+        }
+      ],
+      "parentId": "domain_6"
+    },
+    {
+      "id": "Spawn_Tables",
+      "domain": 6,
+      "priority": "high",
+      "description": "Spawn tables per biome, zone, or trigger context.",
+      "columns": [
+        {
+          "name": "spawn_table_id",
+          "type": "string",
+          "pk": true
+        },
+        {
+          "name": "biome_id",
+          "type": "string",
+          "fk": "Biome_Definitions.biome_id",
+          "nullable": true
+        },
+        {
+          "name": "zone_id",
+          "type": "string",
+          "fk": "World_Zone_Definitions.zone_id",
+          "nullable": true
+        },
+        {
+          "name": "context",
+          "type": "enum",
+          "values": [
+            "ambient",
+            "triggered",
+            "boss_room",
+            "patrol",
+            "scripted"
+          ]
+        },
+        {
+          "name": "max_concurrent",
+          "type": "int",
+          "nullable": true
+        }
+      ],
+      "relations": [
+        {
+          "target": "Biome_Definitions",
+          "type": "N:1",
+          "label": "scoped to biome"
+        },
+        {
+          "target": "World_Zone_Definitions",
+          "type": "N:1",
+          "label": "scoped to zone"
+        },
+        {
+          "target": "Spawn_Table_Entries",
+          "type": "1:N",
+          "label": "contains entries"
+        }
+      ],
+      "parentId": "domain_6"
+    },
+    {
+      "id": "Spawn_Table_Entries",
+      "domain": 6,
+      "priority": "high",
+      "description": "Individual spawn entries — enemy or fauna with weight and conditions.",
+      "columns": [
+        {
+          "name": "entry_id",
+          "type": "string",
+          "pk": true
+        },
+        {
+          "name": "spawn_table_id",
+          "type": "string",
+          "fk": "Spawn_Tables.spawn_table_id"
+        },
+        {
+          "name": "entity_type",
+          "type": "enum",
+          "values": [
+            "enemy",
+            "fauna"
+          ]
+        },
+        {
+          "name": "entity_id",
+          "type": "string",
+          "nullable": false
+        },
+        {
+          "name": "weight",
+          "type": "float",
+          "nullable": false,
+          "default": "1.0"
+        },
+        {
+          "name": "count_min",
+          "type": "int",
+          "nullable": false,
+          "default": "1"
+        },
+        {
+          "name": "count_max",
+          "type": "int",
+          "nullable": false,
+          "default": "1"
+        },
+        {
+          "name": "condition",
+          "type": "string",
+          "nullable": true
+        }
+      ],
+      "relations": [
+        {
+          "target": "Spawn_Tables",
+          "type": "N:1",
+          "label": "part of spawn table"
+        },
+        {
+          "target": "Enemy_Stats",
+          "type": "N:1",
+          "label": "spawns enemy"
+        },
+        {
+          "target": "Fauna_Definitions",
+          "type": "N:1",
+          "label": "spawns fauna"
+        }
+      ],
+      "parentId": "domain_6"
+    },
+    {
+      "id": "World_Zone_Definitions",
+      "domain": 6,
+      "priority": "medium",
+      "description": "World zones — named segments of the game world or tunnel network.",
+      "columns": [
+        {
+          "name": "zone_id",
+          "type": "string",
+          "pk": true
+        },
+        {
+          "name": "display_name",
+          "type": "string",
+          "nullable": false
+        },
+        {
+          "name": "biome_id",
+          "type": "string",
+          "fk": "Biome_Definitions.biome_id",
+          "nullable": true
+        },
+        {
+          "name": "depth_m",
+          "type": "float",
+          "nullable": true
+        },
+        {
+          "name": "danger_rating",
+          "type": "int",
+          "nullable": true
+        }
+      ],
+      "relations": [
+        {
+          "target": "Biome_Definitions",
+          "type": "N:1",
+          "label": "located in biome"
+        },
+        {
+          "target": "Spawn_Tables",
+          "type": "1:N",
+          "label": "has spawn tables"
+        }
+      ],
+      "parentId": "domain_6"
+    },
+    {
+      "id": "Breach_Definitions",
+      "domain": 7,
+      "priority": "high",
+      "description": "Breach types — cause, geometry, and initial severity.",
+      "columns": [
+        {
+          "name": "breach_id",
+          "type": "string",
+          "pk": true
+        },
+        {
+          "name": "display_name",
+          "type": "string",
+          "nullable": false
+        },
+        {
+          "name": "cause",
+          "type": "enum",
+          "values": [
+            "impact",
+            "explosion",
+            "structural_failure",
+            "torpedo",
+            "creature",
+            "corrosion"
+          ]
+        },
+        {
+          "name": "default_severity",
+          "type": "string",
+          "fk": "Breach_Severity_Levels.severity_id"
+        },
+        {
+          "name": "size_class",
+          "type": "enum",
+          "values": [
+            "pinhole",
+            "small",
+            "medium",
+            "large",
+            "critical"
+          ]
+        },
+        {
+          "name": "repairable",
+          "type": "bool",
+          "nullable": false,
+          "default": "true"
+        }
+      ],
+      "relations": [
+        {
+          "target": "Breach_Severity_Levels",
+          "type": "N:1",
+          "label": "default severity"
+        },
+        {
+          "target": "Repair_Action_Definitions",
+          "type": "N:N",
+          "label": "repaired by"
+        }
+      ],
+      "parentId": "domain_7"
+    },
+    {
+      "id": "Breach_Severity_Levels",
+      "domain": 7,
+      "priority": "high",
+      "description": "Severity levels for breaches — defines flood rate and repair difficulty.",
+      "columns": [
+        {
+          "name": "severity_id",
+          "type": "string",
+          "pk": true
+        },
+        {
+          "name": "display_name",
+          "type": "string",
+          "nullable": false
+        },
+        {
+          "name": "flood_rate_mult",
+          "type": "float",
+          "nullable": false
+        },
+        {
+          "name": "repair_time_mult",
+          "type": "float",
+          "nullable": false
+        },
+        {
+          "name": "auto_worsen",
+          "type": "bool",
+          "nullable": false,
+          "default": "false"
+        },
+        {
+          "name": "fatal_threshold",
+          "type": "bool",
+          "nullable": false,
+          "default": "false"
+        }
+      ],
+      "relations": [
+        {
+          "target": "Breach_Definitions",
+          "type": "1:N",
+          "label": "applied to breaches"
+        },
+        {
+          "target": "Repair_Action_Definitions",
+          "type": "N:N",
+          "label": "determines repair actions"
+        }
+      ],
+      "parentId": "domain_7"
+    },
+    {
+      "id": "Flood_Compartment_Config",
+      "domain": 7,
+      "priority": "high",
+      "description": "Flood propagation config per compartment type — capacity and propagation resistance.",
+      "columns": [
+        {
+          "name": "config_id",
+          "type": "string",
+          "pk": true
+        },
+        {
+          "name": "room_tag_id",
+          "type": "string",
+          "fk": "Room_Tag_Catalog.room_tag_id",
+          "nullable": true
+        },
+        {
+          "name": "volume_m3",
+          "type": "float",
+          "nullable": true
+        },
+        {
+          "name": "flood_rate_base",
+          "type": "float",
+          "nullable": false
+        },
+        {
+          "name": "propagation_resistance",
+          "type": "float",
+          "nullable": true
+        },
+        {
+          "name": "critical_level_pct",
+          "type": "float",
+          "nullable": false,
+          "default": "0.8"
+        }
+      ],
+      "relations": [
+        {
+          "target": "Room_Tag_Catalog",
+          "type": "N:1",
+          "label": "config for room type"
+        }
+      ],
+      "parentId": "domain_7"
+    },
+    {
+      "id": "Repair_Action_Definitions",
+      "domain": 7,
+      "priority": "high",
+      "description": "Repair action types — seal, patch, weld, pump.",
+      "columns": [
+        {
+          "name": "repair_id",
+          "type": "string",
+          "pk": true
+        },
+        {
+          "name": "display_name",
+          "type": "string",
+          "nullable": false
+        },
+        {
+          "name": "kind",
+          "type": "enum",
+          "values": [
+            "seal",
+            "patch",
+            "weld",
+            "pump",
+            "reinforce"
+          ]
+        },
+        {
+          "name": "base_duration_s",
+          "type": "float",
+          "nullable": false
+        },
+        {
+          "name": "required_item",
+          "type": "string",
+          "fk": "Items_Stats.item_id",
+          "nullable": true
+        },
+        {
+          "name": "perm_fix",
+          "type": "bool",
+          "nullable": false,
+          "default": "false"
+        }
+      ],
+      "relations": [
+        {
+          "target": "Items_Stats",
+          "type": "N:1",
+          "label": "consumes item"
+        },
+        {
+          "target": "Breach_Definitions",
+          "type": "N:N",
+          "label": "repairs breaches"
+        },
+        {
+          "target": "Breach_Severity_Levels",
+          "type": "N:N",
+          "label": "applicable to severities"
+        }
+      ],
+      "parentId": "domain_7"
+    },
+    {
+      "id": "Mission_Templates",
+      "domain": 8,
+      "priority": "medium",
+      "description": "Mission definitions — objective type, biome, constraints.",
+      "columns": [
+        {
+          "name": "mission_id",
+          "type": "string",
+          "pk": true
+        },
+        {
+          "name": "display_name",
+          "type": "string",
+          "nullable": false
+        },
+        {
+          "name": "biome_id",
+          "type": "string",
+          "fk": "Biome_Definitions.biome_id",
+          "nullable": true
+        },
+        {
+          "name": "objective_id",
+          "type": "string",
+          "fk": "Objective_Definitions.objective_id"
+        },
+        {
+          "name": "difficulty_id",
+          "type": "string",
+          "fk": "Difficulty_Presets.preset_id",
+          "nullable": true
+        },
+        {
+          "name": "time_limit_s",
+          "type": "float",
+          "nullable": true
+        },
+        {
+          "name": "coop_max",
+          "type": "int",
+          "nullable": true,
+          "default": "4"
+        }
+      ],
+      "relations": [
+        {
+          "target": "Biome_Definitions",
+          "type": "N:1",
+          "label": "takes place in biome"
+        },
+        {
+          "target": "Objective_Definitions",
+          "type": "N:1",
+          "label": "has objective type"
+        },
+        {
+          "target": "Mission_Rewards",
+          "type": "1:N",
+          "label": "grants rewards"
+        },
+        {
+          "target": "Mission_Module_Definitions",
+          "type": "N:N",
+          "label": "requires modules"
+        }
+      ],
+      "parentId": "domain_8"
+    },
+    {
+      "id": "Mission_Rewards",
+      "domain": 8,
+      "priority": "medium",
+      "description": "Rewards granted on mission completion — items, XP, unlocks.",
+      "columns": [
+        {
+          "name": "reward_id",
+          "type": "string",
+          "pk": true
+        },
+        {
+          "name": "mission_id",
+          "type": "string",
+          "fk": "Mission_Templates.mission_id"
+        },
+        {
+          "name": "reward_type",
+          "type": "enum",
+          "values": [
+            "item",
+            "xp",
+            "credits",
+            "unlock",
+            "catalog_entry"
+          ]
+        },
+        {
+          "name": "ref_id",
+          "type": "string",
+          "nullable": true
+        },
+        {
+          "name": "qty",
+          "type": "int",
+          "nullable": false,
+          "default": "1"
+        },
+        {
+          "name": "on_condition",
+          "type": "enum",
+          "values": [
+            "completion",
+            "perfect",
+            "bonus",
+            "first_time"
+          ],
+          "nullable": true
+        }
+      ],
+      "relations": [
+        {
+          "target": "Mission_Templates",
+          "type": "N:1",
+          "label": "reward for mission"
+        },
+        {
+          "target": "Items_Stats",
+          "type": "N:1",
+          "label": "item reward"
+        }
+      ],
+      "parentId": "domain_8"
+    },
+    {
+      "id": "Objective_Definitions",
+      "domain": 8,
+      "priority": "medium",
+      "description": "Mission objective type definitions — destroy, retrieve, escort, survive.",
+      "columns": [
+        {
+          "name": "objective_id",
+          "type": "string",
+          "pk": true
+        },
+        {
+          "name": "display_name",
+          "type": "string",
+          "nullable": false
+        },
+        {
+          "name": "kind",
+          "type": "enum",
+          "values": [
+            "destroy",
+            "retrieve",
+            "escort",
+            "survive",
+            "investigate",
+            "defend",
+            "reach"
+          ]
+        },
+        {
+          "name": "timed",
+          "type": "bool",
+          "nullable": false,
+          "default": "false"
+        },
+        {
+          "name": "notes",
+          "type": "string",
+          "nullable": true
+        }
+      ],
+      "relations": [
+        {
+          "target": "Mission_Templates",
+          "type": "1:N",
+          "label": "used by missions"
+        }
+      ],
+      "parentId": "domain_8"
+    },
+    {
+      "id": "Difficulty_Curves",
+      "domain": 9,
+      "priority": "medium",
+      "description": "Per-parameter difficulty scaling curves — enemy HP, flood speed, repair time, etc.",
+      "columns": [
+        {
+          "name": "curve_id",
+          "type": "string",
+          "pk": true
+        },
+        {
+          "name": "preset_id",
+          "type": "string",
+          "fk": "Difficulty_Presets.preset_id"
+        },
+        {
+          "name": "parameter",
+          "type": "enum",
+          "values": [
+            "enemy_hp",
+            "enemy_damage",
+            "flood_rate",
+            "repair_time",
+            "spawn_rate",
+            "item_scarcity"
+          ]
+        },
+        {
+          "name": "multiplier",
+          "type": "float",
+          "nullable": false,
+          "default": "1.0"
+        },
+        {
+          "name": "curve_type",
+          "type": "enum",
+          "values": [
+            "flat",
+            "linear",
+            "exponential"
+          ]
+        }
+      ],
+      "relations": [
+        {
+          "target": "Difficulty_Presets",
+          "type": "N:1",
+          "label": "belongs to preset"
+        }
+      ],
+      "parentId": "domain_9"
+    },
+    {
+      "id": "Difficulty_Presets",
+      "domain": 9,
+      "priority": "medium",
+      "description": "Global difficulty presets — Normal, Hard, Extreme.",
+      "columns": [
+        {
+          "name": "preset_id",
+          "type": "string",
+          "pk": true
+        },
+        {
+          "name": "display_name",
+          "type": "string",
+          "nullable": false
+        },
+        {
+          "name": "order_index",
+          "type": "int",
+          "nullable": false
+        },
+        {
+          "name": "unlocked",
+          "type": "bool",
+          "nullable": false,
+          "default": "true"
+        }
+      ],
+      "relations": [
+        {
+          "target": "Difficulty_Curves",
+          "type": "1:N",
+          "label": "has curves"
+        },
+        {
+          "target": "Mission_Templates",
+          "type": "1:N",
+          "label": "applied to missions"
+        }
+      ],
+      "parentId": "domain_9"
+    },
+    {
+      "id": "Economy_Config",
+      "domain": 9,
+      "priority": "low",
+      "description": "Global economy parameters — base prices, inflation, credit sources.",
+      "columns": [
+        {
+          "name": "config_key",
+          "type": "string",
+          "pk": true
+        },
+        {
+          "name": "display_name",
+          "type": "string",
+          "nullable": false
+        },
+        {
+          "name": "value_float",
+          "type": "float",
+          "nullable": true
+        },
+        {
+          "name": "value_string",
+          "type": "string",
+          "nullable": true
+        },
+        {
+          "name": "notes",
+          "type": "string",
+          "nullable": true
+        }
+      ],
+      "relations": [],
+      "parentId": "domain_9"
+    },
+    {
+      "id": "Progression_Unlocks",
+      "domain": 9,
+      "priority": "low",
+      "description": "XP-gated or progression-based unlock tree — submarines, modules, missions.",
+      "columns": [
+        {
+          "name": "unlock_id",
+          "type": "string",
+          "pk": true
+        },
+        {
+          "name": "display_name",
+          "type": "string",
+          "nullable": false
+        },
+        {
+          "name": "unlock_type",
+          "type": "enum",
+          "values": [
+            "submarine",
+            "module",
+            "mission",
+            "item",
+            "cosmetic"
+          ]
+        },
+        {
+          "name": "ref_id",
+          "type": "string",
+          "nullable": false
+        },
+        {
+          "name": "xp_required",
+          "type": "float",
+          "nullable": true
+        },
+        {
+          "name": "prereq_unlock_id",
+          "type": "string",
+          "fk": "Progression_Unlocks.unlock_id",
+          "nullable": true
+        }
+      ],
+      "relations": [
+        {
+          "target": "Progression_Unlocks",
+          "type": "N:1",
+          "label": "requires unlock"
+        }
+      ],
+      "parentId": "domain_9"
+    }
+  ]
+};
+let SCHEMA = JSON.parse(JSON.stringify(RAW_SCHEMA));
+
+let cy, activeTab = 'schema', selectedId = null, currentView = 'graph';
+const STORAGE_KEY = 'sub3d_studio_ultimate_v2';
+let positions = JSON.parse(localStorage.getItem(STORAGE_KEY) || '{}');
+
+window.onload = () => { renderSidebar(); initGraph(); renderGlobalManager(); };
+
+function initGraph() {
+  cy = cytoscape({
+    container: document.getElementById('cy'),
+    elements: buildElements(),
+    wheelSensitivity: 0.1, minZoom: 0.05, maxZoom: 4,
+    style: [
+      { selector: 'node', style: { 
+        'background-color': 'data(color)', 'background-opacity': 0.1, 'border-color': 'data(color)', 'border-width': 2,
+        'label': 'data(label)', 'color': '#fff', 'font-size': '12px', 'font-family': 'Inter, sans-serif', 'font-weight': 'bold',
+        'text-valign': 'center', 'text-halign': 'center', 'width': '280px', 'height': '80px',
+        'shape': 'roundrectangle', 'text-wrap': 'wrap', 'text-max-width': '240px', 'text-justification': 'center'
+      } },
+      { selector: 'node[?isParent]', style: { 'background-opacity': 0.03, 'border-width': 1.5, 'border-color': 'data(color)', 'label': 'data(label)', 'text-valign': 'top', 'padding': 80, 'text-margin-y': -25, 'font-weight': '900', 'color': 'data(color)', 'font-size': '15px' } },
+      { selector: 'node:selected, node.highlighted', style: { 'background-opacity': 0.35, 'border-width': 5, 'z-index': 100 } },
+      { selector: 'edge', style: { 'width': 2, 'line-color': '#1e293b', 'target-arrow-shape': 'triangle', 'target-arrow-color': '#1e293b', 'curve-style': 'bezier', 'label': 'data(label)', 'font-size': '10px', 'color': '#94a3b8', 'text-background-opacity': 1, 'text-background-color': '#020408' } }
+    ]
+  });
+
+  cy.nodes().forEach(n => { if (positions[n.id()]) n.position(positions[n.id()]); });
+  
+  // MMB PAN
+  let mmb = false, last = null;
+  cy.on('mousedown', e => { if (e.originalEvent.button === 1) { mmb=true; last={x:e.clientX, y:e.clientY}; } });
+  window.addEventListener('mousemove', e => { if(mmb && last){ cy.panBy({ x: e.clientX-last.x, y: e.clientY-last.y }); last={x:e.clientX, y:e.clientY}; } });
+  window.addEventListener('mouseup', e => { if(e.button===1) mmb=false; });
+
+  cy.on('tap', 'node', e => { if(e.target.data('isParent')) selectDomain(parseInt(e.target.id().replace('domain_',''))); else select(e.target.id()); });
+  cy.on('tap', e => { if(e.target === cy) renderGlobalManager(); });
+
+  // FORCE RE-RENDER FOR FONTS
+  setTimeout(() => { cy.style().update(); }, 500); 
+}
+
+function buildElements() {
+  const els = [];
+  SCHEMA.domains.forEach(d => els.push({ data: { id: `domain_${d.id}`, label: d.name.toUpperCase(), color: d.color, isParent: true } }));
+  SCHEMA.tables.forEach(t => { const d = SCHEMA.domains.find(x => x.id === t.domain); els.push({ data: { id: t.id, label: t.id.replace(/_/g, ' '), parent: `domain_${t.domain}`, color: d?.color || '#333' } }); });
+  SCHEMA.tables.forEach(t => (t.relations || []).forEach(r => els.push({ data: { id: `${t.id}_${r.target}`, source: t.id, target: r.target, label: r.type } })));
+  return els;
+}
+
+function select(id) {
+  selectedId = id; const t = SCHEMA.tables.find(x => x.id === id); const d = SCHEMA.domains.find(x => x.id === t.domain);
+  document.getElementById('panel-hdr-area').innerHTML = `<div class="panel-hdr"><div style="font-size:10px; font-weight:900; color:${d.color}">${d.name.toUpperCase()}</div><div style="font-size:28px; font-weight:900; margin-top:8px">${t.id}</div><div style="margin-top:20px; display:flex; gap:10px"><button class="btn" onclick="renameTable('${t.id}')">Rename</button><button class="btn danger" onclick="deleteTable('${t.id}')">Delete</button></div></div>`;
+  document.getElementById('panel-tabs-area').style.display = 'flex'; setPanelTab(activeTab); renderSidebar();
+  cy.nodes().removeClass('highlighted'); cy.getElementById(id).addClass('highlighted');
+}
+
+function setPanelTab(tab) {
+  activeTab = tab; document.querySelectorAll('.tab-btn').forEach(b => b.classList.toggle('active', b.textContent.toLowerCase().includes(tab.toLowerCase())));
+  const t = SCHEMA.tables.find(x => x.id === selectedId); let html = '';
+  if (tab === 'schema') {
+    html = `<div style="font-size:11px; font-weight:900; color:var(--cyan); margin-bottom:20px">COLUMNS <button class="btn" style="padding:4px 8px" onclick="addCol()">+ ADD</button></div>`;
+    t.columns.forEach(c => html += `<div style="padding:15px; background:rgba(255,255,255,0.03); border:1px solid var(--border); border-radius:4px; margin-bottom:10px; display:flex; justify-content:space-between"><span><b>${c.name}</b> <small style="opacity:0.5">${c.type}</small></span><button class="btn" style="padding:0 8px" onclick="delCol('${c.name}')">×</button></div>`);
+  } else if (tab === 'links') {
+    html = `<div style="font-size:11px; font-weight:900; color:var(--cyan); margin-bottom:20px">RELATIONS <button class="btn" style="padding:4px 8px" onclick="openRelModal()">+ NEW</button></div>`;
+    t.relations.forEach((r,i) => html += `<div class="glass" style="padding:15px; margin-bottom:10px; cursor:pointer" onclick="select('${r.target}')"><b>${r.target}</b> <small style="display:block; color:var(--cyan)">${r.type}</small></div>`);
+  } else if (tab === 'data') {
+    html = `<div style="font-size:11px; font-weight:900; color:var(--cyan); margin-bottom:20px">RAW DATA <button class="btn" onclick="addRow('${t.id}')">+ ROW</button></div>`;
+    html += `<div style="overflow-x:auto"><table class="spreadsheet"><tr>${t.columns.map(c => `<th>${c.name}</th>`).join('')}</tr>`;
+    (t.rows || []).forEach((row, idx) => { html += `<tr>${t.columns.map(c => `<td><input value="${row[c.name]||''}" onchange="updRow('${t.id}',${idx},'${c.name}',this.value)"></td>`).join('')}</tr>`; });
+    html += '</table></div>';
+  }
+  document.getElementById('panel-content-area').innerHTML = html;
+}
+
+function renderGlobalManager() {
+  selectedId = null; document.getElementById('panel-hdr-area').innerHTML = `<div class="panel-hdr"><div style="font-size:10px; font-weight:900; color:var(--cyan)">NETWORK TOPOLOGY</div><div style="font-size:28px; font-weight:900">SCHEMA COMMAND</div></div>`;
+  document.getElementById('panel-tabs-area').style.display = 'none';
+  let h = `<div style="font-size:11px; font-weight:900; color:var(--cyan); border-bottom:1px solid var(--border); padding-bottom:8px; margin-bottom:20px">DOMAINS</div>`;
+  SCHEMA.domains.forEach(d => h += `<div onclick="selectDomain(${d.id})" style="padding:15px; background:var(--bg-surface); border:1px solid var(--border); border-radius:4px; margin-bottom:10px; display:flex; align-items:center; gap:12px; cursor:pointer"><div style="width:10px; height:10px; background:${d.color}; border-radius:50%"></div><b>${d.name}</b></div>`);
+  document.getElementById('panel-content-area').innerHTML = h;
+}
+
+function selectDomain(id) {
+  const d = SCHEMA.domains.find(x => x.id === id);
+  document.getElementById('panel-hdr-area').innerHTML = `<div class="panel-hdr"><div style="font-size:10px; font-weight:900; color:${d.color}">CLUSTER</div><div style="font-size:28px; font-weight:900; color:${d.color}">${d.name.toUpperCase()}</div></div>`;
+  document.getElementById('panel-content-area').innerHTML = `<div style="margin-bottom:20px"><label>NAME</label><input value="${d.name}" onchange="updateDomInfo(${id}, 'name', this.value)" style="width:100%; padding:14px; background:#000; border:1px solid var(--border); color:#fff"></div><button class="btn primary" style="width:100%" onclick="openNewTableModal(${id})">+ NEW TABLE IN CLUSTER</button>`;
+}
+
+function renameTable(tid) { 
+  const n = prompt("New Tables ID:", tid); 
+  if(n && n !== tid) {
+    SCHEMA.tables.find(x=>x.id===tid).id = n;
+    SCHEMA.tables.forEach(t => (t.relations||[]).forEach(r => { if(r.target === tid) r.target = n; }));
+    if(positions[tid]) { positions[n] = positions[tid]; delete positions[tid]; }
+    refresh(); select(n);
+  }
+}
+function deleteTable(tid) { if(confirm(`DELETE ${tid}?`)) { SCHEMA.tables = SCHEMA.tables.filter(x=>x.id!==tid); refresh(); renderGlobalManager(); } }
+function updateDomInfo(id, k, v) { SCHEMA.domains.find(d=>d.id===id)[k] = v; refresh(); }
+function setView(v) { currentView=v; document.getElementById('cy').style.display=v==='graph'?'block':'none'; document.getElementById('excel-view').style.display=v==='excel'?'block':'none'; if(v==='excel') renderExcel(); }
+function renderExcel() {
+  const v = document.getElementById('excel-view'); v.innerHTML = '<h1 style="color:var(--cyan); margin-bottom:50px">MASTER REGISTRY</h1>';
+  SCHEMA.domains.forEach(d => {
+    let dh = `<div style="margin-bottom:60px"><div style="font-weight:900; color:${d.color}; border-bottom:1px solid ${d.color}; padding-bottom:10px; margin-bottom:20px">${d.name.toUpperCase()}</div>`;
+    SCHEMA.tables.filter(t=>t.domain===d.id).forEach(t => {
+      dh += `<div style="margin-bottom:20px"><b>${t.id}</b> <table class="spreadsheet" style="margin-top:10px"><tr>${t.columns.map(c=>`<th>${c.name}</th>`).join('')}</tr>`;
+      (t.rows||[]).forEach(r => dh += `<tr>${t.columns.map(c=>`<td><input value="${r[c.name]||''}" onchange="updRow('${t.id}',0,'${c.name}',this.value)"></td>`).join('')}</tr>`);
+      dh += '</table></div>';
+    });
+    v.innerHTML += dh + '</div>';
+  });
+}
+function updRow(tid, i, c, v) { SCHEMA.tables.find(x=>x.id===tid).rows[i][c] = v; }
+function addRow(tid) { const t = SCHEMA.tables.find(x=>x.id===tid); if(!t.rows) t.rows=[]; t.rows.push({}); setPanelTab('data'); }
+function addCol() { const n = prompt("Col Name:"); if(n) { SCHEMA.tables.find(x=>x.id===selectedId).columns.push({name:n, type:'string'}); setPanelTab('schema'); } }
+function delCol(n) { const t = SCHEMA.tables.find(x=>x.id===selectedId); t.columns = t.columns.filter(c=>c.name!==n); setPanelTab('schema'); }
+function openRelModal() { const target = prompt("Target Table ID:"); if(target) { SCHEMA.tables.find(x=>x.id===selectedId).relations.push({ target, type: '1:N', label: 'owns' }); refresh(); setPanelTab('links'); } }
+function exportSchema() { const b = new Blob([JSON.stringify(SCHEMA, null, 2)], { type:'application/json' }); const a = document.createElement('a'); a.href = URL.createObjectURL(b); a.download = 'sub3d_modded_schema.json'; a.click(); }
+function openNewTableModal(dom = 1) { const n = prompt("Table ID:"); if(n) { SCHEMA.tables.push({ id: n, domain: dom, columns:[{name:'id',type:'string',pk:true}], relations:[], rows:[] }); refresh(); select(n); } }
+function renderSidebar() {
+  let h = ''; SCHEMA.domains.forEach(d => {
+    h += `<div class="sb-header">${d.name}</div>`;
+    SCHEMA.tables.filter(t=>t.domain===d.id).forEach(t => h += `<div class="sb-item ${t.id===selectedId?'selected':''}" onclick="select('${t.id}')"><div class="sb-dot" style="background:${d.color}"></div>${t.id}</div>`);
+  });
+  document.getElementById('sidebar-content').innerHTML = h;
+}
+function refresh() { cy.json({ elements: buildElements() }); cy.nodes().forEach(n => { if (positions[n.id()]) n.position(positions[n.id()]); }); renderSidebar(); }
+</script>
+</body>
+</html>

@@ -1,0 +1,3 @@
+Name,display_name,kind,timed,notes
+---,string,string (enum),bool,string
+ROW_EXAMPLE,,,false,

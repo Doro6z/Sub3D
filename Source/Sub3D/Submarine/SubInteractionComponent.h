@@ -14,6 +14,8 @@ class SUB3D_API USubInteractionComponent : public UActorComponent
 public:
 	USubInteractionComponent();
 
+	virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
+
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Submarine|Interaction|Debug")
 	bool bDebugInteractionTrace = false;
 
@@ -31,6 +33,12 @@ public:
 
 	UFUNCTION(BlueprintCallable, Category = "Submarine|Interaction")
 	bool TryRepairFocusedTarget(float RepairStrength = 20.f, float RadiusCm = 30.f);
+
+	UPROPERTY(BlueprintReadOnly, Category = "Submarine|Interaction")
+	AActor* FocusedActor = nullptr;
+
+	UPROPERTY(BlueprintReadOnly, Category = "Submarine|Interaction")
+	class UInteractableComponent* FocusedInteractable = nullptr;
 
 protected:
 	UFUNCTION(Server, Reliable)

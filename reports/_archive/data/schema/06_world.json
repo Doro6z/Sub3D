@@ -1,0 +1,293 @@
+{
+  "meta": {
+    "domain": "World & Spawning",
+    "parentId": "domain_6",
+    "description": "Schema definition for World & Spawning."
+  },
+  "tables": [
+    {
+      "id": "Biome_Definitions",
+      "domain": 6,
+      "priority": "high",
+      "description": "World biome types — abyssal, thermocline, reef, trench, etc.",
+      "columns": [
+        {
+          "name": "biome_id",
+          "type": "string",
+          "pk": true
+        },
+        {
+          "name": "display_name",
+          "type": "string",
+          "nullable": false
+        },
+        {
+          "name": "kind",
+          "type": "enum",
+          "values": [
+            "abyssal",
+            "thermocline",
+            "reef",
+            "trench",
+            "open_ocean",
+            "coastal",
+            "tunnel"
+          ]
+        },
+        {
+          "name": "depth_min_m",
+          "type": "float",
+          "nullable": true
+        },
+        {
+          "name": "depth_max_m",
+          "type": "float",
+          "nullable": true
+        }
+      ],
+      "relations": [
+        {
+          "target": "Biome_Parameters",
+          "type": "1:N",
+          "label": "has parameters"
+        },
+        {
+          "target": "Spawn_Tables",
+          "type": "1:N",
+          "label": "has spawn tables"
+        },
+        {
+          "target": "Mission_Templates",
+          "type": "1:N",
+          "label": "hosts missions"
+        }
+      ]
+    },
+    {
+      "id": "Biome_Parameters",
+      "domain": 6,
+      "priority": "high",
+      "description": "Per-biome environmental parameters — visibility, currents, ambient danger.",
+      "columns": [
+        {
+          "name": "param_id",
+          "type": "string",
+          "pk": true
+        },
+        {
+          "name": "biome_id",
+          "type": "string",
+          "fk": "Biome_Definitions.biome_id"
+        },
+        {
+          "name": "visibility_m",
+          "type": "float",
+          "nullable": false
+        },
+        {
+          "name": "current_speed",
+          "type": "float",
+          "nullable": true
+        },
+        {
+          "name": "ambient_pressure",
+          "type": "float",
+          "nullable": true
+        },
+        {
+          "name": "danger_level",
+          "type": "int",
+          "nullable": false,
+          "default": "1"
+        },
+        {
+          "name": "sonar_noise",
+          "type": "float",
+          "nullable": true
+        }
+      ],
+      "relations": [
+        {
+          "target": "Biome_Definitions",
+          "type": "N:1",
+          "label": "parameters of biome"
+        }
+      ]
+    },
+    {
+      "id": "Spawn_Tables",
+      "domain": 6,
+      "priority": "high",
+      "description": "Spawn tables per biome, zone, or trigger context.",
+      "columns": [
+        {
+          "name": "spawn_table_id",
+          "type": "string",
+          "pk": true
+        },
+        {
+          "name": "biome_id",
+          "type": "string",
+          "fk": "Biome_Definitions.biome_id",
+          "nullable": true
+        },
+        {
+          "name": "zone_id",
+          "type": "string",
+          "fk": "World_Zone_Definitions.zone_id",
+          "nullable": true
+        },
+        {
+          "name": "context",
+          "type": "enum",
+          "values": [
+            "ambient",
+            "triggered",
+            "boss_room",
+            "patrol",
+            "scripted"
+          ]
+        },
+        {
+          "name": "max_concurrent",
+          "type": "int",
+          "nullable": true
+        }
+      ],
+      "relations": [
+        {
+          "target": "Biome_Definitions",
+          "type": "N:1",
+          "label": "scoped to biome"
+        },
+        {
+          "target": "World_Zone_Definitions",
+          "type": "N:1",
+          "label": "scoped to zone"
+        },
+        {
+          "target": "Spawn_Table_Entries",
+          "type": "1:N",
+          "label": "contains entries"
+        }
+      ]
+    },
+    {
+      "id": "Spawn_Table_Entries",
+      "domain": 6,
+      "priority": "high",
+      "description": "Individual spawn entries — enemy or fauna with weight and conditions.",
+      "columns": [
+        {
+          "name": "entry_id",
+          "type": "string",
+          "pk": true
+        },
+        {
+          "name": "spawn_table_id",
+          "type": "string",
+          "fk": "Spawn_Tables.spawn_table_id"
+        },
+        {
+          "name": "entity_type",
+          "type": "enum",
+          "values": [
+            "enemy",
+            "fauna"
+          ]
+        },
+        {
+          "name": "entity_id",
+          "type": "string",
+          "nullable": false
+        },
+        {
+          "name": "weight",
+          "type": "float",
+          "nullable": false,
+          "default": "1.0"
+        },
+        {
+          "name": "count_min",
+          "type": "int",
+          "nullable": false,
+          "default": "1"
+        },
+        {
+          "name": "count_max",
+          "type": "int",
+          "nullable": false,
+          "default": "1"
+        },
+        {
+          "name": "condition",
+          "type": "string",
+          "nullable": true
+        }
+      ],
+      "relations": [
+        {
+          "target": "Spawn_Tables",
+          "type": "N:1",
+          "label": "part of spawn table"
+        },
+        {
+          "target": "Enemy_Stats",
+          "type": "N:1",
+          "label": "spawns enemy"
+        },
+        {
+          "target": "Fauna_Definitions",
+          "type": "N:1",
+          "label": "spawns fauna"
+        }
+      ]
+    },
+    {
+      "id": "World_Zone_Definitions",
+      "domain": 6,
+      "priority": "medium",
+      "description": "World zones — named segments of the game world or tunnel network.",
+      "columns": [
+        {
+          "name": "zone_id",
+          "type": "string",
+          "pk": true
+        },
+        {
+          "name": "display_name",
+          "type": "string",
+          "nullable": false
+        },
+        {
+          "name": "biome_id",
+          "type": "string",
+          "fk": "Biome_Definitions.biome_id",
+          "nullable": true
+        },
+        {
+          "name": "depth_m",
+          "type": "float",
+          "nullable": true
+        },
+        {
+          "name": "danger_rating",
+          "type": "int",
+          "nullable": true
+        }
+      ],
+      "relations": [
+        {
+          "target": "Biome_Definitions",
+          "type": "N:1",
+          "label": "located in biome"
+        },
+        {
+          "target": "Spawn_Tables",
+          "type": "1:N",
+          "label": "has spawn tables"
+        }
+      ]
+    }
+  ]
+}

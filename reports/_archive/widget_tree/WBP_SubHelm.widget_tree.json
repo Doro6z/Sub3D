@@ -1,0 +1,256 @@
+﻿{
+    "asset_path":  "/Game/Sub3D/UI/WBP_SubHelm",
+    "exported_at":  "2026-04-02T08:42:30+02:00",
+    "tree":  {
+                 "widget_blueprint_path":  "/Game/Sub3D/UI/WBP_SubHelm",
+                 "root":  {
+                              "name":  "CanvasPanel_15",
+                              "class":  "CanvasPanel",
+                              "is_panel":  true,
+                              "is_variable":  false,
+                              "children":  [
+                                               {
+                                                   "name":  "Button_Departure",
+                                                   "class":  "Button",
+                                                   "is_panel":  true,
+                                                   "is_variable":  true,
+                                                   "slot_class":  "CanvasPanelSlot",
+                                                   "children":  [
+                                                                    {
+                                                                        "name":  "TextBlock_105",
+                                                                        "class":  "TextBlock",
+                                                                        "is_panel":  false,
+                                                                        "is_variable":  false,
+                                                                        "slot_class":  "ButtonSlot"
+                                                                    }
+                                                                ]
+                                               },
+                                               {
+                                                   "name":  "StatusStripPanel",
+                                                   "class":  "WBP_HelmStatusStrip_C",
+                                                   "is_panel":  false,
+                                                   "is_variable":  true,
+                                                   "slot_class":  "CanvasPanelSlot"
+                                               },
+                                               {
+                                                   "name":  "TacticalGraphView",
+                                                   "class":  "WBP_TacticalGraphView_C",
+                                                   "is_panel":  false,
+                                                   "is_variable":  true,
+                                                   "slot_class":  "CanvasPanelSlot"
+                                               },
+                                               {
+                                                   "name":  "ReconstructionView",
+                                                   "class":  "WBP_ResontructionView_C",
+                                                   "is_panel":  false,
+                                                   "is_variable":  true,
+                                                   "slot_class":  "CanvasPanelSlot"
+                                               },
+                                               {
+                                                   "name":  "ControlStackPanel",
+                                                   "class":  "WBP_HelmControlPanel_C",
+                                                   "is_panel":  false,
+                                                   "is_variable":  true,
+                                                   "slot_class":  "CanvasPanelSlot"
+                                               },
+                                               {
+                                                   "name":  "SonarDisplay",
+                                                   "class":  "WBP_SubRadar_C",
+                                                   "is_panel":  false,
+                                                   "is_variable":  true,
+                                                   "slot_class":  "CanvasPanelSlot"
+                                               },
+                                               {
+                                                   "name":  "ForwardReconstructionView",
+                                                   "class":  "WBP_ResontructionView_C",
+                                                   "is_panel":  false,
+                                                   "is_variable":  true,
+                                                   "slot_class":  "CanvasPanelSlot"
+                                               }
+                                           ]
+                          },
+                 "total_widgets":  9
+             },
+    "slots":  {
+                  "SonarDisplay":  {
+                                       "widget_name":  "SonarDisplay",
+                                       "slot_class":  "CanvasPanelSlot",
+                                       "properties":  {
+                                                          "LayoutData":  {
+                                                                             "Offsets":  {
+                                                                                             "Left":  0,
+                                                                                             "Top":  -90,
+                                                                                             "Right":  800,
+                                                                                             "Bottom":  800
+                                                                                         },
+                                                                             "Anchors":  {
+                                                                                             "Minimum":  {
+                                                                                                             "X":  0.5,
+                                                                                                             "Y":  0.5
+                                                                                                         },
+                                                                                             "Maximum":  {
+                                                                                                             "X":  0.5,
+                                                                                                             "Y":  0.5
+                                                                                                         }
+                                                                                         },
+                                                                             "Alignment":  {
+                                                                                               "X":  0.5,
+                                                                                               "Y":  0.5
+                                                                                           }
+                                                                         },
+                                                          "bAutoSize":  false,
+                                                          "ZOrder":  0
+                                                      }
+                                   },
+                  "ControlStackPanel":  {
+                                            "widget_name":  "ControlStackPanel",
+                                            "slot_class":  "CanvasPanelSlot",
+                                            "properties":  {
+                                                               "LayoutData":  {
+                                                                                  "Offsets":  {
+                                                                                                  "Left":  430,
+                                                                                                  "Top":  0,
+                                                                                                  "Right":  500,
+                                                                                                  "Bottom":  1050
+                                                                                              },
+                                                                                  "Anchors":  {
+                                                                                                  "Minimum":  {
+                                                                                                                  "X":  0.5,
+                                                                                                                  "Y":  0.5
+                                                                                                              },
+                                                                                                  "Maximum":  {
+                                                                                                                  "X":  0.5,
+                                                                                                                  "Y":  0.5
+                                                                                                              }
+                                                                                              },
+                                                                                  "Alignment":  {
+                                                                                                    "X":  0,
+                                                                                                    "Y":  0.5
+                                                                                                }
+                                                                              },
+                                                               "bAutoSize":  false,
+                                                               "ZOrder":  0
+                                                           }
+                                        },
+                  "ForwardReconstructionView":  {
+                                                    "widget_name":  "ForwardReconstructionView",
+                                                    "slot_class":  "CanvasPanelSlot",
+                                                    "properties":  {
+                                                                       "LayoutData":  {
+                                                                                          "Offsets":  {
+                                                                                                          "Left":  -930,
+                                                                                                          "Top":  5,
+                                                                                                          "Right":  500,
+                                                                                                          "Bottom":  240
+                                                                                                      },
+                                                                                          "Anchors":  {
+                                                                                                          "Minimum":  {
+                                                                                                                          "X":  0.5,
+                                                                                                                          "Y":  0.5
+                                                                                                                      },
+                                                                                                          "Maximum":  {
+                                                                                                                          "X":  0.5,
+                                                                                                                          "Y":  0.5
+                                                                                                                      }
+                                                                                                      },
+                                                                                          "Alignment":  {
+                                                                                                            "X":  0,
+                                                                                                            "Y":  0
+                                                                                                        }
+                                                                                      },
+                                                                       "bAutoSize":  false,
+                                                                       "ZOrder":  0
+                                                                   }
+                                                },
+                  "StatusStripPanel":  {
+                                           "widget_name":  "StatusStripPanel",
+                                           "slot_class":  "CanvasPanelSlot",
+                                           "properties":  {
+                                                              "LayoutData":  {
+                                                                                 "Offsets":  {
+                                                                                                 "Left":  0,
+                                                                                                 "Top":  340,
+                                                                                                 "Right":  800,
+                                                                                                 "Bottom":  180
+                                                                                             },
+                                                                                 "Anchors":  {
+                                                                                                 "Minimum":  {
+                                                                                                                 "X":  0.5,
+                                                                                                                 "Y":  0.5
+                                                                                                             },
+                                                                                                 "Maximum":  {
+                                                                                                                 "X":  0.5,
+                                                                                                                 "Y":  0.5
+                                                                                                             }
+                                                                                             },
+                                                                                 "Alignment":  {
+                                                                                                   "X":  0.5,
+                                                                                                   "Y":  0
+                                                                                               }
+                                                                             },
+                                                              "bAutoSize":  false,
+                                                              "ZOrder":  0
+                                                          }
+                                       },
+                  "ReconstructionView":  {
+                                             "widget_name":  "ReconstructionView",
+                                             "slot_class":  "CanvasPanelSlot",
+                                             "properties":  {
+                                                                "LayoutData":  {
+                                                                                   "Offsets":  {
+                                                                                                   "Left":  -930,
+                                                                                                   "Top":  -255,
+                                                                                                   "Right":  500,
+                                                                                                   "Bottom":  240
+                                                                                               },
+                                                                                   "Anchors":  {
+                                                                                                   "Minimum":  {
+                                                                                                                   "X":  0.5,
+                                                                                                                   "Y":  0.5
+                                                                                                               },
+                                                                                                   "Maximum":  {
+                                                                                                                   "X":  0.5,
+                                                                                                                   "Y":  0.5
+                                                                                                               }
+                                                                                               },
+                                                                                   "Alignment":  {
+                                                                                                     "X":  0,
+                                                                                                     "Y":  0
+                                                                                                 }
+                                                                               },
+                                                                "bAutoSize":  false,
+                                                                "ZOrder":  0
+                                                            }
+                                         },
+                  "TacticalGraphView":  {
+                                            "widget_name":  "TacticalGraphView",
+                                            "slot_class":  "CanvasPanelSlot",
+                                            "properties":  {
+                                                               "LayoutData":  {
+                                                                                  "Offsets":  {
+                                                                                                  "Left":  -930,
+                                                                                                  "Top":  -515,
+                                                                                                  "Right":  500,
+                                                                                                  "Bottom":  240
+                                                                                              },
+                                                                                  "Anchors":  {
+                                                                                                  "Minimum":  {
+                                                                                                                  "X":  0.5,
+                                                                                                                  "Y":  0.5
+                                                                                                              },
+                                                                                                  "Maximum":  {
+                                                                                                                  "X":  0.5,
+                                                                                                                  "Y":  0.5
+                                                                                                              }
+                                                                                              },
+                                                                                  "Alignment":  {
+                                                                                                    "X":  0,
+                                                                                                    "Y":  0
+                                                                                                }
+                                                                              },
+                                                               "bAutoSize":  false,
+                                                               "ZOrder":  0
+                                                           }
+                                        }
+              }
+}

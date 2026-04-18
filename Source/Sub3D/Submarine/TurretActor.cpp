@@ -28,6 +28,10 @@ ATurretActor::ATurretActor()
 void ATurretActor::BeginPlay()
 {
 	Super::BeginPlay();
+	if (HasAuthority())
+	{
+		CurrentAmmo = MaxAmmo;
+	}
 	ApplyAimVisuals();
 }
 
@@ -57,6 +61,13 @@ void ATurretActor::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLife
 	DOREPLIFETIME(ATurretActor, TargetAim);
 	DOREPLIFETIME(ATurretActor, bFireHeld);
 	DOREPLIFETIME(ATurretActor, bOnline);
+	DOREPLIFETIME(ATurretActor, CurrentAmmo);
+	DOREPLIFETIME(ATurretActor, LastFireServerTime);
+}
+
+void ATurretActor::OnRep_LastFireTime()
+{
+	BP_OnFiredReplicated();
 }
 
 void ATurretActor::SetAimCommand(const FRotator& InAim)
@@ -90,12 +101,14 @@ void ATurretActor::ApplyAimVisuals()
 
 void ATurretActor::TryFire()
 {
-	if (CooldownRemaining > 0.f || !GetWorld())
+	if (CooldownRemaining > 0.f || !GetWorld() || CurrentAmmo <= 0)
 	{
 		return;
 	}
 
 	CooldownRemaining = FireCooldown;
+	CurrentAmmo = FMath::Max(0, CurrentAmmo - 1);
+	LastFireServerTime = GetWorld()->GetTimeSeconds();
 
 	const FVector Start = PitchPivot ? PitchPivot->GetComponentLocation() : GetActorLocation();
 	const FVector Direction = PitchPivot ? PitchPivot->GetForwardVector() : GetActorForwardVector();

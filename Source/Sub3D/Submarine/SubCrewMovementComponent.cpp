@@ -4,11 +4,14 @@
 #include "SubInteriorFrameComponent.h"
 #include "SubmarineBase.h"
 #include "SubMovementComponent.h"
+#include "Components/CapsuleComponent.h"
 #include "Components/PrimitiveComponent.h"
+#include "Camera/CameraComponent.h"
 #include "DrawDebugHelpers.h"
 #include "Engine/World.h"
 #include "GameFramework/Character.h"
 #include "GameFramework/Controller.h"
+#include "Net/UnrealNetwork.h"
 
 DEFINE_LOG_CATEGORY_STATIC(LogSubCrewMovement, Log, All);
 
@@ -31,19 +34,24 @@ bool IsComponentOnSubmarine(const ASubmarineBase* Submarine, const UPrimitiveCom
 
 USubCrewMovementComponent::USubCrewMovementComponent()
 {
+	SetIsReplicatedByDefault(true);
 }
 
 void USubCrewMovementComponent::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
 {
 	Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
 
+	TickPosture(DeltaTime);
+
 	if (IsEmbarked())
 	{
-		UpdateRelativeState();
+		UpdateRelativeState(DeltaTime);
 		UpdateInertialState();
 		UpdateSupportState();
 		AttemptEmbarkedFloorRecovery(DeltaTime);
 		UpdateBraceState();
+		UpdateHandIKProbes();
+		UpdateFootIKTraces();
 		ApplyYawCompensation();
 		CheckAndLogBaseChange();
 		LogPeriodicState(DeltaTime);
@@ -64,6 +72,7 @@ void USubCrewMovementComponent::TickComponent(float DeltaTime, ELevelTick TickTy
 
 		LastKnownBase.Reset();
 		LastEmbarkedFloorComponent = nullptr;
+		RelativeLinearVelocity = FVector::ZeroVector;
 		LocalSubLinearVelocity = FVector::ZeroVector;
 		LocalSubLinearAcceleration = FVector::ZeroVector;
 		LocalSubAngularVelocityDegrees = FVector::ZeroVector;
@@ -77,6 +86,8 @@ void USubCrewMovementComponent::TickComponent(float DeltaTime, ELevelTick TickTy
 		NearbyBraceWorldLocation = FVector::ZeroVector;
 		NearbyBraceWorldNormal = FVector::ZeroVector;
 		BraceQueryOrigin = FVector::ZeroVector;
+		bHasPreviousRelativeLocation = false;
+		PreviousRelativeLocation = FVector::ZeroVector;
 		FloorRecoveryTimer = 0.f;
 		DebugLogTimer = 0.f;
 	}
@@ -155,25 +166,40 @@ void USubCrewMovementComponent::UpdateInertialState()
 	LocalSubAngularAccelerationDegrees = Frame->GetLocalAngularAccelerationDegrees();
 }
 
-void USubCrewMovementComponent::UpdateRelativeState()
+void USubCrewMovementComponent::UpdateRelativeState(float DeltaTime)
 {
 	const USubInteriorFrameComponent* Frame = GetInteriorFrame();
 	if (!Frame || !CharacterOwner)
 	{
+		RelativeLinearVelocity = FVector::ZeroVector;
+		bHasPreviousRelativeLocation = false;
 		return;
 	}
 
-	RelativeLocation = Frame->WorldToLocal(CharacterOwner->GetActorLocation());
+	const FVector NewRelativeLocation = Frame->WorldToLocal(CharacterOwner->GetActorLocation());
+	if (bHasPreviousRelativeLocation && DeltaTime > KINDA_SMALL_NUMBER)
+	{
+		RelativeLinearVelocity = (NewRelativeLocation - PreviousRelativeLocation) / DeltaTime;
+	}
+	else
+	{
+		RelativeLinearVelocity = FVector::ZeroVector;
+	}
+
+	RelativeLocation = NewRelativeLocation;
 	RelativeRotation = Frame->WorldToLocalRotation(CharacterOwner->GetActorRotation());
+	PreviousRelativeLocation = RelativeLocation;
+	bHasPreviousRelativeLocation = true;
 
 	if (bDebugLogCrewMovement)
 	{
 		UE_LOG(
 			LogSubCrewMovement,
 			Log,
-			TEXT("RelativeState | WorldLoc=%s | RelLoc=%s | RelRot=%s"),
+			TEXT("RelativeState | WorldLoc=%s | RelLoc=%s | RelVel=%s | RelRot=%s"),
 			*CharacterOwner->GetActorLocation().ToCompactString(),
 			*RelativeLocation.ToCompactString(),
+			*RelativeLinearVelocity.ToCompactString(),
 			*RelativeRotation.ToCompactString());
 	}
 }
@@ -549,7 +575,7 @@ void USubCrewMovementComponent::InitializeForSubmarine()
 
 	if (bFrameValid)
 	{
-		UpdateRelativeState();
+		UpdateRelativeState(0.f);
 		UpdateInertialState();
 	}
 
@@ -577,6 +603,9 @@ void USubCrewMovementComponent::InitializeForSubmarine()
 
 	LastKnownBase.Reset();
 	LastEmbarkedFloorComponent = nullptr;
+	RelativeLinearVelocity = FVector::ZeroVector;
+	PreviousRelativeLocation = RelativeLocation;
+	bHasPreviousRelativeLocation = bFrameValid;
 	bHasValidEmbarkedFloor = false;
 	bHasAcceptedEmbarkedBase = false;
 	bNeedsEmbarkedFloorRecovery = false;
@@ -631,4 +660,250 @@ void USubCrewMovementComponent::RefreshEmbarkedFlooring()
 		CurrentFloor.FloorDist,
 		CurrentFloor.LineDist,
 		*CharacterOwner->GetActorLocation().ToCompactString());
+}
+
+
+// ── Posture System ──────────────────────────────────────────────────
+
+void USubCrewMovementComponent::SetPostureTarget(float Alpha)
+{
+	PostureTarget = FMath::Clamp(Alpha, 0.f, 1.f);
+
+	if (PostureTarget < 0.75f)
+	{
+		SetRunningState(false);
+	}
+
+	if (ASubCrewCharacter* Crew = Cast<ASubCrewCharacter>(CharacterOwner))
+	{
+		if (!Crew->HasAuthority())
+		{
+			Crew->ServerSetPostureTarget(PostureTarget);
+		}
+	}
+}
+
+void USubCrewMovementComponent::AddPostureDelta(float Delta)
+{
+	SetPostureTarget(PostureTarget + Delta);
+}
+
+void USubCrewMovementComponent::TickPosture(float DeltaTime)
+{
+	if (PostureAlpha < 0.75f && bIsRunning)
+	{
+		SetRunningState(false);
+	}
+
+	if (FMath::IsNearlyEqual(PostureAlpha, PostureTarget, 0.001f))
+	{
+		PostureAlpha = PostureTarget;
+	}
+	else
+	{
+		PostureAlpha = FMath::FInterpTo(PostureAlpha, PostureTarget, DeltaTime, PostureInterpSpeed);
+	}
+
+	// Update capsule half-height
+	if (ACharacter* Char = GetCharacterOwner())
+	{
+		const float CurrentHalfHeight = Char->GetCapsuleComponent()->GetUnscaledCapsuleHalfHeight();
+		const float NewHalfHeight = FMath::Lerp(ProneHalfHeight, StandingHalfHeight, PostureAlpha);
+		const float HalfHeightDelta = NewHalfHeight - CurrentHalfHeight;
+		Char->GetCapsuleComponent()->SetCapsuleHalfHeight(NewHalfHeight, true);
+		if (!FMath::IsNearlyZero(HalfHeightDelta, KINDA_SMALL_NUMBER))
+		{
+			Char->AddActorWorldOffset(FVector(0.f, 0.f, HalfHeightDelta), false, nullptr, ETeleportType::TeleportPhysics);
+			bForceNextFloorCheck = true;
+		}
+
+		// Update camera Z if FPS camera exists
+		if (ASubCrewCharacter* Crew = Cast<ASubCrewCharacter>(Char))
+		{
+			if (Crew->FPSCamera)
+			{
+				const float NewCameraZ = FMath::Lerp(ProneCameraZ, StandingCameraZ, PostureAlpha);
+				FVector CamLoc = Crew->FPSCamera->GetRelativeLocation();
+				CamLoc.Z = NewCameraZ;
+				Crew->FPSCamera->SetRelativeLocation(CamLoc);
+			}
+		}
+	}
+}
+
+// ── Run System ──────────────────────────────────────────────────
+
+void USubCrewMovementComponent::RequestRunStart()
+{
+	SetRunningState(true);
+}
+
+void USubCrewMovementComponent::RequestRunStop()
+{
+	SetRunningState(false);
+}
+
+ECrewPostureState USubCrewMovementComponent::GetPostureState() const
+{
+	if (PostureAlpha <= 0.25f)
+	{
+		return ECrewPostureState::Prone;
+	}
+
+	if (PostureAlpha < 0.75f)
+	{
+		return ECrewPostureState::Crouched;
+	}
+
+	return ECrewPostureState::Standing;
+}
+
+float USubCrewMovementComponent::GetPostureSpeedScale() const
+{
+	return FMath::Lerp(0.3f, 1.f, PostureAlpha);
+}
+
+float USubCrewMovementComponent::GetDesiredWalkSpeedMultiplier() const
+{
+	const float RunScale = (bIsRunning && GetPostureState() == ECrewPostureState::Standing) ? RunSpeedMultiplier : 1.f;
+	return GetPostureSpeedScale() * RunScale;
+}
+
+void USubCrewMovementComponent::SetRunningState(bool bNewRunning)
+{
+	ASubCrewCharacter* Crew = Cast<ASubCrewCharacter>(CharacterOwner);
+	const bool bResolvedRunning =
+		bNewRunning
+		&& PostureTarget >= 0.75f
+		&& (!Crew || !Crew->bIsSwimmingByFlood);
+
+	if (bIsRunning == bResolvedRunning)
+	{
+		return;
+	}
+
+	bIsRunning = bResolvedRunning;
+
+	if (Crew && !Crew->HasAuthority())
+	{
+		Crew->ServerSetRunning(bIsRunning);
+	}
+}
+
+
+// ── Hand IK Probes ──────────────────────────────────────────────
+
+void USubCrewMovementComponent::UpdateHandIKProbes()
+{
+	// Reset all probes
+	for (int32 i = 0; i < 6; ++i)
+	{
+		HandProbes[i].bHit = false;
+		HandProbes[i].Distance = 0.f;
+		HandProbes[i].WorldLocation = FVector::ZeroVector;
+		HandProbes[i].WorldNormal = FVector::ZeroVector;
+	}
+
+	if (!CharacterOwner || !ShouldEvaluateHandIK())
+	{
+		return;
+	}
+
+	const FVector ActorLoc = CharacterOwner->GetActorLocation();
+	const FRotator ActorRot = CharacterOwner->GetActorRotation();
+	const float CurrentHalfHeight = CharacterOwner->GetCapsuleComponent()
+		? CharacterOwner->GetCapsuleComponent()->GetScaledCapsuleHalfHeight()
+		: FMath::Lerp(ProneHalfHeight, StandingHalfHeight, PostureAlpha);
+
+	// Probe directions in actor local space: Forward, Right, Left, BackRight, BackLeft, Back
+	struct FProbeSetup
+	{
+		FVector LocalDir;
+		float HeightFraction;
+	};
+
+	const FProbeSetup Setups[6] = {
+		{ FVector(0, -1, 0), 0.8f },   // 0: Left hand — left
+		{ FVector(0,  1, 0), 0.8f },   // 1: Right hand — right
+		{ FVector(0, -1, 0), 0.5f },   // 2: Left hip — left, lower
+		{ FVector(0,  1, 0), 0.5f },   // 3: Right hip — right, lower
+		{ FVector(1, -0.5f, 0), 0.8f },// 4: Left shoulder — forward-left
+		{ FVector(1,  0.5f, 0), 0.8f },// 5: Right shoulder — forward-right
+	};
+
+	const float ProbeDistance = 60.f; // cm, arm's reach
+
+	for (int32 i = 0; i < 6; ++i)
+	{
+		const FVector WorldDir = ActorRot.RotateVector(Setups[i].LocalDir.GetSafeNormal());
+		const FVector Start = ActorLoc + FVector(0, 0, CurrentHalfHeight * Setups[i].HeightFraction);
+		const FVector End = Start + WorldDir * ProbeDistance;
+
+		FHitResult Hit;
+		if (QueryBraceSupportHit(Start, End, Hit))
+		{
+			HandProbes[i].bHit = true;
+			HandProbes[i].WorldLocation = Hit.ImpactPoint;
+			HandProbes[i].WorldNormal = Hit.ImpactNormal;
+			HandProbes[i].Distance = Hit.Distance;
+		}
+	}
+}
+
+bool USubCrewMovementComponent::ShouldEvaluateHandIK() const
+{
+	const ASubCrewCharacter* Crew = Cast<ASubCrewCharacter>(CharacterOwner);
+	if (!CharacterOwner || !IsEmbarked() || (Crew && Crew->bIsSwimmingByFlood))
+	{
+		return false;
+	}
+
+	return SupportQuality01 < 0.8f || LocalSubAngularVelocityDegrees.GetAbsMax() > 2.f;
+}
+
+
+// ── Foot IK Traces ──────────────────────────────────────────────
+
+void USubCrewMovementComponent::UpdateFootIKTraces()
+{
+	FootIK_R = FVector::ZeroVector;
+	FootIK_L = FVector::ZeroVector;
+
+	const ASubCrewCharacter* Crew = Cast<ASubCrewCharacter>(CharacterOwner);
+	if (!CharacterOwner || !CharacterOwner->GetCapsuleComponent() || (Crew && Crew->bIsSwimmingByFlood))
+	{
+		return;
+	}
+
+	const FVector ActorLoc = CharacterOwner->GetActorLocation();
+	const float HalfHeight = CharacterOwner->GetCapsuleComponent()->GetScaledCapsuleHalfHeight();
+
+	// Trace down from each foot position
+	const FVector RFootBase = ActorLoc + FVector(0, 8, -HalfHeight);
+	const FVector LFootBase = ActorLoc + FVector(0, -8, -HalfHeight);
+	const float TraceDepth = 30.f;
+
+	FCollisionQueryParams Params;
+	Params.AddIgnoredActor(CharacterOwner);
+
+	FHitResult HitR, HitL;
+	const UWorld* World = GetWorld();
+
+	if (World->LineTraceSingleByChannel(HitR, RFootBase + FVector(0,0,10), RFootBase - FVector(0,0,TraceDepth), ECC_GameTraceChannel2, Params))
+	{
+		FootIK_R.Z = HitR.ImpactPoint.Z - (ActorLoc.Z - HalfHeight);
+	}
+
+	if (World->LineTraceSingleByChannel(HitL, LFootBase + FVector(0,0,10), LFootBase - FVector(0,0,TraceDepth), ECC_GameTraceChannel2, Params))
+	{
+		FootIK_L.Z = HitL.ImpactPoint.Z - (ActorLoc.Z - HalfHeight);
+	}
+}
+
+
+void USubCrewMovementComponent::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const
+{
+	Super::GetLifetimeReplicatedProps(OutLifetimeProps);
+	DOREPLIFETIME(USubCrewMovementComponent, PostureAlpha);
+	DOREPLIFETIME(USubCrewMovementComponent, bIsRunning);
 }

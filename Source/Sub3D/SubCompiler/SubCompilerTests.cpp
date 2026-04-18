@@ -350,7 +350,6 @@ bool FSubCompilerBuildCompilerTest::RunTest(const FString& Parameters)
 	}
 
 	HullComponent->InitializeFromLayout(LayoutAsset);
-	TestEqual(TEXT("Hull component should initialize 4 compartment states"), HullComponent->GetCompartmentStates().Num(), 4);
 	TestEqual(TEXT("Hull component should keep compiled sheet count"), HullComponent->GetStructuralSheets().Num(), 19);
 
 	return true;

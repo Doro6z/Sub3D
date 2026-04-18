@@ -1,0 +1,3 @@
+Name,display_name,enemy_class,base_hp,base_damage,base_speed,detect_range_m,breach_capable
+---,string,string (enum),float,float,float,float,bool
+ROW_EXAMPLE,,,,,,,false

@@ -7,7 +7,7 @@
 
 namespace
 {
-	FSlateLayoutTransform MakeLayoutTransform(const FVector2D& Position)
+	FSlateLayoutTransform MakeInstrumentWindowLayoutTransform(const FVector2D& Position)
 	{
 		return FSlateLayoutTransform(FVector2f(static_cast<float>(Position.X), static_cast<float>(Position.Y)));
 	}
@@ -42,9 +42,9 @@ int32 UDraggableInstrumentWindowWidget::NativePaint(
 
 	const auto MakePaintGeometry = [&AllottedGeometry](const FVector2D& LocalPos, const FVector2D& LocalSize)
 	{
-		return AllottedGeometry.ToPaintGeometry(
+		return AllottedGeometry.MakeChild(
 			FVector2f(static_cast<float>(LocalSize.X), static_cast<float>(LocalSize.Y)),
-			MakeLayoutTransform(LocalPos));
+			MakeInstrumentWindowLayoutTransform(LocalPos)).ToPaintGeometry();
 	};
 
 	const FSlateRect TitleRect = GetTitleBarLocalRect(Size);

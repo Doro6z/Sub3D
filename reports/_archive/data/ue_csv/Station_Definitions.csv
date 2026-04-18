@@ -1,0 +1,3 @@
+Name,display_name,kind,room_tag_id,interact_range,requires_power
+---,string,string (enum),string,float,bool
+ROW_EXAMPLE,,,,,true

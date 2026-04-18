@@ -2,16 +2,21 @@
 #include "Engine/DamageEvents.h"
 #include "SubmarineBase.h"
 #include "SubCrewMovementComponent.h"
+#include "SubFloodComponent.h"
 #include "SubHullComponent.h"
+#include "SubLegacyLog.h"
+#include "SubmarineLayoutAsset.h"
 #include "SubMovementComponent.h"
 #include "SubmarineSystemsComponent.h"
 #include "SubInteractionComponent.h"
 #include "InteractableComponent.h"
+#include "Generator/SubmarineDefinition.h"
 #include "Camera/CameraComponent.h"
 #include "Components/CapsuleComponent.h"
 #include "Components/PrimitiveComponent.h"
 #include "Engine/World.h"
 #include "GameFramework/CharacterMovementComponent.h"
+#include "GameFramework/SpringArmComponent.h"
 #include "Net/UnrealNetwork.h"
 
 DEFINE_LOG_CATEGORY_STATIC(LogSubCrew, Log, All);
@@ -93,11 +98,24 @@ ASubCrewCharacter::ASubCrewCharacter(const FObjectInitializer& ObjectInitializer
 	FPSCamera->SetRelativeLocation(FVector(0.f, 0.f, 70.f));
 	FPSCamera->bUsePawnControlRotation = true;
 
+	TPSCameraBoom = CreateDefaultSubobject<USpringArmComponent>(TEXT("TPSCameraBoom"));
+	TPSCameraBoom->SetupAttachment(GetRootComponent());
+	TPSCameraBoom->bUsePawnControlRotation = true;
+	TPSCameraBoom->bDoCollisionTest = true;
+	TPSCameraBoom->ProbeChannel = ECC_GameTraceChannel2;
+	TPSCameraBoom->TargetOffset = FVector(0.f, 0.f, 70.f);
+	TPSCameraBoom->TargetArmLength = 0.f;
+	TPSCameraBoom->SocketOffset = FVector::ZeroVector;
+
+	TPSCamera = CreateDefaultSubobject<UCameraComponent>(TEXT("TPSCamera"));
+	TPSCamera->SetupAttachment(TPSCameraBoom, USpringArmComponent::SocketName);
+	TPSCamera->bUsePawnControlRotation = false;
+
 	InteractionComponent = CreateDefaultSubobject<USubInteractionComponent>(TEXT("InteractionComponent"));
 
 	if (UCapsuleComponent* Capsule = GetCapsuleComponent())
 	{
-		Capsule->SetCollisionResponseToChannel(ECC_GameTraceChannel1, ECR_Ignore);
+		Capsule->SetCollisionResponseToChannel(ECC_GameTraceChannel1, ECR_Block);
 		Capsule->SetCollisionResponseToChannel(ECC_GameTraceChannel2, ECR_Block);
 	}
 
@@ -121,12 +139,103 @@ void ASubCrewCharacter::BeginPlay()
 		DefaultWalkSpeed = FMath::Max(1.f, MovementComponent->MaxWalkSpeed);
 		DefaultSwimSpeed = FMath::Max(1.f, MovementComponent->MaxSwimSpeed > 0.f ? MovementComponent->MaxSwimSpeed : DefaultWalkSpeed * 0.8f);
 	}
+
+	Health = MaxHealth;
+	UpdateCameraRig();
+
+	if (IsLocallyControlled())
+	{
+		bWantsFirstPerson = true;
+		CameraBlendAlpha = 0.f;
+		if (FPSCamera)
+		{
+			FPSCamera->SetActive(true);
+		}
+		if (TPSCamera)
+		{
+			TPSCamera->SetActive(false);
+		}
+	}
+
+	UpdateLocalHeadVisibility();
+}
+
+USubCrewMovementComponent* ASubCrewCharacter::GetCrewMovement() const
+{
+	return Cast<USubCrewMovementComponent>(GetCharacterMovement());
+}
+
+void ASubCrewCharacter::ToggleCameraMode()
+{
+	SetFirstPersonMode(!bWantsFirstPerson);
+}
+
+void ASubCrewCharacter::SetFirstPersonMode(bool bNewFirstPerson)
+{
+	if (!IsLocallyControlled())
+	{
+		return;
+	}
+
+	bWantsFirstPerson = bNewFirstPerson;
+	UpdateCameraRig();
+	UpdateLocalHeadVisibility();
+
+	if (!bWantsFirstPerson && TPSCamera)
+	{
+		TPSCamera->SetActive(true);
+	}
+
+	if (bWantsFirstPerson && FPSCamera && CameraBlendAlpha <= 0.01f)
+	{
+		FPSCamera->SetActive(true);
+	}
+}
+
+UCameraComponent* ASubCrewCharacter::GetActiveViewCamera() const
+{
+	if (IsLocallyControlled() && TPSCamera && TPSCamera->IsActive())
+	{
+		return TPSCamera;
+	}
+
+	return FPSCamera;
+}
+
+float ASubCrewCharacter::GetCurrentPostureCameraZ() const
+{
+	if (const USubCrewMovementComponent* CrewMovement = GetCrewMovement())
+	{
+		return FMath::Lerp(CrewMovement->ProneCameraZ, CrewMovement->StandingCameraZ, CrewMovement->PostureAlpha);
+	}
+
+	return FPSCamera ? FPSCamera->GetRelativeLocation().Z : 70.f;
 }
 
 void ASubCrewCharacter::Tick(float DeltaSeconds)
 {
 	Super::Tick(DeltaSeconds);
+	UpdateCameraMode(DeltaSeconds);
 	UpdateEnvironmentalEffects(DeltaSeconds);
+
+	// FPS camera: follow posture Z + subtle sub motion sway
+	if (IsLocallyControlled() && FPSCamera)
+	{
+		USubCrewMovementComponent* CMC = GetCrewMovement();
+		if (CMC)
+		{
+			const float PostureZ = FMath::Lerp(CMC->ProneCameraZ, CMC->StandingCameraZ, CMC->PostureAlpha);
+
+			// Sway from sub motion
+			FVector Sway = FVector::ZeroVector;
+			Sway.X = CMC->LocalSubLinearAcceleration.X * CameraSwayAccelScale;
+			Sway.Y = CMC->LocalSubLinearAcceleration.Y * CameraSwayAccelScale;
+			Sway.Z = CMC->LocalSubAngularVelocityDegrees.Y * CameraSwayAngularScale;
+			Sway = Sway.GetClampedToMaxSize(CameraSwayMaxCm);
+
+			FPSCamera->SetRelativeLocation(FVector(Sway.X, Sway.Y, PostureZ + Sway.Z));
+		}
+	}
 }
 
 void ASubCrewCharacter::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const
@@ -134,6 +243,7 @@ void ASubCrewCharacter::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& Ou
 	Super::GetLifetimeReplicatedProps(OutLifetimeProps);
 	DOREPLIFETIME(ASubCrewCharacter, CurrentSubmarine);
 	DOREPLIFETIME(ASubCrewCharacter, bIsAtHelm);
+	DOREPLIFETIME(ASubCrewCharacter, Health);
 }
 
 void ASubCrewCharacter::OnRep_CurrentSubmarine()
@@ -325,25 +435,34 @@ void ASubCrewCharacter::Server_TakeHelm_Implementation()
 
 void ASubCrewCharacter::Server_ReleaseHelm_Implementation()
 {
+	// Command state intentionally persists on the submarine after the pilot
+	// leaves the helm. A thrust/rudder/dive-plane value set by pilot A is
+	// still active when pilot A leaves, and pilot B sees the same values when
+	// they sit down. Only the pilot slot is released here.
 	bIsAtHelm = false;
 	if (CurrentSubmarine && CurrentSubmarine->CurrentPilot == this)
 	{
 		CurrentSubmarine->ClearPilot();
 	}
+}
 
-	if (CurrentSubmarine && CurrentSubmarine->SubMovement)
+float ASubCrewCharacter::TakeDamage(float DamageAmount, struct FDamageEvent const& DamageEvent, class AController* EventInstigator, AActor* DamageCauser)
+{
+	if (DamageAmount <= 0.f || Health <= 0.f)
 	{
-		CurrentSubmarine->SubMovement->SetThrustInput(0.f);
-		CurrentSubmarine->SubMovement->SetRudderInput(0.f);
-		CurrentSubmarine->SubMovement->SetDivePlaneInput(0.f);
+		return 0.f;
 	}
 
-	if (CurrentSubmarine && CurrentSubmarine->Systems)
+	const float ActualDamage = Super::TakeDamage(DamageAmount, DamageEvent, EventInstigator, DamageCauser);
+	Health = FMath::Max(0.f, Health - ActualDamage);
+
+	if (Health <= 0.f)
 	{
-		CurrentSubmarine->Systems->SetHelmThrottleCommand(0.f);
-		CurrentSubmarine->Systems->SetHelmYawCommand(0.f);
-		CurrentSubmarine->Systems->SetHelmTrimCommand(0.f);
+		UE_LOG(LogSubCrew, Warning, TEXT("ASubCrewCharacter::TakeDamage | %s died!"), *GetName());
+		// TODO: Handle death (ragdoll, respawn, etc.) if needed for Proto03
 	}
+
+	return ActualDamage;
 }
 
 void ASubCrewCharacter::Interact()
@@ -364,14 +483,105 @@ void ASubCrewCharacter::SetWaterMovementProtectionMultiplier(float NewWaterMovem
 	WaterMovementProtectionMultiplier = FMath::Max(0.f, NewWaterMovementProtectionMultiplier);
 }
 
+void ASubCrewCharacter::ServerSetPostureTarget_Implementation(float Alpha)
+{
+	if (USubCrewMovementComponent* CrewMovement = GetCrewMovement())
+	{
+		CrewMovement->SetPostureTarget(Alpha);
+	}
+}
+
+void ASubCrewCharacter::ServerSetRunning_Implementation(bool bNewRunning)
+{
+	if (USubCrewMovementComponent* CrewMovement = GetCrewMovement())
+	{
+		if (bNewRunning)
+		{
+			CrewMovement->RequestRunStart();
+		}
+		else
+		{
+			CrewMovement->RequestRunStop();
+		}
+	}
+}
+
 bool ASubCrewCharacter::ResolveCurrentCompartment(FCompartmentState& OutState, FBox& OutLocalBounds) const
 {
-	if (!CurrentSubmarine || !CurrentSubmarine->SubHull)
+	if (!CurrentSubmarine)
 	{
 		return false;
 	}
 
-	return CurrentSubmarine->SubHull->SampleCompartmentStateAtWorldLocation(GetActorLocation(), OutState, &OutLocalBounds);
+	// Resolve compartment spatially from GeneratedDefinition or LayoutAsset.
+	const FVector LocalPos = CurrentSubmarine->GetActorTransform().InverseTransformPosition(GetActorLocation());
+	bool bFoundCompartment = false;
+
+	if (CurrentSubmarine->GeneratedDefinition)
+	{
+		const FGeneratedCompartmentDef* Comp = CurrentSubmarine->GeneratedDefinition->FindCompartmentAtLocalLocation(LocalPos);
+		if (Comp)
+		{
+			OutState.CompartmentId = Comp->CompartmentId;
+			OutLocalBounds = FBox(Comp->HydroBoundsMin, Comp->HydroBoundsMax);
+			bFoundCompartment = true;
+		}
+	}
+
+	if (!bFoundCompartment && CurrentSubmarine->SubHull && CurrentSubmarine->SubHull->LayoutAsset)
+	{
+		// LEGACY (Phase 7A, 2026-04-10) — Proto fallback. We resolve crew
+		// compartment from LayoutAsset because no GeneratedDefinition is
+		// assigned. Log once per process to avoid per-tick spam.
+		// Will be removed in Phase 7B.
+		static bool bWarnedLegacyLayoutFallback = false;
+		if (!bWarnedLegacyLayoutFallback)
+		{
+			bWarnedLegacyLayoutFallback = true;
+			UE_LOG(LogSubLegacy, Warning,
+				TEXT("[LEGACY] ASubCrewCharacter::ResolveCurrentCompartment: using LayoutAsset fallback. ")
+				TEXT("Assign a GeneratedDefinition on the submarine to use the generator path."));
+		}
+
+		const USubmarineLayoutAsset* Layout = CurrentSubmarine->SubHull->LayoutAsset;
+		float BestVolume = TNumericLimits<float>::Max();
+		for (const FSubCompartmentDef& CompDef : Layout->Compartments)
+		{
+			const FBox Bounds(CompDef.HydroBoundsMin, CompDef.HydroBoundsMax);
+			const FBox Expanded = Bounds.ExpandBy(25.f);
+			if (Expanded.IsInsideOrOn(LocalPos))
+			{
+				const float Volume = FMath::Max(1.f, Expanded.GetVolume());
+				if (Volume < BestVolume)
+				{
+					BestVolume = Volume;
+					OutState.CompartmentId = CompDef.CompartmentId;
+					OutLocalBounds = Bounds;
+					bFoundCompartment = true;
+				}
+			}
+		}
+	}
+
+	if (!bFoundCompartment)
+	{
+		return false;
+	}
+
+	// Read flood data from SubFlood.
+	OutState.FloodLevel01 = 0.f;
+	OutState.WaterHeightCm = 0.f;
+	OutState.WaterMassLiters = 0.f;
+
+	USubFloodComponent* SubFlood = CurrentSubmarine->SubFlood;
+	if (SubFlood && SubFlood->IsInitialized())
+	{
+		OutState.FloodLevel01 = SubFlood->GetCompartmentFloodLevel01(OutState.CompartmentId);
+		OutState.WaterHeightCm = SubFlood->GetCompartmentWaterHeightCm(OutState.CompartmentId);
+		OutState.WaterMassLiters = SubFlood->GetCompartmentWaterLiters(OutState.CompartmentId);
+	}
+
+	return true;
 }
 
 void ASubCrewCharacter::UpdateEnvironmentalEffects(float DeltaSeconds)
@@ -483,6 +693,12 @@ void ASubCrewCharacter::ApplyWaterMovementState(float WaterImmersion01)
 
 	const float MovementProtection = FMath::Max(0.f, WaterMovementProtectionMultiplier);
 	float WalkSpeedMultiplier = 1.f;
+	float CrewWalkSpeedMultiplier = 1.f;
+
+	if (const USubCrewMovementComponent* CrewMovement = GetCrewMovement())
+	{
+		CrewWalkSpeedMultiplier = CrewMovement->GetDesiredWalkSpeedMultiplier();
+	}
 
 	if (WaterImmersion01 >= SwimThreshold01)
 	{
@@ -499,7 +715,7 @@ void ASubCrewCharacter::ApplyWaterMovementState(float WaterImmersion01)
 		WalkSpeedMultiplier = FMath::Lerp(ShallowWadeSpeedMultiplier, DeepWadeSpeedMultiplier, RangeAlpha);
 	}
 
-	MovementComponent->MaxWalkSpeed = DefaultWalkSpeed * WalkSpeedMultiplier * MovementProtection;
+	MovementComponent->MaxWalkSpeed = DefaultWalkSpeed * CrewWalkSpeedMultiplier * WalkSpeedMultiplier * MovementProtection;
 	MovementComponent->MaxSwimSpeed = DefaultSwimSpeed * FMath::Max(0.f, SwimSpeedMultiplier) * MovementProtection;
 
 	if (bIsSwimmingByFlood)
@@ -528,13 +744,86 @@ void ASubCrewCharacter::ResetEnvironmentalState()
 
 	if (UCharacterMovementComponent* MovementComponent = GetCharacterMovement())
 	{
-		MovementComponent->MaxWalkSpeed = DefaultWalkSpeed;
+		const float CrewWalkSpeedMultiplier = GetCrewMovement() ? GetCrewMovement()->GetDesiredWalkSpeedMultiplier() : 1.f;
+		MovementComponent->MaxWalkSpeed = DefaultWalkSpeed * CrewWalkSpeedMultiplier;
 		MovementComponent->MaxSwimSpeed = DefaultSwimSpeed;
 		if (MovementComponent->MovementMode == MOVE_Swimming)
 		{
 			MovementComponent->SetMovementMode(MOVE_Walking);
 		}
 	}
+}
+
+void ASubCrewCharacter::UpdateCameraMode(float DeltaSeconds)
+{
+	if (!IsLocallyControlled())
+	{
+		return;
+	}
+
+	const float TargetAlpha = bWantsFirstPerson ? 0.f : 1.f;
+	CameraBlendAlpha = FMath::FInterpTo(CameraBlendAlpha, TargetAlpha, DeltaSeconds, CameraBlendSpeed);
+	UpdateCameraRig();
+
+	if (TPSCamera)
+	{
+		const bool bShouldUseTPSCamera = !bWantsFirstPerson || CameraBlendAlpha > 0.01f;
+		TPSCamera->SetActive(bShouldUseTPSCamera);
+	}
+
+	if (FPSCamera)
+	{
+		const bool bShouldUseFPSCamera = bWantsFirstPerson && CameraBlendAlpha <= 0.01f;
+		FPSCamera->SetActive(bShouldUseFPSCamera);
+	}
+
+	UpdateLocalHeadVisibility();
+}
+
+void ASubCrewCharacter::UpdateCameraRig()
+{
+	if (!TPSCameraBoom)
+	{
+		return;
+	}
+
+	const float PostureAlpha = GetCrewMovement() ? GetCrewMovement()->PostureAlpha : 1.f;
+	const FVector ShoulderOffset = FMath::Lerp(ThirdPersonProneSocketOffset, ThirdPersonStandingSocketOffset, PostureAlpha);
+
+	TPSCameraBoom->TargetOffset = FVector(0.f, 0.f, GetCurrentPostureCameraZ());
+	TPSCameraBoom->TargetArmLength = FMath::Lerp(0.f, ThirdPersonArmLength, CameraBlendAlpha);
+	TPSCameraBoom->SocketOffset = FMath::Lerp(FVector::ZeroVector, ShoulderOffset, CameraBlendAlpha);
+}
+
+void ASubCrewCharacter::UpdateLocalHeadVisibility()
+{
+	if (!IsLocallyControlled() || !bHideHeadInFPS)
+	{
+		return;
+	}
+
+	USkeletalMeshComponent* SkelMesh = GetMesh();
+	if (!SkelMesh)
+	{
+		return;
+	}
+
+	const bool bShouldHideHead = bWantsFirstPerson && CameraBlendAlpha <= 0.15f;
+	if (bShouldHideHead == bHeadHiddenForLocalView)
+	{
+		return;
+	}
+
+	if (bShouldHideHead)
+	{
+		SkelMesh->HideBoneByName(FName("head"), EPhysBodyOp::PBO_None);
+	}
+	else
+	{
+		SkelMesh->UnHideBoneByName(FName("head"));
+	}
+
+	bHeadHiddenForLocalView = bShouldHideHead;
 }
 
 void ASubCrewCharacter::Server_SetThrust_Implementation(float Value)
