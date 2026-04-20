@@ -16,7 +16,7 @@
 
 namespace
 {
-USubHelmWidget* ResolveShell(const UUserWidget* Widget)
+USubHelmWidget* ResolveRudderYokeShell(const UUserWidget* Widget)
 {
 	for (UObject* Outer = Widget ? Widget->GetOuter() : nullptr; Outer; Outer = Outer->GetOuter())
 	{
@@ -128,7 +128,7 @@ void UHelmRudderYokeWidget::BuildWidgetTree()
 
 void UHelmRudderYokeWidget::RefreshFromHelmData()
 {
-	USubHelmWidget* Shell = ResolveShell(this);
+	USubHelmWidget* Shell = ResolveRudderYokeShell(this);
 	if (!Shell)
 	{
 		return;
@@ -316,7 +316,7 @@ FReply UHelmRudderYokeWidget::NativeOnMouseButtonUp(const FGeometry& InGeometry,
 	// Release ramp intent to 0 so the spring-back (RudderReturnRate) kicks
 	// in if hold is disabled. If hold is on, the last commanded rudder is
 	// retained by the backend.
-	if (USubHelmWidget* Shell = ResolveShell(this))
+	if (USubHelmWidget* Shell = ResolveRudderYokeShell(this))
 	{
 		Shell->RouteSetHelmSteer(DisplayedRudderCmd);  // absolute, persists
 	}
@@ -327,7 +327,7 @@ void UHelmRudderYokeWidget::PushRudderFromDrag(float LocalX, float WidgetHalfWid
 {
 	// Map [0 .. 2 * HalfWidth] to [-1 .. +1]. Clamp.
 	const float Ratio = FMath::Clamp((LocalX - WidgetHalfWidth) / FMath::Max(1.f, WidgetHalfWidth * 0.8f), -1.f, 1.f);
-	if (USubHelmWidget* Shell = ResolveShell(this))
+	if (USubHelmWidget* Shell = ResolveRudderYokeShell(this))
 	{
 		Shell->RouteSetHelmSteer(Ratio);
 	}
@@ -335,7 +335,7 @@ void UHelmRudderYokeWidget::PushRudderFromDrag(float LocalX, float WidgetHalfWid
 
 void UHelmRudderYokeWidget::HandleHoldRudderToggle()
 {
-	if (USubHelmWidget* Shell = ResolveShell(this))
+	if (USubHelmWidget* Shell = ResolveRudderYokeShell(this))
 	{
 		Shell->RouteSetRudderHoldEnabled(!bRudderHoldCached);
 	}
@@ -343,7 +343,7 @@ void UHelmRudderYokeWidget::HandleHoldRudderToggle()
 
 void UHelmRudderYokeWidget::HandleRecenter()
 {
-	if (USubHelmWidget* Shell = ResolveShell(this))
+	if (USubHelmWidget* Shell = ResolveRudderYokeShell(this))
 	{
 		Shell->RouteSetHelmSteer(0.f);
 		// Ensure hold is disabled so the rudder truly returns to zero.

@@ -9,7 +9,7 @@
 
 namespace
 {
-USubHelmWidget* ResolveShell(const UUserWidget* Widget)
+USubHelmWidget* ResolveKillSwitchShell(const UUserWidget* Widget)
 {
 	for (UObject* Outer = Widget ? Widget->GetOuter() : nullptr; Outer; Outer = Outer->GetOuter())
 	{
@@ -71,7 +71,7 @@ void UHelmKillSwitchWidget::BuildWidgetTree()
 
 void UHelmKillSwitchWidget::RefreshFromHelmData()
 {
-	USubHelmWidget* Shell = ResolveShell(this);
+	USubHelmWidget* Shell = ResolveKillSwitchShell(this);
 	if (!Shell)
 	{
 		return;
@@ -101,7 +101,7 @@ void UHelmKillSwitchWidget::RefreshFromHelmData()
 
 void UHelmKillSwitchWidget::HandleToggle()
 {
-	if (USubHelmWidget* Shell = ResolveShell(this))
+	if (USubHelmWidget* Shell = ResolveKillSwitchShell(this))
 	{
 		Shell->RouteSetStabilizationMasterEnabled(!bMasterEnabledCached);
 	}

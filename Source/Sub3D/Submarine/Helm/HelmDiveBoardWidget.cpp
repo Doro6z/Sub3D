@@ -16,7 +16,7 @@
 
 namespace
 {
-USubHelmWidget* ResolveShell(const UUserWidget* Widget)
+USubHelmWidget* ResolveDiveBoardShell(const UUserWidget* Widget)
 {
 	for (UObject* Outer = Widget ? Widget->GetOuter() : nullptr; Outer; Outer = Outer->GetOuter())
 	{
@@ -132,7 +132,7 @@ void UHelmDiveBoardWidget::BuildWidgetTree()
 
 void UHelmDiveBoardWidget::RefreshFromHelmData()
 {
-	USubHelmWidget* Shell = ResolveShell(this);
+	USubHelmWidget* Shell = ResolveDiveBoardShell(this);
 	if (!Shell)
 	{
 		return;
@@ -351,7 +351,7 @@ FReply UHelmDiveBoardWidget::NativeOnMouseButtonDown(const FGeometry& InGeometry
 	{
 		const float Ratio = FMath::Clamp((LocalPos.X - RibbonX) / RibbonW, 0.f, 1.f);
 		const float Trim = FMath::Clamp(Ratio * 2.f - 1.f, -1.f, 1.f);
-		if (USubHelmWidget* Shell = ResolveShell(this))
+		if (USubHelmWidget* Shell = ResolveDiveBoardShell(this))
 		{
 			Shell->RouteSetHelmTrim(Trim);
 		}
@@ -362,7 +362,7 @@ FReply UHelmDiveBoardWidget::NativeOnMouseButtonDown(const FGeometry& InGeometry
 
 void UHelmDiveBoardWidget::HandleDirect()
 {
-	if (USubHelmWidget* Shell = ResolveShell(this))
+	if (USubHelmWidget* Shell = ResolveDiveBoardShell(this))
 	{
 		Shell->RouteSetAutoDepthEnabled(false);
 	}
@@ -370,7 +370,7 @@ void UHelmDiveBoardWidget::HandleDirect()
 
 void UHelmDiveBoardWidget::HandleHoldVert()
 {
-	if (USubHelmWidget* Shell = ResolveShell(this))
+	if (USubHelmWidget* Shell = ResolveDiveBoardShell(this))
 	{
 		Shell->RouteSetAutoDepthEnabled(true);
 		Shell->RouteSetBallastsActive(true);
@@ -379,7 +379,7 @@ void UHelmDiveBoardWidget::HandleHoldVert()
 
 void UHelmDiveBoardWidget::HandleSurface()
 {
-	USubHelmWidget* Shell = ResolveShell(this);
+	USubHelmWidget* Shell = ResolveDiveBoardShell(this);
 	if (!Shell)
 	{
 		return;
@@ -396,7 +396,7 @@ void UHelmDiveBoardWidget::HandleSurface()
 
 void UHelmDiveBoardWidget::HandleDiveCommand()
 {
-	USubHelmWidget* Shell = ResolveShell(this);
+	USubHelmWidget* Shell = ResolveDiveBoardShell(this);
 	if (!Shell)
 	{
 		return;
