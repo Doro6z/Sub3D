@@ -31,9 +31,9 @@ public:
 	UPROPERTY(Config, EditAnywhere, Category = "Crew")
 	bool bLogCrewJitter = false;
 
-	/** Warn when crew relative-frame position jumps more than this in a single tick. */
-	UPROPERTY(Config, EditAnywhere, Category = "Crew", meta = (ClampMin = "1.0"))
-	float CrewJitterWarnThresholdCm = 25.f;
+	/** Warn when crew relative-frame velocity exceeds this. Chosen above max plausible ground speed (sprint ~500 cm/s) so frame hitches at running speed aren't false-flagged. */
+	UPROPERTY(Config, EditAnywhere, Category = "Crew", meta = (ClampMin = "10.0"))
+	float CrewJitterWarnVelocityCmPerSec = 1200.f;
 
 	// ── Submarine | Movement ──────────────────────────────────
 	UPROPERTY(Config, EditAnywhere, Category = "Submarine|Movement")
