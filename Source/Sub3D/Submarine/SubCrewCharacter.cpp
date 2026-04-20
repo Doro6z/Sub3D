@@ -44,12 +44,6 @@ bool FindInteriorWalkableHit(
 		return false;
 	}
 
-	const TArray<UPrimitiveComponent*> WalkableComponents = Submarine->GetInteriorWalkableComponents();
-	if (WalkableComponents.Num() == 0)
-	{
-		return false;
-	}
-
 	FCollisionObjectQueryParams ObjectQueryParams;
 	ObjectQueryParams.AddObjectTypesToQuery(ECC_GameTraceChannel2);
 
@@ -70,7 +64,7 @@ bool FindInteriorWalkableHit(
 		}
 
 		UPrimitiveComponent* HitComponent = Hit.GetComponent();
-		if (!HitComponent || !WalkableComponents.Contains(HitComponent))
+		if (!Submarine->IsInteriorWalkableComponent(HitComponent))
 		{
 			continue;
 		}
@@ -124,6 +118,10 @@ ASubCrewCharacter::ASubCrewCharacter(const FObjectInitializer& ObjectInitializer
 	GetCharacterMovement()->GravityScale = 1.f;
 	GetCharacterMovement()->bOrientRotationToMovement = false;
 	GetCharacterMovement()->bEnablePhysicsInteraction = false;
+	// bIgnoreBaseRotation is toggled per-tick by USubCrewMovementComponent based
+	// on IsEmbarked(): true while on the sub (custom yaw compensation drives the
+	// rotation), false otherwise so stock based-rotation still works on any other
+	// moving base in the world.
 	GetCharacterMovement()->bIgnoreBaseRotation = false;
 	GetCharacterMovement()->bAlwaysCheckFloor = true;
 
@@ -158,6 +156,7 @@ void ASubCrewCharacter::BeginPlay()
 	}
 
 	UpdateLocalHeadVisibility();
+	EnsureEmbarkedSubmarineBinding(TEXT("BeginPlay"));
 }
 
 USubCrewMovementComponent* ASubCrewCharacter::GetCrewMovement() const
@@ -215,6 +214,7 @@ float ASubCrewCharacter::GetCurrentPostureCameraZ() const
 void ASubCrewCharacter::Tick(float DeltaSeconds)
 {
 	Super::Tick(DeltaSeconds);
+	EnsureEmbarkedSubmarineBinding(TEXT("Tick"));
 	UpdateCameraMode(DeltaSeconds);
 	UpdateEnvironmentalEffects(DeltaSeconds);
 
@@ -273,6 +273,65 @@ void ASubCrewCharacter::SetCurrentSubmarine(ASubmarineBase* Sub)
 	}
 
 	UE_LOG(LogSubCrew, Log, TEXT("SetCurrentSubmarine | Crew=%s | Sub=%s"), *GetName(), *GetNameSafe(CurrentSubmarine));
+}
+
+ASubmarineBase* ASubCrewCharacter::ResolveSubmarineFromMovementBase() const
+{
+	const UPrimitiveComponent* MovementBase = GetMovementBase();
+	const AActor* CurrentOwner = MovementBase ? MovementBase->GetOwner() : nullptr;
+	while (CurrentOwner)
+	{
+		if (ASubmarineBase* Submarine = Cast<ASubmarineBase>(const_cast<AActor*>(CurrentOwner)))
+		{
+			return Submarine;
+		}
+
+		const AActor* NextOwner = CurrentOwner->GetOwner();
+		if (!NextOwner)
+		{
+			NextOwner = CurrentOwner->GetAttachParentActor();
+		}
+
+		if (NextOwner == CurrentOwner)
+		{
+			break;
+		}
+
+		CurrentOwner = NextOwner;
+	}
+
+	return nullptr;
+}
+
+void ASubCrewCharacter::EnsureEmbarkedSubmarineBinding(const TCHAR* Context)
+{
+	if (CurrentSubmarine)
+	{
+		return;
+	}
+
+	ASubmarineBase* ResolvedSubmarine = ResolveSubmarineFromMovementBase();
+	if (!ResolvedSubmarine || !ResolvedSubmarine->IsInteriorWalkableComponent(GetMovementBase()))
+	{
+		return;
+	}
+
+	SetCurrentSubmarine(ResolvedSubmarine);
+
+	if (USubCrewMovementComponent* CrewMovement = GetCrewMovement())
+	{
+		CrewMovement->InitializeForSubmarine();
+		CrewMovement->RefreshEmbarkedFlooring();
+	}
+
+	UE_LOG(
+		LogSubCrew,
+		Log,
+		TEXT("Auto-bound submarine from movement base | Context=%s | Crew=%s | Base=%s | Sub=%s"),
+		Context,
+		*GetName(),
+		*DescribeMovementBase(this),
+		*GetNameSafe(CurrentSubmarine));
 }
 
 void ASubCrewCharacter::EnterOnFootInSubmarine(ASubmarineBase* Sub, const FTransform& SpawnXform)

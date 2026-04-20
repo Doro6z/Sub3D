@@ -256,6 +256,8 @@ public:
 	void Server_ResyncBallasts(float GlobalTarget);
 
 private:
+	ASubmarineBase* ResolveSubmarineFromMovementBase() const;
+	void EnsureEmbarkedSubmarineBinding(const TCHAR* Context);
 	void UpdateEnvironmentalEffects(float DeltaSeconds);
 	bool ResolveCurrentCompartment(FCompartmentState& OutState, FBox& OutLocalBounds) const;
 	void ApplyPressureEffects(float DeltaSeconds, float AmbientPressureKPa);

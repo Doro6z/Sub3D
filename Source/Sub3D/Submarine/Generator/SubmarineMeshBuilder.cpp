@@ -13,20 +13,20 @@ DEFINE_LOG_CATEGORY_STATIC(LogSubMeshBuilder, Log, All);
 namespace
 {
 
-struct FProfilePoint
+struct FMB_ProfilePoint
 {
 	FVector Position;
 	FVector InwardNormal;
 	float U = 0.f;
 };
 
-struct FExteriorRing
+struct FMB_ExteriorRing
 {
 	float X = 0.f;
 	float Radius = 0.f;
 };
 
-float SuperellipsePow(float Base, float Exp)
+float MB_SuperellipsePow(float Base, float Exp)
 {
 	if (FMath::Abs(Base) < KINDA_SMALL_NUMBER)
 	{
@@ -35,7 +35,7 @@ float SuperellipsePow(float Base, float Exp)
 	return FMath::Sign(Base) * FMath::Pow(FMath::Abs(Base), Exp);
 }
 
-void AppendTriangle(
+void MB_AppendTriangle(
 	TArray<int32>& Triangles,
 	int32 A,
 	int32 B,
@@ -46,7 +46,7 @@ void AppendTriangle(
 	Triangles.Add(C);
 }
 
-void AppendQuad(
+void MB_AppendQuad(
 	FSubmarineMeshSectionData& Section,
 	const FVector& A,
 	const FVector& B,
@@ -78,8 +78,8 @@ void AppendQuad(
 	Section.Tangents.Add(Tan);
 	Section.Tangents.Add(Tan);
 
-	AppendTriangle(Section.Triangles, BaseIndex, BaseIndex + 2, BaseIndex + 1);
-	AppendTriangle(Section.Triangles, BaseIndex + 1, BaseIndex + 2, BaseIndex + 3);
+	MB_AppendTriangle(Section.Triangles, BaseIndex, BaseIndex + 2, BaseIndex + 1);
+	MB_AppendTriangle(Section.Triangles, BaseIndex + 1, BaseIndex + 2, BaseIndex + 3);
 }
 
 } // anonymous namespace
@@ -248,7 +248,7 @@ bool USubmarineMeshBuilder::BuildExteriorHull(
 	const float HullOffset = FMath::Max(0.f, Envelope->ExteriorHullOffsetCm);
 
 	// Gather knot rings from hull compartments (non-airlock).
-	TArray<FExteriorRing> KnotRings;
+	TArray<FMB_ExteriorRing> KnotRings;
 	for (const FGeneratedCompartmentDef& Comp : Definition->Compartments)
 	{
 		if (Comp.SemanticType == ESubCompartmentType::Airlock)
@@ -258,7 +258,7 @@ bool USubmarineMeshBuilder::BuildExteriorHull(
 
 		if (KnotRings.Num() == 0)
 		{
-			FExteriorRing StartRing;
+			FMB_ExteriorRing StartRing;
 			StartRing.X = Comp.HydroBoundsMin.X;
 			// Use untapered radius -- taper is applied once after subdivision.
 			const float StartNorm = FMath::Clamp(Comp.HydroBoundsMin.X / SpineLength, 0.f, 1.f);
@@ -268,7 +268,7 @@ bool USubmarineMeshBuilder::BuildExteriorHull(
 
 		const float EndNorm = FMath::Clamp(Comp.HydroBoundsMax.X / SpineLength, 0.f, 1.f);
 
-		FExteriorRing EndRing;
+		FMB_ExteriorRing EndRing;
 		EndRing.X = Comp.HydroBoundsMax.X;
 		EndRing.Radius = FMath::Max(1.f, Envelope->EvaluateRadius(EndNorm) + HullOffset);
 		KnotRings.Add(EndRing);
@@ -283,18 +283,18 @@ bool USubmarineMeshBuilder::BuildExteriorHull(
 	const int32 EffRadial = FMath::Clamp(RadialSegments, 12, 64);
 	const int32 EffLongSubdiv = FMath::Clamp(LongitudinalSubdivisionsPerSpan, 1, 16);
 
-	TArray<FExteriorRing> Rings;
+	TArray<FMB_ExteriorRing> Rings;
 	Rings.Reserve(((KnotRings.Num() - 1) * EffLongSubdiv) + 1);
 
 	for (int32 RingIndex = 0; RingIndex + 1 < KnotRings.Num(); ++RingIndex)
 	{
-		const FExteriorRing& Start = KnotRings[RingIndex];
-		const FExteriorRing& End = KnotRings[RingIndex + 1];
+		const FMB_ExteriorRing& Start = KnotRings[RingIndex];
+		const FMB_ExteriorRing& End = KnotRings[RingIndex + 1];
 
 		for (int32 Step = 0; Step < EffLongSubdiv; ++Step)
 		{
 			const float T = static_cast<float>(Step) / static_cast<float>(EffLongSubdiv);
-			FExteriorRing Sample;
+			FMB_ExteriorRing Sample;
 			Sample.X = FMath::Lerp(Start.X, End.X, T);
 			Sample.Radius = FMath::InterpEaseInOut(Start.Radius, End.Radius, T, 2.f);
 			Rings.Add(Sample);
@@ -326,12 +326,12 @@ bool USubmarineMeshBuilder::BuildExteriorHull(
 			const float Theta = 2.f * PI * static_cast<float>(Seg) / static_cast<float>(EffRadial);
 			const float CosA = FMath::Cos(Theta);
 			const float SinA = FMath::Sin(Theta);
-			const float Y = R * WidthToHeightRatio * SuperellipsePow(CosA, 2.f / SectionExponent);
-			const float Z = R * SuperellipsePow(SinA, 2.f / SectionExponent);
+			const float Y = R * WidthToHeightRatio * MB_SuperellipsePow(CosA, 2.f / SectionExponent);
+			const float Z = R * MB_SuperellipsePow(SinA, 2.f / SectionExponent);
 
-			const float NY = SectionExponent * SuperellipsePow(CosA, SectionExponent - 1.f)
+			const float NY = SectionExponent * MB_SuperellipsePow(CosA, SectionExponent - 1.f)
 				/ FMath::Pow(FMath::Max(1.f, R * WidthToHeightRatio), SectionExponent);
-			const float NZ = SectionExponent * SuperellipsePow(SinA, SectionExponent - 1.f)
+			const float NZ = SectionExponent * MB_SuperellipsePow(SinA, SectionExponent - 1.f)
 				/ FMath::Pow(FMath::Max(1.f, R), SectionExponent);
 			FVector Normal(0.f, NY, NZ);
 			Normal.Normalize();
@@ -357,8 +357,8 @@ bool USubmarineMeshBuilder::BuildExteriorHull(
 			const int32 B0 = NextRingBase + Seg;
 			const int32 B1 = NextRingBase + NextSeg;
 
-			AppendTriangle(Out.Triangles, A0, A1, B0);
-			AppendTriangle(Out.Triangles, B0, A1, B1);
+			MB_AppendTriangle(Out.Triangles, A0, A1, B0);
+			MB_AppendTriangle(Out.Triangles, B0, A1, B1);
 		}
 	}
 
@@ -392,8 +392,8 @@ bool USubmarineMeshBuilder::BuildExteriorHull(
 				const float Theta = 2.f * PI * static_cast<float>(Seg) / static_cast<float>(EffRadial);
 				const float CosA = FMath::Cos(Theta);
 				const float SinA = FMath::Sin(Theta);
-				const float Y = ShrinkR * WidthToHeightRatio * SuperellipsePow(CosA, 2.f / SectionExponent);
-				const float Z = ShrinkR * SuperellipsePow(SinA, 2.f / SectionExponent);
+				const float Y = ShrinkR * WidthToHeightRatio * MB_SuperellipsePow(CosA, 2.f / SectionExponent);
+				const float Z = ShrinkR * MB_SuperellipsePow(SinA, 2.f / SectionExponent);
 				FVector Normal = FVector(-T, CosA * (1.f - T), SinA * (1.f - T));
 				Normal.Normalize();
 				Out.Vertices.Add(FVector(CapX, Y, Z));
@@ -410,8 +410,8 @@ bool USubmarineMeshBuilder::BuildExteriorHull(
 			for (int32 Seg = 0; Seg < EffRadial; ++Seg)
 			{
 				const int32 NextSeg = (Seg + 1) % EffRadial;
-				AppendTriangle(Out.Triangles, BaseA + Seg, BaseB + Seg, BaseA + NextSeg);
-				AppendTriangle(Out.Triangles, BaseA + NextSeg, BaseB + Seg, BaseB + NextSeg);
+				MB_AppendTriangle(Out.Triangles, BaseA + Seg, BaseB + Seg, BaseA + NextSeg);
+				MB_AppendTriangle(Out.Triangles, BaseA + NextSeg, BaseB + Seg, BaseB + NextSeg);
 			}
 		}
 
@@ -425,7 +425,7 @@ bool USubmarineMeshBuilder::BuildExteriorHull(
 		for (int32 Seg = 0; Seg < EffRadial; ++Seg)
 		{
 			const int32 NextSeg = (Seg + 1) % EffRadial;
-			AppendTriangle(Out.Triangles, BowCenter, LastCapBase + NextSeg, LastCapBase + Seg);
+			MB_AppendTriangle(Out.Triangles, BowCenter, LastCapBase + NextSeg, LastCapBase + Seg);
 		}
 	}
 
@@ -458,8 +458,8 @@ bool USubmarineMeshBuilder::BuildExteriorHull(
 				const float Theta = 2.f * PI * static_cast<float>(Seg) / static_cast<float>(EffRadial);
 				const float CosA = FMath::Cos(Theta);
 				const float SinA = FMath::Sin(Theta);
-				const float Y = ShrinkR * WidthToHeightRatio * SuperellipsePow(CosA, 2.f / SectionExponent);
-				const float Z = ShrinkR * SuperellipsePow(SinA, 2.f / SectionExponent);
+				const float Y = ShrinkR * WidthToHeightRatio * MB_SuperellipsePow(CosA, 2.f / SectionExponent);
+				const float Z = ShrinkR * MB_SuperellipsePow(SinA, 2.f / SectionExponent);
 				FVector Normal = FVector(T, CosA * (1.f - T), SinA * (1.f - T));
 				Normal.Normalize();
 				Out.Vertices.Add(FVector(CapX, Y, Z));
@@ -476,8 +476,8 @@ bool USubmarineMeshBuilder::BuildExteriorHull(
 			for (int32 Seg = 0; Seg < EffRadial; ++Seg)
 			{
 				const int32 NextSeg = (Seg + 1) % EffRadial;
-				AppendTriangle(Out.Triangles, BaseA + Seg, BaseA + NextSeg, BaseB + Seg);
-				AppendTriangle(Out.Triangles, BaseB + Seg, BaseA + NextSeg, BaseB + NextSeg);
+				MB_AppendTriangle(Out.Triangles, BaseA + Seg, BaseA + NextSeg, BaseB + Seg);
+				MB_AppendTriangle(Out.Triangles, BaseB + Seg, BaseA + NextSeg, BaseB + NextSeg);
 			}
 		}
 
@@ -491,7 +491,7 @@ bool USubmarineMeshBuilder::BuildExteriorHull(
 		for (int32 Seg = 0; Seg < EffRadial; ++Seg)
 		{
 			const int32 NextSeg = (Seg + 1) % EffRadial;
-			AppendTriangle(Out.Triangles, SternCenter, LastCapBase + Seg, LastCapBase + NextSeg);
+			MB_AppendTriangle(Out.Triangles, SternCenter, LastCapBase + Seg, LastCapBase + NextSeg);
 		}
 	}
 
@@ -562,7 +562,7 @@ bool USubmarineMeshBuilder::BuildInteriorCompartments(
 		// Compute arc theta range (floor-to-floor via top of cross-section).
 		const float FloorRatio = FMath::Clamp(FloorZ / HalfH, -1.f, 1.f);
 		const float InvExp = 1.f / FMath::Max(KINDA_SMALL_NUMBER, Exp);
-		const float MappedSin = FMath::Clamp(SuperellipsePow(FloorRatio, InvExp), -1.f, 1.f);
+		const float MappedSin = FMath::Clamp(MB_SuperellipsePow(FloorRatio, InvExp), -1.f, 1.f);
 		const float EndTheta = FMath::Asin(MappedSin);
 		const float StartTheta = PI - EndTheta;
 
@@ -573,8 +573,8 @@ bool USubmarineMeshBuilder::BuildInteriorCompartments(
 			{
 				const float CosA = FMath::Cos(StartTheta);
 				const float SinA = FMath::Sin(StartTheta);
-				PrevPos.X = HalfW * SuperellipsePow(CosA, Exp);
-				PrevPos.Y = HalfH * SuperellipsePow(SinA, Exp);
+				PrevPos.X = HalfW * MB_SuperellipsePow(CosA, Exp);
+				PrevPos.Y = HalfH * MB_SuperellipsePow(SinA, Exp);
 			}
 			const int32 ArcSamples = ArcSegs * 2;
 			for (int32 i = 1; i <= ArcSamples; ++i)
@@ -583,22 +583,22 @@ bool USubmarineMeshBuilder::BuildInteriorCompartments(
 				const float Theta = FMath::Lerp(StartTheta, EndTheta, T);
 				const float CosA = FMath::Cos(Theta);
 				const float SinA = FMath::Sin(Theta);
-				FVector2D CurrPos(HalfW * SuperellipsePow(CosA, Exp), HalfH * SuperellipsePow(SinA, Exp));
+				FVector2D CurrPos(HalfW * MB_SuperellipsePow(CosA, Exp), HalfH * MB_SuperellipsePow(SinA, Exp));
 				TotalArcLength += FVector2D::Distance(PrevPos, CurrPos);
 				PrevPos = CurrPos;
 			}
 		}
 
 		// Build profile points along the superellipse arc.
-		TArray<FProfilePoint> ProfilePoints;
+		TArray<FMB_ProfilePoint> ProfilePoints;
 		ProfilePoints.Reserve(ArcSegs + 1);
 		float TraversedArc = 0.f;
 		FVector2D LastPos;
 		{
 			const float CosA = FMath::Cos(StartTheta);
 			const float SinA = FMath::Sin(StartTheta);
-			LastPos.X = HalfW * SuperellipsePow(CosA, Exp);
-			LastPos.Y = HalfH * SuperellipsePow(SinA, Exp);
+			LastPos.X = HalfW * MB_SuperellipsePow(CosA, Exp);
+			LastPos.Y = HalfH * MB_SuperellipsePow(SinA, Exp);
 		}
 
 		for (int32 Seg = 0; Seg <= ArcSegs; ++Seg)
@@ -608,14 +608,14 @@ bool USubmarineMeshBuilder::BuildInteriorCompartments(
 			const float CosA = FMath::Cos(Theta);
 			const float SinA = FMath::Sin(Theta);
 
-			FVector2D Pos(HalfW * SuperellipsePow(CosA, Exp), HalfH * SuperellipsePow(SinA, Exp));
+			FVector2D Pos(HalfW * MB_SuperellipsePow(CosA, Exp), HalfH * MB_SuperellipsePow(SinA, Exp));
 
 			if (Seg > 0)
 			{
 				TraversedArc += FVector2D::Distance(LastPos, Pos);
 			}
 
-			FProfilePoint Point;
+			FMB_ProfilePoint Point;
 			Point.Position = FVector(0.f, Pos.X, Pos.Y);
 			Point.InwardNormal = FVector(0.f, -Pos.X, -Pos.Y).GetSafeNormal();
 			Point.U = (TotalArcLength > KINDA_SMALL_NUMBER) ? (TraversedArc / TotalArcLength) : T;
@@ -640,7 +640,7 @@ bool USubmarineMeshBuilder::BuildInteriorCompartments(
 			const float X = (RingIdx == 0) ? WallStartX : WallEndX;
 			const float V = static_cast<float>(RingIdx);
 
-			for (const FProfilePoint& Pt : ProfilePoints)
+			for (const FMB_ProfilePoint& Pt : ProfilePoints)
 			{
 				MeshData.WallSection.Vertices.Add(FVector(X, Pt.Position.Y, Pt.Position.Z));
 				MeshData.WallSection.Normals.Add(Pt.InwardNormal);
@@ -655,8 +655,8 @@ bool USubmarineMeshBuilder::BuildInteriorCompartments(
 			const int32 FN = Seg + 1;
 			const int32 BC = PointsPerRing + Seg;
 			const int32 BN = PointsPerRing + Seg + 1;
-			AppendTriangle(MeshData.WallSection.Triangles, FC, FN, BC);
-			AppendTriangle(MeshData.WallSection.Triangles, BC, FN, BN);
+			MB_AppendTriangle(MeshData.WallSection.Triangles, FC, FN, BC);
+			MB_AppendTriangle(MeshData.WallSection.Triangles, BC, FN, BN);
 		}
 
 		MeshData.WallSection.VertexCount = MeshData.WallSection.Vertices.Num();
@@ -681,12 +681,12 @@ bool USubmarineMeshBuilder::BuildInteriorCompartments(
 			FProcMeshTangent(1.f, 0.f, 0.f), FProcMeshTangent(1.f, 0.f, 0.f),
 			FProcMeshTangent(1.f, 0.f, 0.f), FProcMeshTangent(1.f, 0.f, 0.f)
 		};
-		AppendTriangle(MeshData.FloorSection.Triangles, 0, 2, 1);
-		AppendTriangle(MeshData.FloorSection.Triangles, 1, 2, 3);
+		MB_AppendTriangle(MeshData.FloorSection.Triangles, 0, 2, 1);
+		MB_AppendTriangle(MeshData.FloorSection.Triangles, 1, 2, 3);
 
 		// -- Bow/Stern cap discs (fan triangulation from centroid) --
 		FVector2D CapCentroid(0.f, 0.f);
-		for (const FProfilePoint& Pt : ProfilePoints)
+		for (const FMB_ProfilePoint& Pt : ProfilePoints)
 		{
 			CapCentroid += FVector2D(Pt.Position.Y, Pt.Position.Z);
 		}
@@ -700,7 +700,7 @@ bool USubmarineMeshBuilder::BuildInteriorCompartments(
 			Section.UVs.Add(FVector2D(0.5f, 0.5f));
 			Section.Tangents.Add(FProcMeshTangent(0.f, 1.f, 0.f));
 
-			for (const FProfilePoint& Pt : ProfilePoints)
+			for (const FMB_ProfilePoint& Pt : ProfilePoints)
 			{
 				Section.Vertices.Add(FVector(XPos, Pt.Position.Y, Pt.Position.Z));
 				Section.Normals.Add(FaceNormal);
@@ -714,11 +714,11 @@ bool USubmarineMeshBuilder::BuildInteriorCompartments(
 				const int32 Next = (i + 1) % TotalPts;
 				if (FaceNormal.X < 0.f)
 				{
-					AppendTriangle(Section.Triangles, CI, CI + 1 + Next, CI + 1 + i);
+					MB_AppendTriangle(Section.Triangles, CI, CI + 1 + Next, CI + 1 + i);
 				}
 				else
 				{
-					AppendTriangle(Section.Triangles, CI, CI + 1 + i, CI + 1 + Next);
+					MB_AppendTriangle(Section.Triangles, CI, CI + 1 + i, CI + 1 + Next);
 				}
 			}
 
@@ -773,12 +773,12 @@ bool USubmarineMeshBuilder::BuildInteriorCompartments(
 		const FVector P111(Max.X, Max.Y, Max.Z);
 
 		// Walls: 4 vertical faces (inward-facing normals for interior view).
-		AppendQuad(MeshData.WallSection, P010, P000, P011, P001, -FVector::ForwardVector, -FVector::RightVector);
-		AppendQuad(MeshData.WallSection, P100, P110, P101, P111, FVector::ForwardVector, FVector::RightVector);
-		AppendQuad(MeshData.WallSection, P000, P100, P001, P101, -FVector::RightVector, FVector::ForwardVector);
-		AppendQuad(MeshData.WallSection, P110, P010, P111, P011, FVector::RightVector, -FVector::ForwardVector);
+		MB_AppendQuad(MeshData.WallSection, P010, P000, P011, P001, -FVector::ForwardVector, -FVector::RightVector);
+		MB_AppendQuad(MeshData.WallSection, P100, P110, P101, P111, FVector::ForwardVector, FVector::RightVector);
+		MB_AppendQuad(MeshData.WallSection, P000, P100, P001, P101, -FVector::RightVector, FVector::ForwardVector);
+		MB_AppendQuad(MeshData.WallSection, P110, P010, P111, P011, FVector::RightVector, -FVector::ForwardVector);
 		// Ceiling.
-		AppendQuad(MeshData.WallSection, P001, P101, P011, P111, FVector::UpVector, FVector::ForwardVector);
+		MB_AppendQuad(MeshData.WallSection, P001, P101, P011, P111, FVector::UpVector, FVector::ForwardVector);
 
 		MeshData.WallSection.VertexCount = MeshData.WallSection.Vertices.Num();
 		MeshData.WallSection.TriangleCount = MeshData.WallSection.Triangles.Num();
@@ -791,8 +791,8 @@ bool USubmarineMeshBuilder::BuildInteriorCompartments(
 			FProcMeshTangent(1.f, 0.f, 0.f), FProcMeshTangent(1.f, 0.f, 0.f),
 			FProcMeshTangent(1.f, 0.f, 0.f), FProcMeshTangent(1.f, 0.f, 0.f)
 		};
-		AppendTriangle(MeshData.FloorSection.Triangles, 0, 2, 1);
-		AppendTriangle(MeshData.FloorSection.Triangles, 1, 2, 3);
+		MB_AppendTriangle(MeshData.FloorSection.Triangles, 0, 2, 1);
+		MB_AppendTriangle(MeshData.FloorSection.Triangles, 1, 2, 3);
 
 		Definition->InteriorMeshes.Add(MoveTemp(MeshData));
 	}
@@ -849,7 +849,7 @@ bool USubmarineMeshBuilder::BuildBulkheads(
 		// Generate outline from floor-left through top arc to floor-right.
 		const float FloorRatio = FMath::Clamp(FloorZ / HalfH, -1.f, 1.f);
 		const float InvExp = 1.f / FMath::Max(KINDA_SMALL_NUMBER, Exp);
-		const float MappedSin = FMath::Clamp(SuperellipsePow(FloorRatio, InvExp), -1.f, 1.f);
+		const float MappedSin = FMath::Clamp(MB_SuperellipsePow(FloorRatio, InvExp), -1.f, 1.f);
 		const float EndTheta = FMath::Asin(MappedSin);
 		const float StartTheta = PI - EndTheta;
 
@@ -861,8 +861,8 @@ bool USubmarineMeshBuilder::BuildBulkheads(
 			const float Theta = FMath::Lerp(StartTheta, EndTheta, T);
 			const float CosA = FMath::Cos(Theta);
 			const float SinA = FMath::Sin(Theta);
-			const float Y = HalfW * SuperellipsePow(CosA, Exp);
-			const float Z = HalfH * SuperellipsePow(SinA, Exp);
+			const float Y = HalfW * MB_SuperellipsePow(CosA, Exp);
+			const float Z = HalfH * MB_SuperellipsePow(SinA, Exp);
 			OutlinePoints.Add(FVector2D(Y, Z));
 		}
 
@@ -1100,12 +1100,12 @@ bool USubmarineMeshBuilder::BuildBulkheads(
 			{
 				if (bReverseWinding)
 				{
-					AppendTriangle(MeshData.PanelSection.Triangles,
+					MB_AppendTriangle(MeshData.PanelSection.Triangles,
 						Base + Tri.X, Base + Tri.Z, Base + Tri.Y);
 				}
 				else
 				{
-					AppendTriangle(MeshData.PanelSection.Triangles,
+					MB_AppendTriangle(MeshData.PanelSection.Triangles,
 						Base + Tri.X, Base + Tri.Y, Base + Tri.Z);
 				}
 			}
@@ -1133,7 +1133,7 @@ bool USubmarineMeshBuilder::BuildBulkheads(
 			FVector2D EdgeDir = P1 - P0;
 			FVector EdgeNormal = FVector(0.f, -EdgeDir.Y, EdgeDir.X).GetSafeNormal();
 
-			AppendQuad(
+			MB_AppendQuad(
 				MeshData.PanelSection,
 				FVector(ForeX, P0.X, P0.Y),
 				FVector(AftX, P0.X, P0.Y),

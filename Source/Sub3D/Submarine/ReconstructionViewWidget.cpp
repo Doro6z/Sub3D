@@ -1,9 +1,12 @@
 #include "ReconstructionViewWidget.h"
 
 #include "Brushes/SlateColorBrush.h"
+#include "HelmNavigationDisplayComponent.h"
 #include "Input/Reply.h"
 #include "Rendering/DrawElements.h"
 #include "Styling/CoreStyle.h"
+#include "SubMovementComponent.h"
+#include "SubmarineBase.h"
 
 namespace
 {
@@ -402,6 +405,26 @@ int32 UReconstructionViewWidget::PaintInstrumentContent(
 		CommitmentWarning.bWarning ? WarningColor : FrameColor,
 		NextLayer + 2,
 		SmallFont);
+
+	// Top-right HUD overlay: own-ship speed / pitch / heading. Same layout
+	// as TacticalGraphView so the player has a consistent maneuvering
+	// readout regardless of which instrument they're focused on.
+	if (CachedDisplayComponent.IsValid())
+	{
+		if (const ASubmarineBase* Sub = Cast<ASubmarineBase>(CachedDisplayComponent->GetOwner()))
+		{
+			const float SpeedMs = (Sub->SubMovement ? Sub->SubMovement->ForwardSpeedCmS : 0.f) * 0.01f;
+			const FRotator Rot = Sub->GetActorRotation();
+			const float PitchDeg = FRotator::NormalizeAxis(Rot.Pitch);
+			const float YawDeg = FRotator::NormalizeAxis(Rot.Yaw);
+			const float YawCompass = (YawDeg < 0.f) ? (YawDeg + 360.f) : YawDeg;
+
+			const FVector2D HudPos(ContentPos.X + ContentSize.X - 110.f, ContentPos.Y + 6.f);
+			DrawTextLine(HudPos,                         FString::Printf(TEXT("SPD %5.1f m/s"), SpeedMs), AccentColor, NextLayer + 2, SmallFont);
+			DrawTextLine(HudPos + FVector2D(0.f, 13.f), FString::Printf(TEXT("PITCH %+5.1f\u00B0"), PitchDeg), (FMath::Abs(PitchDeg) > 20.f ? WarningColor : AccentColor), NextLayer + 2, SmallFont);
+			DrawTextLine(HudPos + FVector2D(0.f, 26.f), FString::Printf(TEXT("HDG %5.0f\u00B0"), YawCompass), AccentColor, NextLayer + 2, SmallFont);
+		}
+	}
 
 	return NextLayer + 3;
 }

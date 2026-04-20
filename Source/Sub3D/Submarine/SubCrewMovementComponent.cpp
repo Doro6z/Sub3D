@@ -39,6 +39,11 @@ USubCrewMovementComponent::USubCrewMovementComponent()
 
 void USubCrewMovementComponent::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
 {
+	// Scope bIgnoreBaseRotation to embarked state only: our ApplyYawCompensation
+	// owns the yaw while embarked, but off-sub moving bases must keep the stock
+	// rotation behavior.
+	bIgnoreBaseRotation = IsEmbarked();
+
 	Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
 
 	TickPosture(DeltaTime);
@@ -133,19 +138,8 @@ bool USubCrewMovementComponent::IsEmbarked() const
 
 bool USubCrewMovementComponent::IsAcceptedEmbarkedBase(const UPrimitiveComponent* CandidateBase) const
 {
-	if (!CandidateBase)
-	{
-		return false;
-	}
-
 	const ASubmarineBase* Submarine = GetCurrentSubmarine();
-	if (!Submarine)
-	{
-		return false;
-	}
-
-	const TArray<UPrimitiveComponent*> WalkableComponents = Submarine->GetInteriorWalkableComponents();
-	return WalkableComponents.Num() == 0 || WalkableComponents.Contains(const_cast<UPrimitiveComponent*>(CandidateBase));
+	return Submarine && Submarine->IsInteriorWalkableComponent(CandidateBase);
 }
 
 void USubCrewMovementComponent::UpdateInertialState()
@@ -375,7 +369,7 @@ void USubCrewMovementComponent::UpdateBraceState()
 
 void USubCrewMovementComponent::ApplyYawCompensation()
 {
-	if (!CharacterOwner || !CharacterOwner->IsLocallyControlled())
+	if (!CharacterOwner)
 	{
 		return;
 	}
@@ -392,20 +386,34 @@ void USubCrewMovementComponent::ApplyYawCompensation()
 		return;
 	}
 
-	if (AController* Controller = CharacterOwner->GetController())
-	{
-		FRotator ControlRotation = Controller->GetControlRotation();
-		ControlRotation.Yaw = FRotator::NormalizeAxis(ControlRotation.Yaw + YawDelta);
-		Controller->SetControlRotation(ControlRotation);
+	// Rotate the actor to follow the sub's yaw. Applied on every instance so
+	// the crew tracks the sub on both server and clients. On remote peers the
+	// sub transform is interpolated/extrapolated (see USubMovementComponent
+	// client interp path), so the yaw delta is not bit-identical across peers;
+	// it is close enough for visual coherence but not a replication guarantee.
+	FRotator NewActorRotation = CharacterOwner->GetActorRotation();
+	NewActorRotation.Yaw = FRotator::NormalizeAxis(NewActorRotation.Yaw + YawDelta);
+	CharacterOwner->SetActorRotation(NewActorRotation);
 
-		if (bDebugLogCrewMovement)
+	// Keep the local camera in sync so bUseControllerRotationYaw does not
+	// snap the pawn yaw back on the next FaceRotation pass.
+	if (CharacterOwner->IsLocallyControlled())
+	{
+		if (AController* Controller = CharacterOwner->GetController())
 		{
-			UE_LOG(
-				LogSubCrewMovement,
-				Log,
-				TEXT("YawCompensation | DeltaYaw=%.3f | NewControlYaw=%.3f"),
-				YawDelta,
-				ControlRotation.Yaw);
+			FRotator ControlRotation = Controller->GetControlRotation();
+			ControlRotation.Yaw = FRotator::NormalizeAxis(ControlRotation.Yaw + YawDelta);
+			Controller->SetControlRotation(ControlRotation);
+
+			if (bDebugLogCrewMovement)
+			{
+				UE_LOG(
+					LogSubCrewMovement,
+					Log,
+					TEXT("YawCompensation | DeltaYaw=%.3f | NewControlYaw=%.3f"),
+					YawDelta,
+					ControlRotation.Yaw);
+			}
 		}
 	}
 }

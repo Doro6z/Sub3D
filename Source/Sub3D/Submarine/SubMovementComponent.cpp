@@ -17,6 +17,49 @@ DEFINE_LOG_CATEGORY_STATIC(LogSubMovement, Log, All);
 
 static constexpr float G_SI = 9.81f;
 
+// Runtime debug toggles for Point 1 jitter diagnosis. Set from the UE console
+// in PIE, e.g. `sub.DisableVisualInterp 1` or `sub.LogVisualInterp 1`.
+static TAutoConsoleVariable<bool> CVarSubDisableVisualInterp(
+	TEXT("sub.DisableVisualInterp"),
+	false,
+	TEXT("Authoritative path only. When true, skip the Lerp(PrevSim, CurrSim, alpha) ")
+	TEXT("visual write — actor root sits on CurrSim. Use to isolate whether Point 1 ")
+	TEXT("interpolation is the source of observed jitter."),
+	ECVF_Default);
+
+static TAutoConsoleVariable<bool> CVarSubLogVisualInterp(
+	TEXT("sub.LogVisualInterp"),
+	false,
+	TEXT("Emit SUB_TRACE per-tick log: PreUndo / PostUndo / PostSim / PostInterp poses, ")
+	TEXT("alpha, sim-steps-this-tick, external-drift (vs last tick end), tick delta. ")
+	TEXT("Flags BACKWARD and EXTERNAL_WRITE anomalies as Error."),
+	ECVF_Default);
+
+static TAutoConsoleVariable<float> CVarSubTraceExternalDriftThresholdCm(
+	TEXT("sub.TraceExternalDriftThresholdCm"),
+	0.01f,
+	TEXT("Threshold (cm) above which an ExtDrift delta is flagged as EXTERNAL_WRITE. ")
+	TEXT("Distance between actor.Location at tick start and the pose we wrote at end of ")
+	TEXT("previous tick. Non-zero in standalone means a foreign writer exists."),
+	ECVF_Default);
+
+static TAutoConsoleVariable<float> CVarSubTraceBackwardThresholdCm(
+	TEXT("sub.TraceBackwardThresholdCm"),
+	0.1f,
+	TEXT("Threshold (cm) below which TickDelta.X is flagged as BACKWARD motion. ")
+	TEXT("Negative forward delta during cruise is a hard anomaly."),
+	ECVF_Default);
+
+static TAutoConsoleVariable<float> CVarSubMaxInterpDurationSec(
+	TEXT("sub.MaxInterpDurationSec"),
+	0.1f,
+	TEXT("Upper bound (seconds) on the InterpDuration computed by HandleReplicatedNetState. ")
+	TEXT("Without this clamp, a large server-side frame gap or a client-side framerate dip ")
+	TEXT("produces FrameDelta * FixedSimDt values of several hundred ms, which makes the ")
+	TEXT("client visually crawl over the true sub distance rather than catch up. Default 100ms. ")
+	TEXT("Set <= 0 to disable the clamp (legacy adaptive-only behavior)."),
+	ECVF_Default);
+
 namespace
 {
 bool UsesComplexAsSimpleSweep(const UPrimitiveComponent* PrimitiveComponent)
@@ -115,12 +158,25 @@ void USubMovementComponent::TickComponent(float DeltaTime, ELevelTick TickType, 
 		Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
 	}
 
-	// Undo visual extrapolation from previous frame so sim operates on authoritative position.
-	if (bHasVisualExtrapolation && Owner->HasAuthority())
+	const bool bTraceEnabled = CVarSubLogVisualInterp.GetValueOnGameThread();
+	const bool bDisableInterp = CVarSubDisableVisualInterp.GetValueOnGameThread();
+
+	// Captured at the very top for EXTERNAL_WRITE detection: any delta
+	// between LastPostTickLocation (end of our previous tick) and PreUndoLoc
+	// (start of this tick, before we do anything) means a foreign writer
+	// modified the actor root between ticks.
+	const FVector PreUndoLoc = Owner->GetActorLocation();
+	const FRotator PreUndoRot = Owner->GetActorRotation();
+
+	// Undo visual offset from previous frame so the sim operates on the
+	// authoritative post-step pose, not on the frame-time interpolated pose.
+	if (bHasVisualOffset && Owner->HasAuthority())
 	{
 		Owner->SetActorLocationAndRotation(AuthoritativeLocation, AuthoritativeRotation, false, nullptr, ETeleportType::TeleportPhysics);
-		bHasVisualExtrapolation = false;
+		bHasVisualOffset = false;
 	}
+
+	const FVector PostUndoLoc = Owner->GetActorLocation();
 
 	if (const ASubmarineBase* Submarine = Cast<ASubmarineBase>(Owner))
 	{
@@ -156,40 +212,122 @@ void USubMovementComponent::TickComponent(float DeltaTime, ELevelTick TickType, 
 	SimAccumulator += DeltaTime;
 	const float FixedSimDt = FixedSimulationHz > KINDA_SMALL_NUMBER ? (1.f / FixedSimulationHz) : (1.f / 30.f);
 	bool bSimulated = false;
+	int32 StepsThisTick = 0;
 
 	while (SimAccumulator >= FixedSimDt)
 	{
+		// Capture the pre-step pose as PrevSim. After the loop exits,
+		// PrevSimLocation/Rotation hold the pose at the start of the last
+		// executed SimulateStep. When the loop runs multiple steps in one
+		// tick (catch-up after a frame spike), only the last two poses are
+		// retained — intermediate steps are not visualized.
+		PrevSimLocation = Owner->GetActorLocation();
+		PrevSimRotation = Owner->GetActorRotation();
+
 		SimulateStep(FixedSimDt);
 		SimAccumulator -= FixedSimDt;
 		++SimFrameCounter;
+		++StepsThisTick;
 		bSimulated = true;
+		bHasSimBuffer = true;
 	}
 
 	if (bSimulated)
 	{
 		if (ASubmarineBase* Sub = Cast<ASubmarineBase>(Owner))
 		{
+			// Tick-order invariant: RefreshRepState must run before any
+			// visual offset is written to the actor. It samples the actor
+			// transform directly (SubmarineBase::RefreshRepState), and the
+			// actor currently holds CurrSim (post-last-step pose). Writing
+			// an interpolated pose below would poison replication with a
+			// non-authoritative transform.
 			Sub->RefreshRepState();
 		}
 	}
 
-	// Visual extrapolation: project actor forward using current velocity
-	// to fill the gap between the last sim step and the render frame.
+	// Capture the latest sim-authoritative pose as CurrSim.
 	AuthoritativeLocation = Owner->GetActorLocation();
 	AuthoritativeRotation = Owner->GetActorRotation();
 
-	if (SimAccumulator > KINDA_SMALL_NUMBER)
-	{
-		const FVector ExtrapolatedLocation = AuthoritativeLocation + Velocity * SimAccumulator;
-		FRotator ExtrapolatedRotation = AuthoritativeRotation;
-		ExtrapolatedRotation.Yaw += YawRateDegPerSec * SimAccumulator;
-		ExtrapolatedRotation.Pitch = FMath::Clamp(
-			ExtrapolatedRotation.Pitch + PitchRateDegPerSec * SimAccumulator,
-			-MaxDivePlanePitch, MaxDivePlanePitch);
+	const FVector PostSimLoc = AuthoritativeLocation;
 
-		Owner->SetActorLocationAndRotation(ExtrapolatedLocation, ExtrapolatedRotation, false, nullptr, ETeleportType::None);
-		bHasVisualExtrapolation = true;
+	// Visual interpolation between PrevSim and CurrSim. Alpha = how far
+	// we are into the next sim step (SimAccumulator / FixedSimDt). The
+	// rendered pose trails CurrSim by at most one sim step (~16.6ms at
+	// 60Hz), which is the cost of showing only known poses instead of
+	// velocity-based predictions that diverge each step due to drag,
+	// damping, pitch/vertical coupling, and idle restore.
+	//
+	// Suppressed while in contact (Option A): holding CurrSim directly on
+	// the wall avoids visual oscillation between pre- and post-depenetration
+	// poses.
+	// Suppressed when `sub.DisableVisualInterp 1` (debug): actor sits on
+	// CurrSim so we can isolate the jitter source in PIE.
+	float AlphaUsed = 0.f;
+	bool bWroteInterp = false;
+	if (!bDisableInterp && bHasSimBuffer && !bLastStepHadBlockingHit)
+	{
+		AlphaUsed = FMath::Clamp(SimAccumulator / FixedSimDt, 0.f, 1.f);
+		const FVector InterpLocation = FMath::Lerp(PrevSimLocation, AuthoritativeLocation, AlphaUsed);
+		const FRotator InterpRotation = FMath::Lerp(PrevSimRotation, AuthoritativeRotation, AlphaUsed);
+
+		Owner->SetActorLocationAndRotation(InterpLocation, InterpRotation, false, nullptr, ETeleportType::None);
+		bHasVisualOffset = true;
+		bWroteInterp = true;
 	}
+
+	// Snapshot the final pose we leave on the actor root, for the next
+	// tick's EXTERNAL_WRITE check and the BACKWARD anomaly check.
+	const FVector PostInterpLoc = Owner->GetActorLocation();
+	const FRotator PostInterpRot = Owner->GetActorRotation();
+
+	if (bTraceEnabled)
+	{
+		const FVector ExtDrift = bHasLastPostTick ? (PreUndoLoc - LastPostTickLocation) : FVector::ZeroVector;
+		const FVector TickDelta = bHasLastPostTick ? (PostInterpLoc - LastPostTickLocation) : FVector::ZeroVector;
+
+		UE_LOG(LogSubMovement, Log,
+			TEXT("SUB_TRACE | DT=%.4f Accum=%.4f Alpha=%.3f Steps=%d Contact=%d Interp=%d")
+			TEXT(" | PreUndo=(%.2f,%.2f,%.2f) PostUndo=(%.2f,%.2f,%.2f) PostSim=(%.2f,%.2f,%.2f) PostInterp=(%.2f,%.2f,%.2f)")
+			TEXT(" | PrevSim=(%.2f,%.2f,%.2f) CurrSim=(%.2f,%.2f,%.2f)")
+			TEXT(" | ExtDrift=(%.3f,%.3f,%.3f) TickDelta=(%.3f,%.3f,%.3f)"),
+			DeltaTime, SimAccumulator, AlphaUsed, StepsThisTick,
+			bLastStepHadBlockingHit ? 1 : 0, bWroteInterp ? 1 : 0,
+			PreUndoLoc.X, PreUndoLoc.Y, PreUndoLoc.Z,
+			PostUndoLoc.X, PostUndoLoc.Y, PostUndoLoc.Z,
+			PostSimLoc.X, PostSimLoc.Y, PostSimLoc.Z,
+			PostInterpLoc.X, PostInterpLoc.Y, PostInterpLoc.Z,
+			PrevSimLocation.X, PrevSimLocation.Y, PrevSimLocation.Z,
+			AuthoritativeLocation.X, AuthoritativeLocation.Y, AuthoritativeLocation.Z,
+			ExtDrift.X, ExtDrift.Y, ExtDrift.Z,
+			TickDelta.X, TickDelta.Y, TickDelta.Z);
+
+		const float ExtDriftThreshold = CVarSubTraceExternalDriftThresholdCm.GetValueOnGameThread();
+		if (bHasLastPostTick && ExtDrift.Size() > ExtDriftThreshold)
+		{
+			UE_LOG(LogSubMovement, Error,
+				TEXT("SUB_TRACE EXTERNAL_WRITE | A foreign writer modified the actor between last tick's end and this tick's start.")
+				TEXT(" | LastPostTick=(%.3f,%.3f,%.3f) PreUndo=(%.3f,%.3f,%.3f) Drift=%.3f"),
+				LastPostTickLocation.X, LastPostTickLocation.Y, LastPostTickLocation.Z,
+				PreUndoLoc.X, PreUndoLoc.Y, PreUndoLoc.Z,
+				ExtDrift.Size());
+		}
+
+		const float BackwardThreshold = CVarSubTraceBackwardThresholdCm.GetValueOnGameThread();
+		if (bHasLastPostTick && TickDelta.X < -BackwardThreshold)
+		{
+			UE_LOG(LogSubMovement, Error,
+				TEXT("SUB_TRACE BACKWARD | Actor moved backward on X this tick during forward cruise.")
+				TEXT(" | TickDelta.X=%.3f Alpha=%.3f Steps=%d PrevSim.X=%.3f CurrSim.X=%.3f"),
+				TickDelta.X, AlphaUsed, StepsThisTick,
+				PrevSimLocation.X, AuthoritativeLocation.X);
+		}
+	}
+
+	LastPostTickLocation = PostInterpLoc;
+	LastPostTickRotation = PostInterpRot;
+	bHasLastPostTick = true;
 }
 
 void USubMovementComponent::SimulateStep(float DeltaTime)
@@ -290,7 +428,17 @@ void USubMovementComponent::ApplyPhysics(float DeltaTime)
 	const float TargetYawRate = RudderInput * RudderTurnRate * SpeedAuthority;
 	YawRateDegPerSec += (TargetYawRate - YawRateDegPerSec * YawRateDamping) * DeltaTime;
 	YawRateDegPerSec = FMath::Clamp(YawRateDegPerSec, -RudderTurnRate, RudderTurnRate);
-	NewRotation.Yaw += YawRateDegPerSec * DeltaTime;
+
+	// Option C — contact-aware yaw damping. The rate state itself keeps
+	// tracking rudder input (so releasing contact feels immediate), but the
+	// yaw actually committed to the rotation this tick is scaled down while
+	// the previous step hit something. This kills the "full thrust + wall +
+	// rudder" saccade where rotation kept driving the hull into geometry
+	// the sweep then had to push back out.
+	const float ContactYawScale = bLastStepHadBlockingHit
+		? FMath::Clamp(ContactYawDampingFactor, 0.f, 1.f)
+		: 1.f;
+	NewRotation.Yaw += YawRateDegPerSec * DeltaTime * ContactYawScale;
 
 	// ── 4. Pitch (hydroplane + ballast trim + BG restoring moment) ──────
 	const float HydroplaneSpeedFactor = HydroplaneAuthoritySpeed > KINDA_SMALL_NUMBER
@@ -415,10 +563,6 @@ void USubMovementComponent::ApplyPhysics(float DeltaTime)
 			return false;
 		}
 
-		const FVector Start = SweepShape->GetComponentLocation();
-		const FVector End = Start + MoveDelta;
-		const FQuat SweepRot = SweepShape->GetComponentQuat();
-
 		if (UsesComplexAsSimpleSweep(SweepShape))
 		{
 			if (bDebugLogCollisionSweeps || bDebugLogSubMovement)
@@ -438,66 +582,102 @@ void USubMovementComponent::ApplyPhysics(float DeltaTime)
 		Params.AddIgnoredActor(Owner);
 		Params.bTraceComplex = SweepShape->bTraceComplexOnMove;
 
-		TArray<FHitResult> Hits;
-		const bool bAnyHit = World->ComponentSweepMulti(Hits, SweepShape, Start, End, SweepRot, Params);
-		FHitResult Blocking;
-		bool bHasBlocking = false;
-		if (bAnyHit)
+		// Iterative sweep → advance → slide → re-sweep. Each iteration consumes
+		// the remaining portion of the move along one contact plane; on the
+		// next pass we re-sweep the projected remainder rather than applying
+		// it blind. This is what kills the "enter / exit / re-collide" chatter
+		// on grazing contacts and inner corners. Bounded to MaxSlideIterations
+		// so a pathological case (two near-parallel walls) can't live-lock.
+		FVector RemainingDelta = MoveDelta;
+		bool bAnyBlocking = false;
+		const int32 IterationBound = FMath::Clamp(MaxSlideIterations, 1, 4);
+
+		for (int32 Iteration = 0; Iteration < IterationBound; ++Iteration)
 		{
-			for (const FHitResult& H : Hits)
+			if (RemainingDelta.IsNearlyZero())
 			{
-				if (H.bBlockingHit)
+				break;
+			}
+
+			const FVector Start = SweepShape->GetComponentLocation();
+			const FVector End = Start + RemainingDelta;
+			const FQuat SweepRot = SweepShape->GetComponentQuat();
+
+			TArray<FHitResult> Hits;
+			const bool bAnyHit = World->ComponentSweepMulti(Hits, SweepShape, Start, End, SweepRot, Params);
+			FHitResult Blocking;
+			bool bHasBlocking = false;
+			if (bAnyHit)
+			{
+				for (const FHitResult& H : Hits)
 				{
-					Blocking = H;
-					bHasBlocking = true;
-					break;
+					if (H.bBlockingHit)
+					{
+						Blocking = H;
+						bHasBlocking = true;
+						break;
+					}
 				}
+			}
+
+			if (!bHasBlocking)
+			{
+				Owner->AddActorWorldOffset(RemainingDelta, false, nullptr, ETeleportType::None);
+				RemainingDelta = FVector::ZeroVector;
+				break;
+			}
+
+			bAnyBlocking = true;
+
+			// Advance up to the hit, then depenetrate if the sweep started inside geometry.
+			const float HitTime = FMath::Clamp(Blocking.Time, 0.f, 1.f);
+			const FVector AdvanceDelta = RemainingDelta * HitTime;
+			if (!AdvanceDelta.IsNearlyZero())
+			{
+				Owner->AddActorWorldOffset(AdvanceDelta, false, nullptr, ETeleportType::None);
+			}
+
+			if (Blocking.bStartPenetrating)
+			{
+				const FVector Depen = Blocking.Normal * FMath::Max(2.f, Blocking.PenetrationDepth + 1.f);
+				Owner->AddActorWorldOffset(Depen, false, nullptr, ETeleportType::None);
+			}
+
+			// Project the leftover motion onto the hit plane and project the
+			// outgoing velocity so subsequent iterations (and the next tick)
+			// see a tangent-only velocity along every contact normal hit
+			// this tick.
+			const float RemainingFraction = 1.f - HitTime;
+			RemainingDelta = FVector::VectorPlaneProject(RemainingDelta * RemainingFraction, Blocking.Normal);
+			InOutVelocity = FVector::VectorPlaneProject(InOutVelocity, Blocking.Normal);
+
+			if (bDebugLogCollisionSweeps)
+			{
+				UE_LOG(LogSubMovement, Log,
+					TEXT("HullSweep hit | Iter=%d | Comp=%s | OtherActor=%s | OtherComp=%s | Normal=%s | Time=%.3f"),
+					Iteration,
+					*GetNameSafe(SweepShape),
+					*GetNameSafe(Blocking.GetActor()),
+					*GetNameSafe(Blocking.GetComponent()),
+					*Blocking.Normal.ToCompactString(),
+					HitTime);
 			}
 		}
 
-		if (!bHasBlocking)
+		// If iterations were exhausted and a non-zero remainder is still
+		// pending, DROP it. The previous "apply unswept as fallback" path
+		// could push the hull through a corner / double-wall geometry
+		// because no sweep was performed for that final segment. The
+		// player feels a tiny stick in true corners, but the sub never
+		// teleports through walls. Sticky > tunneling.
+		if (!RemainingDelta.IsNearlyZero() && bDebugLogCollisionSweeps)
 		{
-			Owner->AddActorWorldOffset(MoveDelta, false, nullptr, ETeleportType::None);
-			return false;
+			UE_LOG(LogSubMovement, Verbose,
+				TEXT("HullSweep | iter exhausted, dropping residual=%s (mag=%.2f)"),
+				*RemainingDelta.ToCompactString(), RemainingDelta.Size());
 		}
 
-		// Partial move up to the blocking contact, then depenetrate if needed.
-		const float HitTime = FMath::Clamp(Blocking.Time, 0.f, 1.f);
-		const FVector AdvanceDelta = MoveDelta * HitTime;
-		if (!AdvanceDelta.IsNearlyZero())
-		{
-			Owner->AddActorWorldOffset(AdvanceDelta, false, nullptr, ETeleportType::None);
-		}
-
-		if (Blocking.bStartPenetrating)
-		{
-			const FVector Depen = Blocking.Normal * FMath::Max(2.f, Blocking.PenetrationDepth + 1.f);
-			Owner->AddActorWorldOffset(Depen, false, nullptr, ETeleportType::None);
-		}
-
-		// Slide: project remaining motion onto the hit plane and move once more
-		// without a second sweep. Good enough for smooth grazing; a re-sweep
-		// would add cost for marginal benefit at these sub-tick scales.
-		const float RemainingTime = 1.f - HitTime;
-		const FVector SlideDelta = FVector::VectorPlaneProject(MoveDelta * RemainingTime, Blocking.Normal);
-		if (!SlideDelta.IsNearlyZero())
-		{
-			Owner->AddActorWorldOffset(SlideDelta, false, nullptr, ETeleportType::None);
-		}
-
-		InOutVelocity = FVector::VectorPlaneProject(InOutVelocity, Blocking.Normal);
-
-		if (bDebugLogCollisionSweeps)
-		{
-			UE_LOG(LogSubMovement, Log,
-				TEXT("HullSweep hit | Comp=%s | OtherActor=%s | OtherComp=%s | Normal=%s | Time=%.3f"),
-				*GetNameSafe(SweepShape),
-				*GetNameSafe(Blocking.GetActor()),
-				*GetNameSafe(Blocking.GetComponent()),
-				*Blocking.Normal.ToCompactString(),
-				HitTime);
-		}
-		return true;
+		return bAnyBlocking;
 	};
 
 	const FVector HorizontalDelta = FVector(DeltaLocation.X, DeltaLocation.Y, 0.f);
@@ -508,6 +688,10 @@ void USubMovementComponent::ApplyPhysics(float DeltaTime)
 	{
 		Velocity = FMath::VInterpTo(Velocity, FVector::ZeroVector, DeltaTime, ContactVelocityDamping);
 	}
+
+	// Latch contact state so the next SimulateStep (Option C — yaw damping)
+	// and TickComponent (Option A — visual extrapolation gate) can react.
+	bLastStepHadBlockingHit = bHadBlockingHit;
 
 	Owner->SetActorRotation(NewRotation, ETeleportType::None);
 	CurrentDepth = FMath::Max(0.f, -Owner->GetActorLocation().Z / 100.f);
@@ -653,7 +837,11 @@ void USubMovementComponent::HandleReplicatedNetState(const FSubmarineNetState& N
 	const int32 FrameDelta = (bHasReceivedSnapshot && NewState.SimFrame >= PreviousFrame)
 		? (NewState.SimFrame - PreviousFrame)
 		: 1;
-	const float NewInterpDuration = FMath::Max(FixedSimDt, FrameDelta * FixedSimDt);
+	const float RawInterpDuration = FMath::Max(FixedSimDt, FrameDelta * FixedSimDt);
+	const float MaxInterpDurationSec = CVarSubMaxInterpDurationSec.GetValueOnGameThread();
+	const float NewInterpDuration = (MaxInterpDurationSec > 0.f)
+		? FMath::Min(RawInterpDuration, FMath::Max(FixedSimDt, MaxInterpDurationSec))
+		: RawInterpDuration;
 	const float SnapshotDistanceCm = FVector::Dist(Owner->GetActorLocation(), NewState.WorldLocation);
 
 	UE_LOG(
@@ -681,6 +869,7 @@ void USubMovementComponent::HandleReplicatedNetState(const FSubmarineNetState& N
 		PitchRateDegPerSec = NewState.AngularVelocity.Y;
 		CurrentDepth = NewState.DepthMeters;
 		FloodedMassKg = NewState.FloodedMassKg;
+		ForwardSpeedCmS = NewState.ForwardSpeed;
 		Owner->SetActorLocationAndRotation(NewState.WorldLocation, NewState.QuantizedRotation, false, nullptr, ETeleportType::TeleportPhysics);
 		return;
 	}
@@ -701,6 +890,7 @@ void USubMovementComponent::HandleReplicatedNetState(const FSubmarineNetState& N
 	PitchRateDegPerSec = TargetSnapshot.AngularVelocity.Y;
 	CurrentDepth = TargetSnapshot.DepthMeters;
 	FloodedMassKg = TargetSnapshot.FloodedMassKg;
+	ForwardSpeedCmS = TargetSnapshot.ForwardSpeed;
 
 	if (SnapshotDistanceCm > InterpSnapDistanceCm)
 	{

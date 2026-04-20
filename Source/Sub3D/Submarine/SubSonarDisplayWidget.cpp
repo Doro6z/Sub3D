@@ -1,8 +1,11 @@
 #include "SubSonarDisplayWidget.h"
 
 #include "Brushes/SlateColorBrush.h"
+#include "Components/StaticMeshComponent.h"
+#include "Engine/StaticMesh.h"
 #include "Engine/Texture2D.h"
 #include "Rendering/DrawElements.h"
+#include "SubmarineBase.h"
 #include "SubSonarComponent.h"
 #include "SubSonarSystemComponent.h"
 
@@ -359,19 +362,111 @@ int32 USubSonarDisplayWidget::NativePaint(
 	if (RefActor)
 	{
 		const FVector Forward = RefActor->GetActorForwardVector().GetSafeNormal2D();
-		const FVector2D ArrowEnd = Center + FVector2D(Forward.X, -Forward.Y) * (MinSide * 0.16f);
-		TArray<FVector2f> ArrowLine;
-		ArrowLine.Add(FVector2f(Center.X, Center.Y));
-		ArrowLine.Add(FVector2f(ArrowEnd.X, ArrowEnd.Y));
-		FSlateDrawElement::MakeLines(
-			OutDrawElements,
-			NextLayer++,
-			AllottedGeometry.ToPaintGeometry(),
-			ArrowLine,
-			ESlateDrawEffect::None,
-			SweepColor,
-			true,
-			2.0f);
+		// Sonar is north-up: world X axis maps to screen X (+right), world Y
+		// axis maps to screen Y inverted (north up = -screen Y). Right of
+		// world forward is (Fy, -Fx) in world XY; in screen coords with the
+		// inverted Y, that becomes (Fy, +Fx). Earlier perpendicular formula
+		// ((-Sf.Y, -Sf.X)) flipped both width and bow taper as the sub
+		// turned, which is the "shape morphing" the user observed.
+		const FVector2D ScreenForward(Forward.X, -Forward.Y);
+		const FVector2D ScreenRight(Forward.Y, Forward.X);
+
+		if (bDrawSubSilhouette)
+		{
+			// Resolve sub local half-extents (cm). Prefer MovementCollisionProxy
+			// when assigned (it's the actual movement shape); fall back to
+			// HullMesh, then to user-tunable defaults. Scales the raw mesh
+			// extent by the component's relative scale so a non-unit scale on
+			// HullMesh / MovementCollisionProxy is respected (review caught
+			// this — GetBoundingBox alone ignores SetRelativeScale3D).
+			FVector LocalHalfExtent = FallbackHullHalfExtentCm;
+			if (const ASubmarineBase* Sub = Cast<ASubmarineBase>(RefActor))
+			{
+				const UStaticMeshComponent* ShapeSource = nullptr;
+				if (Sub->MovementCollisionProxy && Sub->MovementCollisionProxy->GetStaticMesh())
+				{
+					ShapeSource = Sub->MovementCollisionProxy;
+				}
+				else if (Sub->HullMesh && Sub->HullMesh->GetStaticMesh())
+				{
+					ShapeSource = Sub->HullMesh;
+				}
+				if (ShapeSource && ShapeSource->GetStaticMesh())
+				{
+					const FVector MeshExtent = ShapeSource->GetStaticMesh()->GetBoundingBox().GetExtent();
+					const FVector Scale = ShapeSource->GetComponentScale();
+					LocalHalfExtent = FVector(MeshExtent.X * Scale.X, MeshExtent.Y * Scale.Y, MeshExtent.Z * Scale.Z);
+				}
+			}
+
+			// Map cm → sonar pixels using the active range.
+			const float PxPerCm = (MinSide * 0.5f) / FMath::Max(1.f, RangeCm);
+			const float HalfLengthPx = LocalHalfExtent.X * PxPerCm;
+			const float HalfWidthPx = LocalHalfExtent.Y * PxPerCm;
+
+			// Sample a tear-drop / cigar polygon: ellipse with a sharper bow.
+			constexpr int32 NumSegments = 32;
+			TArray<FVector2f> Polygon;
+			Polygon.Reserve(NumSegments + 1);
+			for (int32 i = 0; i <= NumSegments; ++i)
+			{
+				const float Theta = 2.f * PI * static_cast<float>(i) / NumSegments;
+				// Slight bow taper: shorten width at the front (cos(theta) > 0).
+				const float CosT = FMath::Cos(Theta);
+				const float SinT = FMath::Sin(Theta);
+				const float WidthFactor = (CosT > 0.f) ? (1.f - 0.18f * CosT) : 1.f;
+				const float LocalX = HalfLengthPx * CosT;
+				const float LocalY = HalfWidthPx * SinT * WidthFactor;
+				const FVector2D Screen = Center + ScreenForward * LocalX + ScreenRight * LocalY;
+				Polygon.Add(FVector2f(static_cast<float>(Screen.X), static_cast<float>(Screen.Y)));
+			}
+
+			// Outline.
+			FSlateDrawElement::MakeLines(
+				OutDrawElements,
+				NextLayer,
+				AllottedGeometry.ToPaintGeometry(),
+				Polygon,
+				ESlateDrawEffect::None,
+				SubSilhouetteColor,
+				true,
+				1.5f);
+
+			// Heading tick: short line from nose forward by ~15% of length.
+			const FVector2D Nose = Center + ScreenForward * HalfLengthPx;
+			const FVector2D NoseEnd = Nose + ScreenForward * (HalfLengthPx * 0.30f);
+			TArray<FVector2f> HeadingLine;
+			HeadingLine.Add(FVector2f(static_cast<float>(Nose.X), static_cast<float>(Nose.Y)));
+			HeadingLine.Add(FVector2f(static_cast<float>(NoseEnd.X), static_cast<float>(NoseEnd.Y)));
+			FSlateDrawElement::MakeLines(
+				OutDrawElements,
+				NextLayer + 1,
+				AllottedGeometry.ToPaintGeometry(),
+				HeadingLine,
+				ESlateDrawEffect::None,
+				SubHeadingColor,
+				true,
+				2.0f);
+
+			NextLayer += 2;
+		}
+		else
+		{
+			// Legacy short forward-tick fallback when silhouette is disabled.
+			const FVector2D ArrowEnd = Center + ScreenForward * (MinSide * 0.16f);
+			TArray<FVector2f> ArrowLine;
+			ArrowLine.Add(FVector2f(static_cast<float>(Center.X), static_cast<float>(Center.Y)));
+			ArrowLine.Add(FVector2f(static_cast<float>(ArrowEnd.X), static_cast<float>(ArrowEnd.Y)));
+			FSlateDrawElement::MakeLines(
+				OutDrawElements,
+				NextLayer++,
+				AllottedGeometry.ToPaintGeometry(),
+				ArrowLine,
+				ESlateDrawEffect::None,
+				SweepColor,
+				true,
+				2.0f);
+		}
 	}
 
 	if (SmudgeOverlayTexture && SmudgeOverlayAlpha > 0.f)

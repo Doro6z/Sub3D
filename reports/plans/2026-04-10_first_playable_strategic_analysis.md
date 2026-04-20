@@ -912,3 +912,15 @@ Les points suivants sont légitimes mais différés explicitement :
 9. `C:\Dev\Sub3D\reports\plans\2026-04-08_submarine_generator_architecture_unified.md` — scope authoritaire M1
 
 Tout agent implémenteur doit lire au moins les points 1, 4, 5 et 9 avant de proposer du code sur ce projet.
+
+---
+
+## Décisions post-rédaction
+
+### 2026-04-18 — Pipelines submarine
+
+- **Bake pipeline** (`Sub3DBake/`) : **en pause**, legacy Proto03/04. Ne pas toucher. Ne pas ajouter de dette dessus.
+- **Generator pipeline** (`Sub3D/Submarine/Generator/`, `SubmarineGeneratedGeometryComponent`) : **en pause** jusqu'à post-FP. Le code reste, on n'investit plus dessus pendant le First Playable.
+- **Craniata scripted** (sub handmade généré par script Blender + FBX → BP manuel) : **pipeline de production** pour le First Playable et tout travail immédiat. Toute nouvelle feature runtime (damage, feedback, outils, mob) cible Craniata.
+
+Règle pratique : si un bug se manifeste dans le Generator ou le Bake pendant la phase FP, ne pas le corriger. Le noter dans `reports/backlog/post_fp_debt.md` (à créer si absent) et passer à autre chose.

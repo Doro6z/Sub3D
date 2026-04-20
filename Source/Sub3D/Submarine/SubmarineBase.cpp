@@ -39,6 +39,20 @@ DEFINE_LOG_CATEGORY(LogSubLegacy);
 
 namespace
 {
+bool IsComponentOnOrOwnedBySubmarine(const ASubmarineBase* Submarine, const UPrimitiveComponent* Component)
+{
+	if (!Submarine || !Component)
+	{
+		return false;
+	}
+
+	const AActor* ComponentOwner = Component->GetOwner();
+	return ComponentOwner == Submarine
+		|| (ComponentOwner && ComponentOwner->GetOwner() == Submarine)
+		|| (ComponentOwner && ComponentOwner->GetAttachParentActor() == Submarine)
+		|| (ComponentOwner && ComponentOwner->IsAttachedTo(Submarine));
+}
+
 bool HasAuthoritativeContext(const AActor* Actor)
 {
 	if (!Actor)
@@ -1189,6 +1203,42 @@ TArray<UPrimitiveComponent*> ASubmarineBase::GetInteriorWalkableComponents() con
 	}
 
 	return Result;
+}
+
+bool ASubmarineBase::IsInteriorWalkableComponent(const UPrimitiveComponent* Component) const
+{
+	if (!IsValid(Component))
+	{
+		return false;
+	}
+
+	const TArray<UPrimitiveComponent*> WalkableComponents = GetInteriorWalkableComponents();
+	if (WalkableComponents.Contains(const_cast<UPrimitiveComponent*>(Component)))
+	{
+		return true;
+	}
+
+	if (!IsComponentOnOrOwnedBySubmarine(this, Component))
+	{
+		return false;
+	}
+
+	if (Component == GetMovementCollisionComponent() || Component == HullMesh)
+	{
+		return false;
+	}
+
+	if (Component->GetCollisionEnabled() == ECollisionEnabled::NoCollision)
+	{
+		return false;
+	}
+
+	if (Component->GetCollisionResponseToChannel(ECC_Pawn) != ECR_Block)
+	{
+		return false;
+	}
+
+	return Component->CanCharacterStepUpOn != ECB_No;
 }
 
 FTransform ASubmarineBase::GetCrewEmbarkTransform() const

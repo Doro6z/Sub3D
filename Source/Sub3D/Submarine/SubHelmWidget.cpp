@@ -4,11 +4,12 @@
 #include "Blueprint/WidgetTree.h"
 #include "Components/CanvasPanel.h"
 #include "Components/CanvasPanelSlot.h"
-#include "HelmControlPanelWidget.h"
+#include "Helm/HelmCockpitWidget.h"
 #include "HelmNavigationDisplayComponent.h"
 #include "HelmNavigationDisplayWidget.h"
 #include "HelmStatusStripWidget.h"
 #include "ReconstructionViewWidget.h"
+#include "SubFloodComponent.h"
 #include "SubPlayerController.h"
 #include "SubMovementComponent.h"
 #include "SubSonarComponent.h"
@@ -181,7 +182,7 @@ void USubHelmWidget::DiscoverWidgetReferencesFromTree()
 	}
 	if (!ControlStackPanel)
 	{
-		ControlStackPanel = FindNamedWidget<UHelmControlPanelWidget>(WidgetTree, TEXT("ControlStackPanel"));
+		ControlStackPanel = FindNamedWidget<UHelmCockpitWidget>(WidgetTree, TEXT("ControlStackPanel"));
 	}
 	if (!StatusStripPanel)
 	{
@@ -212,7 +213,7 @@ void USubHelmWidget::DiscoverWidgetReferencesFromTree()
 		}
 		if (!ControlStackPanel)
 		{
-			ControlStackPanel = Cast<UHelmControlPanelWidget>(Widget);
+			ControlStackPanel = Cast<UHelmCockpitWidget>(Widget);
 		}
 		if (!StatusStripPanel)
 		{
@@ -381,6 +382,14 @@ FHelmControlPanelData USubHelmWidget::GetControlPanelData() const
 	Data.State = ResolveControlPanelState();
 	Data.CommandState = Systems->GetCommandState();
 	Data.CurrentForwardSpeedCmS = Movement->ForwardSpeedCmS;
+	Data.MaxForwardSpeedCmS = FMath::Max(1.f, Movement->MaxForwardSpeed);
+	Data.MaxReverseSpeedCmS = FMath::Max(1.f, Movement->MaxReverseSpeed);
+	Data.CurrentSpooledPower = Movement->GetSpooledPower();
+	Data.CurrentYawRateDegPerSec = Movement->GetYawRateDegPerSec();
+	{
+		const float YawWorld = FRotator::NormalizeAxis(Submarine->GetActorRotation().Yaw);
+		Data.CurrentHeadingDeg = (YawWorld < 0.f) ? (YawWorld + 360.f) : YawWorld;
+	}
 	Data.CurrentDepthMeters = Movement->CurrentDepth;
 	Data.CurrentPitchDeg = Submarine ? FRotator::NormalizeAxis(Submarine->GetActorRotation().Pitch) : 0.f;
 	Data.EffectivePowerInput = Movement->EffectivePowerInput;
@@ -426,6 +435,34 @@ FHelmAlertPanelData USubHelmWidget::GetAlertPanelData() const
 	Data.StoppingDistanceWarning = Display ? Display->GetStoppingDistanceWarning() : FTunnelNavStoppingDistanceWarning();
 	Data.CommitmentWarning = Display ? Display->GetCommitmentWarning() : FTunnelNavCommitmentWarning();
 	Data.InstrumentStatus = Display ? Display->GetInstrumentStatus() : FHelmInstrumentStatus();
+
+	// Critical alarm aggregation. SubFlood owns both: the per-compartment
+	// flood level (for the "FLOODING xx%" tier) and the breach list (for
+	// the "HULL BREACH" tier). Both fields stay 0 / 0.0 if SubFlood isn't
+	// initialised yet, which is the right idle state.
+	if (Submarine->SubFlood && Submarine->SubFlood->IsInitialized())
+	{
+		const TArray<FCompartmentBreachState>& Breaches = Submarine->SubFlood->GetBreaches();
+		int32 ActiveBreaches = 0;
+		for (const FCompartmentBreachState& Breach : Breaches)
+		{
+			if (Breach.bBreached)
+			{
+				++ActiveBreaches;
+			}
+		}
+		Data.ActiveBreachCount = ActiveBreaches;
+
+		TArray<FCompartmentState> States;
+		Submarine->SubFlood->ExportCompartmentStates(States);
+		float MaxFlood = 0.f;
+		for (const FCompartmentState& State : States)
+		{
+			MaxFlood = FMath::Max(MaxFlood, State.FloodLevel01);
+		}
+		Data.MaxCompartmentFloodFraction = MaxFlood;
+	}
+
 	return Data;
 }
 
@@ -652,6 +689,18 @@ void USubHelmWidget::RouteSetBallastsActive(bool bActive)
 	}
 
 	UE_LOG(LogTemp, Warning, TEXT("[%s] RouteSetBallastsActive failed: OwnerController unresolved."), *GetName());
+}
+
+void USubHelmWidget::RouteSetBallastByIndex(int32 TankIndex, float Target01)
+{
+	ResolveRuntimeRefs();
+	if (OwnerController.IsValid())
+	{
+		OwnerController->ServerRouteBallastByIndex(TankIndex, Target01);
+		return;
+	}
+
+	UE_LOG(LogTemp, Warning, TEXT("[%s] RouteSetBallastByIndex failed: OwnerController unresolved."), *GetName());
 }
 
 void USubHelmWidget::RouteSetPumpActive(bool bActive)
@@ -1052,14 +1101,14 @@ void USubHelmWidget::TryBindControlStackPanel()
 {
 	if (!ControlStackPanel)
 	{
-		ControlStackPanel = FindNamedWidget<UHelmControlPanelWidget>(WidgetTree, TEXT("ControlStackPanel"));
+		ControlStackPanel = FindNamedWidget<UHelmCockpitWidget>(WidgetTree, TEXT("ControlStackPanel"));
 		if (WidgetTree)
 		{
 			WidgetTree->ForEachWidget([this](UWidget* Widget)
 			{
 				if (!ControlStackPanel)
 				{
-					ControlStackPanel = Cast<UHelmControlPanelWidget>(Widget);
+					ControlStackPanel = Cast<UHelmCockpitWidget>(Widget);
 				}
 			});
 		}
@@ -1068,8 +1117,8 @@ void USubHelmWidget::TryBindControlStackPanel()
 		{
 			if (UCanvasPanel* RootCanvas = ResolveRootCanvasPanel())
 			{
-				UClass* PanelClass = ControlStackPanelClass ? ControlStackPanelClass.Get() : UHelmControlPanelWidget::StaticClass();
-				ControlStackPanel = WidgetTree->ConstructWidget<UHelmControlPanelWidget>(PanelClass, TEXT("ControlStackPanel"));
+				UClass* PanelClass = ControlStackPanelClass ? ControlStackPanelClass.Get() : UHelmCockpitWidget::StaticClass();
+				ControlStackPanel = WidgetTree->ConstructWidget<UHelmCockpitWidget>(PanelClass, TEXT("ControlStackPanel"));
 				if (ControlStackPanel)
 				{
 					RootCanvas->AddChild(ControlStackPanel);
@@ -1082,7 +1131,7 @@ void USubHelmWidget::TryBindControlStackPanel()
 		{
 			if (!bLoggedMissingControlStackPanel)
 			{
-				UE_LOG(LogTemp, Warning, TEXT("[%s] TryBindControlStackPanel: expected widget named ControlStackPanel of class UHelmControlPanelWidget in WBP_SubHelm."), *GetName());
+				UE_LOG(LogTemp, Warning, TEXT("[%s] TryBindControlStackPanel: expected widget named ControlStackPanel of class UHelmCockpitWidget in WBP_SubHelm."), *GetName());
 				bLoggedMissingControlStackPanel = true;
 			}
 			return;

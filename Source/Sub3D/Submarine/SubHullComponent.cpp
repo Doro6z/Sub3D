@@ -52,25 +52,152 @@ void USubHullComponent::TickComponent(float DeltaTime, ELevelTick TickType, FAct
 
 	UpdateFlowFields();
 
-	if (!bDrawDebug || !GetWorld())
+	if (!GetWorld())
+	{
+		return;
+	}
+
+	if (bDrawDebug)
+	{
+		const FTransform ActorTransform = GetOwner()->GetActorTransform();
+
+		for (const FBreachClusterState& Cluster : BreachClusters)
+		{
+			const FVector WorldCenter = ActorTransform.TransformPosition(Cluster.LocalCenter);
+			DrawDebugSphere(GetWorld(), WorldCenter, Cluster.InscribedRadiusCm, 16, FColor::Cyan, false, -1.f, 0, 1.f);
+		}
+
+		for (const FBreachFlowField& Flow : FlowFields)
+		{
+			const FVector WorldCenter = ActorTransform.TransformPosition(Flow.LocalCenter);
+			const FVector WorldDir = ActorTransform.TransformVectorNoScale(Flow.Direction).GetSafeNormal();
+			DrawDebugLine(GetWorld(), WorldCenter, WorldCenter + WorldDir * 120.f, FColor::Orange, false, -1.f, 0, 2.f);
+			DrawDebugSphere(GetWorld(), WorldCenter, Flow.OuterRadiusCm, 12, FColor::Green, false, -1.f, 0, 0.8f);
+		}
+	}
+
+	if (bDrawDebugSheets)
+	{
+		DrawDebugSheets();
+	}
+}
+
+void USubHullComponent::DrawDebugSheets() const
+{
+	UWorld* World = GetWorld();
+	if (!World || !GetOwner())
 	{
 		return;
 	}
 
 	const FTransform ActorTransform = GetOwner()->GetActorTransform();
 
-	for (const FBreachClusterState& Cluster : BreachClusters)
+	for (int32 SheetIndex = 0; SheetIndex < StructuralSheets.Num(); ++SheetIndex)
 	{
-		const FVector WorldCenter = ActorTransform.TransformPosition(Cluster.LocalCenter);
-		DrawDebugSphere(GetWorld(), WorldCenter, Cluster.InscribedRadiusCm, 16, FColor::Cyan, false, -1.f, 0, 1.f);
-	}
+		const FStructuralSheetDef& Sheet = StructuralSheets[SheetIndex];
 
-	for (const FBreachFlowField& Flow : FlowFields)
-	{
-		const FVector WorldCenter = ActorTransform.TransformPosition(Flow.LocalCenter);
-		const FVector WorldDir = ActorTransform.TransformVectorNoScale(Flow.Direction).GetSafeNormal();
-		DrawDebugLine(GetWorld(), WorldCenter, WorldCenter + WorldDir * 120.f, FColor::Orange, false, -1.f, 0, 2.f);
-		DrawDebugSphere(GetWorld(), WorldCenter, Flow.OuterRadiusCm, 12, FColor::Green, false, -1.f, 0, 0.8f);
+		// Four corners in local space: origin is the centre; offsets go ±half along each tangent.
+		const FVector HalfX = Sheet.LocalTangentX * (Sheet.SizeCm.X * 0.5f);
+		const FVector HalfY = Sheet.LocalTangentY * (Sheet.SizeCm.Y * 0.5f);
+
+		const FVector LocalCorners[4] = {
+			Sheet.LocalOrigin - HalfX - HalfY,
+			Sheet.LocalOrigin + HalfX - HalfY,
+			Sheet.LocalOrigin + HalfX + HalfY,
+			Sheet.LocalOrigin - HalfX + HalfY,
+		};
+
+		FVector WorldCorners[4];
+		for (int32 i = 0; i < 4; ++i)
+		{
+			WorldCorners[i] = ActorTransform.TransformPosition(LocalCorners[i]);
+		}
+
+		// Compute mean damage across cells so the outline color reflects sheet health.
+		float MeanDamage = 0.f;
+		int32 DamagedCells = 0;
+		if (SheetStates.IsValidIndex(SheetIndex))
+		{
+			const FStructuralSheetRuntimeState& State = SheetStates[SheetIndex];
+			if (State.Cells.Num() > 0)
+			{
+				float Sum = 0.f;
+				for (const FStructuralCellState& Cell : State.Cells)
+				{
+					Sum += Cell.Damage01;
+					if (Cell.Damage01 > 0.01f)
+					{
+						++DamagedCells;
+					}
+				}
+				MeanDamage = Sum / State.Cells.Num();
+			}
+		}
+
+		// Outline color: green = healthy, yellow = stressed, red = breaching threshold.
+		const FColor OutlineColor = FLinearColor::LerpUsingHSV(FLinearColor::Green, FLinearColor::Red, FMath::Clamp(MeanDamage * 2.f, 0.f, 1.f)).ToFColor(true);
+
+		// Four edges.
+		DrawDebugLine(World, WorldCorners[0], WorldCorners[1], OutlineColor, false, -1.f, 0, 2.f);
+		DrawDebugLine(World, WorldCorners[1], WorldCorners[2], OutlineColor, false, -1.f, 0, 2.f);
+		DrawDebugLine(World, WorldCorners[2], WorldCorners[3], OutlineColor, false, -1.f, 0, 2.f);
+		DrawDebugLine(World, WorldCorners[3], WorldCorners[0], OutlineColor, false, -1.f, 0, 2.f);
+
+		// Diagonals help read the sheet orientation at a glance.
+		DrawDebugLine(World, WorldCorners[0], WorldCorners[2], OutlineColor, false, -1.f, 0, 0.8f);
+		DrawDebugLine(World, WorldCorners[1], WorldCorners[3], OutlineColor, false, -1.f, 0, 0.8f);
+
+		// Normal arrow at the centre so bow/stern/port/starboard is obvious.
+		const FVector WorldOrigin = ActorTransform.TransformPosition(Sheet.LocalOrigin);
+		const FVector WorldNormal = ActorTransform.TransformVectorNoScale(Sheet.LocalNormal).GetSafeNormal();
+		DrawDebugDirectionalArrow(World, WorldOrigin, WorldOrigin + WorldNormal * 80.f, 20.f, FColor::White, false, -1.f, 0, 2.f);
+
+		// Label: SheetId + damage summary.
+		const FString Label = FString::Printf(
+			TEXT("%s\n%.0f%% dmg | %d/%d cells"),
+			*Sheet.SheetId.ToString(),
+			MeanDamage * 100.f,
+			DamagedCells,
+			SheetStates.IsValidIndex(SheetIndex) ? SheetStates[SheetIndex].Cells.Num() : 0);
+		DrawDebugString(World, WorldOrigin + WorldNormal * 30.f, Label, nullptr, FColor::White, 0.f, true, 1.2f);
+
+		// Per-cell coloring. Skipped by default to avoid 1600 draws/frame; opt in
+		// via bDrawDebugSheetCellsAlways, or the damaged ones are always drawn.
+		if (!SheetStates.IsValidIndex(SheetIndex))
+		{
+			continue;
+		}
+
+		const FStructuralSheetRuntimeState& State = SheetStates[SheetIndex];
+		const int32 ResX = FMath::Max(1, Sheet.GridResolutionX);
+		const int32 ResY = FMath::Max(1, Sheet.GridResolutionY);
+		const FVector CellStepX = Sheet.LocalTangentX * (Sheet.SizeCm.X / ResX);
+		const FVector CellStepY = Sheet.LocalTangentY * (Sheet.SizeCm.Y / ResY);
+		const FVector CellOriginLocal = Sheet.LocalOrigin - HalfX - HalfY;
+
+		for (int32 CellIdx = 0; CellIdx < State.Cells.Num(); ++CellIdx)
+		{
+			const FStructuralCellState& Cell = State.Cells[CellIdx];
+			const bool bDamaged = Cell.Damage01 > 0.01f;
+			if (!bDamaged && !bDrawDebugSheetCellsAlways)
+			{
+				continue;
+			}
+
+			const int32 CellX = CellIdx % ResX;
+			const int32 CellY = CellIdx / ResX;
+			const FVector LocalCenter = CellOriginLocal
+				+ CellStepX * (CellX + 0.5f)
+				+ CellStepY * (CellY + 0.5f);
+			const FVector WorldCenter = ActorTransform.TransformPosition(LocalCenter);
+
+			const FColor CellColor = FLinearColor::LerpUsingHSV(
+				FLinearColor(0.f, 1.f, 0.f, 0.25f),
+				FLinearColor(1.f, 0.f, 0.f, 1.f),
+				FMath::Clamp(Cell.Damage01, 0.f, 1.f)).ToFColor(true);
+
+			DrawDebugPoint(World, WorldCenter, bDamaged ? 8.f : 4.f, CellColor, false, -1.f);
+		}
 	}
 }
 

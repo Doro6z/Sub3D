@@ -14,7 +14,7 @@ class USubSonarComponent;
 class USubSonarSystemComponent;
 class UHelmNavigationDisplayWidget;
 class UHelmNavigationDisplayComponent;
-class UHelmControlPanelWidget;
+class UHelmCockpitWidget;
 class UHelmStatusStripWidget;
 class UReconstructionViewWidget;
 class UTacticalGraphViewWidget;
@@ -144,6 +144,31 @@ struct FHelmControlPanelData
 	UPROPERTY(BlueprintReadOnly, Category = "Helm")
 	float CurrentForwardSpeedCmS = 0.f;
 
+	// Max forward speed authored on the submarine, used by the telegraph
+	// panel to convert preset ratios (-1..+1) into command-state cm/s.
+	UPROPERTY(BlueprintReadOnly, Category = "Helm")
+	float MaxForwardSpeedCmS = 650.f;
+
+	// Max reverse speed (separately authored). Telegraph reverse presets
+	// must scale against this — backend clamps reverse to -MaxReverseSpeed
+	// independently from MaxForwardSpeed (asymmetric subs).
+	UPROPERTY(BlueprintReadOnly, Category = "Helm")
+	float MaxReverseSpeedCmS = 250.f;
+
+	// Engine spool state (-1..+1). Lags HelmThrottleCmd; cockpit shows
+	// the gap between commanded and actual throttle.
+	UPROPERTY(BlueprintReadOnly, Category = "Helm")
+	float CurrentSpooledPower = 0.f;
+
+	// Yaw rate (deg/s, +ccw). Drives the rudder yoke's secondary arc
+	// and the heading-change feedback.
+	UPROPERTY(BlueprintReadOnly, Category = "Helm")
+	float CurrentYawRateDegPerSec = 0.f;
+
+	// Compass heading (0..360°). Cockpit display.
+	UPROPERTY(BlueprintReadOnly, Category = "Helm")
+	float CurrentHeadingDeg = 0.f;
+
 	UPROPERTY(BlueprintReadOnly, Category = "Helm")
 	float CurrentDepthMeters = 0.f;
 
@@ -209,6 +234,15 @@ struct FHelmAlertPanelData
 
 	UPROPERTY(BlueprintReadOnly, Category = "Helm")
 	FHelmInstrumentStatus InstrumentStatus;
+
+	// Critical-tier alarms (smart strip Option γ). Populated by
+	// GetAlertPanelData from SubFlood / Compartments queries. The strip
+	// promotes these above stop-margin / commit warnings and renders red.
+	UPROPERTY(BlueprintReadOnly, Category = "Helm|Alarm")
+	int32 ActiveBreachCount = 0;
+
+	UPROPERTY(BlueprintReadOnly, Category = "Helm|Alarm")
+	float MaxCompartmentFloodFraction = 0.f;
 };
 
 /**
@@ -322,6 +356,11 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Helm|Control")
 	void RouteSetGlobalBallast(float Target01);
 
+	// Per-tank ballast target. Used by the dive board for SURFACE / DIVE
+	// commands (force individual tanks to 0% / 100%) and per-pipe drag.
+	UFUNCTION(BlueprintCallable, Category = "Helm|Control")
+	void RouteSetBallastByIndex(int32 TankIndex, float Target01);
+
 	UFUNCTION(BlueprintCallable, Category = "Helm|Control")
 	void RouteSetBallastsActive(bool bActive);
 
@@ -371,7 +410,7 @@ public:
 	TObjectPtr<UTacticalGraphViewWidget> TacticalGraphView;
 
 	UPROPERTY(BlueprintReadWrite, Category = "Helm", meta = (BindWidgetOptional))
-	TObjectPtr<UHelmControlPanelWidget> ControlStackPanel;
+	TObjectPtr<UHelmCockpitWidget> ControlStackPanel;
 
 	UPROPERTY(BlueprintReadWrite, Category = "Helm", meta = (BindWidgetOptional))
 	TObjectPtr<UHelmStatusStripWidget> StatusStripPanel;
@@ -403,7 +442,7 @@ public:
 	bool bAutoCreateControlStackPanelIfMissing = false;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Helm")
-	TSubclassOf<UHelmControlPanelWidget> ControlStackPanelClass;
+	TSubclassOf<UHelmCockpitWidget> ControlStackPanelClass;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Helm")
 	bool bAutoCreateStatusStripPanelIfMissing = false;

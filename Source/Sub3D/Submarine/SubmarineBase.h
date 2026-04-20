@@ -265,6 +265,10 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Submarine|Interior")
 	virtual TArray<UPrimitiveComponent*> GetInteriorWalkableComponents() const;
 
+	/** Returns true when the component is a valid crew walkable surface on this submarine. */
+	UFUNCTION(BlueprintPure, Category = "Submarine|Interior")
+	virtual bool IsInteriorWalkableComponent(const UPrimitiveComponent* Component) const;
+
 	/** Returns the canonical transform for crew embark (corrected for floor support). */
 	UFUNCTION(BlueprintPure, Category = "Submarine|Interior")
 	virtual FTransform GetCrewEmbarkTransform() const;

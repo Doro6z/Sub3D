@@ -65,6 +65,20 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physics")
 	float ContactVelocityDamping = 8.f;
 
+	// Scales the yaw delta applied this tick when the previous step had a
+	// blocking hit. 1.0 = stock behavior, 0.0 = fully frozen. Keeping some
+	// yaw lets the pilot rotate away from the obstacle without the full
+	// "rudder + wall" saccade.
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physics|Contact", meta = (ClampMin = "0.0", ClampMax = "1.0"))
+	float ContactYawDampingFactor = 0.35f;
+
+	// Max sweep/slide iterations for a single SimulateStep move call. 1 is
+	// the stock one-shot slide; 2-3 produces noticeably smoother glide
+	// along walls because the remaining motion is re-swept rather than
+	// applied blind.
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physics|Contact", meta = (ClampMin = "1", ClampMax = "4"))
+	int32 MaxSlideIterations = 2;
+
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physics")
 	float RudderTurnRate = 15.f;
 
@@ -259,6 +273,15 @@ public:
 	float GetPitchRateDegPerSec() const { return PitchRateDegPerSec; }
 	float GetYawRateDegPerSec() const { return YawRateDegPerSec; }
 
+	// Server-side spooled engine power (-1..+1). Lags HelmThrottleCmd by
+	// EngineSpoolUpRate / EngineSpoolDownRate. Read by the helm cockpit
+	// for the throttle "spool meter" feedback.
+	UFUNCTION(BlueprintPure, Category = "Submarine|Physics")
+	float GetSpooledPower() const { return SpooledPower; }
+
+	UFUNCTION(BlueprintPure, Category = "Submarine|Physics")
+	bool HadBlockingHitLastStep() const { return bLastStepHadBlockingHit; }
+
 private:
 	// Input values replicated to all clients for visual feedback (rudder mesh
 	// yaw, hydroplane mesh pitch). Server-authoritative; writes come from
@@ -285,9 +308,42 @@ private:
 	bool bHasReceivedSnapshot = false;
 	float ClientExtrapolationElapsedSec = 0.f;
 
+	// Latest sim-authoritative pose ("CurrSim"). Captured after each
+	// SimulateStep. Used to restore the actor before the next sim step
+	// (undo of visual offset) and as the upper bound of the render-frame
+	// interpolation Lerp(PrevSim, CurrSim, alpha).
 	FVector AuthoritativeLocation = FVector::ZeroVector;
 	FRotator AuthoritativeRotation = FRotator::ZeroRotator;
-	bool bHasVisualExtrapolation = false;
+
+	// Sim-authoritative pose one step earlier ("PrevSim"). Captured at the
+	// start of each SimulateStep inside TickComponent. Lower bound of the
+	// render-frame interpolation.
+	FVector PrevSimLocation = FVector::ZeroVector;
+	FRotator PrevSimRotation = FRotator::ZeroRotator;
+
+	// False until the first SimulateStep has produced a (PrevSim, CurrSim)
+	// pair. Interpolation is skipped while this is false.
+	bool bHasSimBuffer = false;
+
+	// True when the actor root holds a visual pose offset from the sim
+	// pose (i.e. the frame-time interpolated pose between PrevSim and
+	// CurrSim). The next tick's start restores the actor to
+	// AuthoritativeLocation so the sim never operates on a visual pose.
+	bool bHasVisualOffset = false;
+
+	// Set at the end of each authority SimulateStep. Read by TickComponent
+	// (to suppress visual interpolation during contact — Option A) and by
+	// the next SimulateStep (to damp applied yaw — Option C).
+	bool bLastStepHadBlockingHit = false;
+
+	// Last pose written to the actor root at end of TickComponent (either
+	// the interpolated pose or the sim pose if interp was suppressed/disabled).
+	// Read at the next tick's start to detect external writers that modified
+	// the actor between our final write and the next tick. Populated once
+	// per authoritative tick; unused on remote clients.
+	FVector LastPostTickLocation = FVector::ZeroVector;
+	FRotator LastPostTickRotation = FRotator::ZeroRotator;
+	bool bHasLastPostTick = false;
 
 	void UpdateBallasts(float DeltaTime);
 	void SimulateStep(float DeltaTime);

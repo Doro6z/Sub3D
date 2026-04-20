@@ -2,6 +2,7 @@
 
 #include "DrawDebugHelpers.h"
 #include "GameFramework/Actor.h"
+#include "SubmarineBase.h"
 #include "SubMovementComponent.h"
 
 DEFINE_LOG_CATEGORY_STATIC(LogSubInteriorFrame, Log, All);
@@ -68,7 +69,15 @@ void USubInteriorFrameComponent::TickComponent(float DeltaTime, ELevelTick TickT
 
 	if (DeltaTime > KINDA_SMALL_NUMBER)
 	{
-		LocalLinearVelocity = Owner->GetActorTransform().InverseTransformVectorNoScale(FrameLocationDelta / DeltaTime);
+		FVector WorldLinearVelocity = FrameLocationDelta / DeltaTime;  // fallback: finite diff (legacy behavior)
+		if (const ASubmarineBase* Sub = Cast<ASubmarineBase>(Owner))
+		{
+			if (const USubMovementComponent* SubMov = Sub->SubMovement)
+			{
+				WorldLinearVelocity = SubMov->Velocity;  // sim-side, signal propre par construction
+			}
+		}
+		LocalLinearVelocity = Owner->GetActorTransform().InverseTransformVectorNoScale(WorldLinearVelocity);
 		LocalLinearAcceleration = (LocalLinearVelocity - PreviousLocalLinearVelocity) / DeltaTime;
 
 		LocalAngularVelocityDegrees = FVector(

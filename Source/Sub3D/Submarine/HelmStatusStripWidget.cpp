@@ -218,11 +218,36 @@ void UHelmStatusStripWidget::RefreshFromHelmData()
 		TEXT("NAV %s   BALLAST %.0f%%"),
 		Alert.bNavigationDataValid ? TEXT("READY") : TEXT("DEGRADED"),
 		Control.GlobalBallastFill01 * 100.f);
+
+	// Critical-tier alarms (smart strip Option γ). Promoted above the
+	// existing stop-margin / commit / nav warnings because hull integrity
+	// trumps trajectory feedback. Bright red text + pulse-friendly color.
+	const FLinearColor CriticalColor(1.0f, 0.20f, 0.10f, 1.f);
 	if (!Alert.bBound)
 	{
 		WarningLabel = TEXT("STATUS UNBOUND");
 		WarningColor = FLinearColor(1.f, 0.56f, 0.24f, 1.f);
 		WarningDetail = TEXT("No alert panel data.");
+	}
+	else if (Alert.ActiveBreachCount > 0)
+	{
+		WarningLabel = (Alert.ActiveBreachCount > 1)
+			? FString::Printf(TEXT("HULL BREACH x%d"), Alert.ActiveBreachCount)
+			: TEXT("HULL BREACH");
+		WarningColor = CriticalColor;
+		WarningDetail = TEXT("Compartments flooding. Seal doors, run pumps.");
+	}
+	else if (Alert.MaxCompartmentFloodFraction >= 0.5f)
+	{
+		WarningLabel = FString::Printf(TEXT("FLOODING %.0f%%"), Alert.MaxCompartmentFloodFraction * 100.f);
+		WarningColor = CriticalColor;
+		WarningDetail = TEXT("Compartment past half flood. Pump immediately.");
+	}
+	else if (Alert.MaxCompartmentFloodFraction >= 0.15f)
+	{
+		WarningLabel = FString::Printf(TEXT("WATER INGRESS %.0f%%"), Alert.MaxCompartmentFloodFraction * 100.f);
+		WarningColor = FLinearColor(1.f, 0.56f, 0.24f, 1.f);
+		WarningDetail = TEXT("Minor flooding detected.");
 	}
 	else if (Alert.StoppingDistanceWarning.bWarning)
 	{
@@ -250,7 +275,19 @@ void UHelmStatusStripWidget::RefreshFromHelmData()
 	}
 
 	WarningValueText->SetText(FText::FromString(WarningLabel));
-	WarningValueText->SetColorAndOpacity(FSlateColor(WarningColor));
+
+	// Pulse the value label when in critical-tier red so it draws the eye
+	// without needing animation in BP. Pulse only when red to avoid flicker
+	// on routine warnings.
+	const bool bCritical = (WarningColor.R > 0.9f && WarningColor.G < 0.35f);
+	FLinearColor RenderColor = WarningColor;
+	if (bCritical)
+	{
+		const double Now = FPlatformTime::Seconds();
+		const float Pulse = 0.5f + 0.5f * FMath::Sin(static_cast<float>(Now) * 6.28f * 1.5f);
+		RenderColor.A = FMath::Lerp(0.6f, 1.0f, Pulse);
+	}
+	WarningValueText->SetColorAndOpacity(FSlateColor(RenderColor));
 	WarningDetailText->SetText(FText::FromString(WarningDetail));
 	WarningDetailText->SetColorAndOpacity(FSlateColor(FLinearColor(0.82f, 0.90f, 0.94f, 0.92f)));
 }

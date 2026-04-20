@@ -246,25 +246,43 @@ bool USubmarineGeneratedGeometryComponent::BuildInteriorCompartments(const USubm
 		BuildRenderSection(Interior.BowCapSection, TEXT("BowCap"));
 		BuildRenderSection(Interior.SternCapSection, TEXT("SternCap"));
 
-		// Floor collision — walkable surface using SubInteriorWalkable profile
-		// so that crew floor-snap traces (ECC_GameTraceChannel2 / SubInterior) find it.
-		if (Interior.FloorSection.Vertices.Num() > 0 && Interior.FloorSection.Triangles.Num() > 0)
+		auto BuildInteriorCollisionSection = [&](const FSubmarineMeshSectionData& Section, const TCHAR* Suffix, bool bTrackAsFloor)
 		{
-			const FName CollisionName = FName(*FString::Printf(TEXT("%s_Floor_Collision"), *IdStr));
-			UProceduralMeshComponent* FloorCollision = CreatePMC(
-				CollisionName, false, true, TEXT("GeneratedCollision"));
-			if (FloorCollision)
+			if (Section.Vertices.Num() == 0 || Section.Triangles.Num() == 0)
 			{
-				if (!Interior.CompartmentId.IsNone())
-				{
-					FloorCollision->ComponentTags.Add(FName(*FString::Printf(TEXT("CompartmentId=%s"), *Interior.CompartmentId.ToString())));
-				}
-				ApplySectionToPMC(FloorCollision, Interior.FloorSection, true);
-				FloorCollision->SetCollisionProfileName(FName(TEXT("SubInteriorWalkable")));
-				CollisionComponents.Add(FloorCollision);
-				InteriorFloorCollisionComponents.Add(FloorCollision);
+				return;
 			}
-		}
+
+			const FName CollisionName = FName(*FString::Printf(TEXT("%s_%s_Collision"), *IdStr, Suffix));
+			UProceduralMeshComponent* Collision = CreatePMC(
+				CollisionName, false, true, TEXT("GeneratedCollision"));
+			if (!Collision)
+			{
+				return;
+			}
+
+			if (!Interior.CompartmentId.IsNone())
+			{
+				Collision->ComponentTags.Add(FName(*FString::Printf(TEXT("CompartmentId=%s"), *Interior.CompartmentId.ToString())));
+			}
+			ApplySectionToPMC(Collision, Section, true);
+			Collision->SetCollisionProfileName(FName(TEXT("SubInteriorWalkable")));
+			CollisionComponents.Add(Collision);
+			if (bTrackAsFloor)
+			{
+				InteriorFloorCollisionComponents.Add(Collision);
+			}
+		};
+
+		// Floor collision — walkable surface, tracked so crew floor-snap traces
+		// (ECC_GameTraceChannel2 / SubInterior) find it.
+		BuildInteriorCollisionSection(Interior.FloorSection, TEXT("Floor"), true);
+		// Walls + end caps — block the crew capsule so they can't pass through
+		// the hull from inside. Not tracked as walkable; crew CMC reads only the
+		// floor set for its walkable list.
+		BuildInteriorCollisionSection(Interior.WallSection, TEXT("Walls"), false);
+		BuildInteriorCollisionSection(Interior.BowCapSection, TEXT("BowCap"), false);
+		BuildInteriorCollisionSection(Interior.SternCapSection, TEXT("SternCap"), false);
 	}
 
 	UE_LOG(LogTemp, Log,

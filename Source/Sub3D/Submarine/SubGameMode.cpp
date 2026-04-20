@@ -100,13 +100,7 @@ void LogDepartureCollisionSnapshot(const ASubmarineBase* Submarine)
 
 bool IsAcceptedCrewBaseForSubmarine(const ASubmarineBase* Submarine, const UPrimitiveComponent* CandidateBase)
 {
-	if (!Submarine || !CandidateBase)
-	{
-		return false;
-	}
-
-	const TArray<UPrimitiveComponent*> WalkableComponents = Submarine->GetInteriorWalkableComponents();
-	return WalkableComponents.Num() == 0 || WalkableComponents.Contains(const_cast<UPrimitiveComponent*>(CandidateBase));
+	return Submarine && Submarine->IsInteriorWalkableComponent(CandidateBase);
 }
 }
 

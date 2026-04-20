@@ -110,6 +110,24 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Sonar|Style")
 	float CenterTextureScale = 0.35f;
 
+	// Draw a true-scale silhouette of the owning submarine at the sonar
+	// center. Lets the player read contact size relative to their own hull.
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Sonar|Self")
+	bool bDrawSubSilhouette = true;
+
+	// Outline color for the silhouette. Inside is filled with a darker tint.
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Sonar|Self")
+	FLinearColor SubSilhouetteColor = FLinearColor(0.40f, 0.85f, 1.00f, 0.85f);
+
+	// Color of the heading line drawn from the silhouette nose forward.
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Sonar|Self")
+	FLinearColor SubHeadingColor = FLinearColor(1.00f, 0.85f, 0.20f, 0.95f);
+
+	// Fallback bounds (cm, half-extents) when the owning sub has no usable
+	// hull mesh assigned. Reasonable mid-size sub envelope.
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Sonar|Self")
+	FVector FallbackHullHalfExtentCm = FVector(1000.f, 200.f, 200.f);
+
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Sonar|Style")
 	FLinearColor BackgroundColor = FLinearColor(0.0f, 0.05f, 0.02f, 0.92f);
 

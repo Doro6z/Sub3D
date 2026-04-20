@@ -4,6 +4,8 @@
 #include "HelmNavigationDisplayComponent.h"
 #include "Rendering/DrawElements.h"
 #include "Styling/CoreStyle.h"
+#include "SubMovementComponent.h"
+#include "SubmarineBase.h"
 #include "SubSonarSystemComponent.h"
 
 namespace
@@ -226,6 +228,22 @@ int32 UTacticalGraphViewWidget::PaintInstrumentContent(
 	const FVector2D FooterPos(ContentPos.X + 8.f, ContentPos.Y + ContentSize.Y - 34.f);
 	DrawTextLine(FooterPos, FString::Printf(TEXT("EDGE %d   HUB %.1fm   SPLIT %.1fm   MERGE %.1fm"), GraphView.CurrentEdgeIndex, GraphView.DistanceToNextHubMeters, GraphView.DistanceToNextSplitMeters, GraphView.DistanceToNextMergeMeters), AccentColor, NextLayer + 4, SmallFont);
 	DrawTextLine(FooterPos + FVector2D(0.f, 14.f), FString::Printf(TEXT("TRACKS %d   %s"), TrackCount, GraphView.bMultipleExitsNearby ? TEXT("MULTI-EXIT") : TEXT("SINGLE FLOW")), GraphView.bMultipleExitsNearby ? PriorityColor : FrameColor, NextLayer + 4, SmallFont);
+
+	// Top-right HUD overlay: own-ship speed / pitch / heading. Lets the
+	// player read maneuvering state without leaving the tactical view.
+	if (const ASubmarineBase* Sub = Cast<ASubmarineBase>(CachedDisplayComponent->GetOwner()))
+	{
+		const float SpeedMs = (Sub->SubMovement ? Sub->SubMovement->ForwardSpeedCmS : 0.f) * 0.01f;
+		const FRotator Rot = Sub->GetActorRotation();
+		const float PitchDeg = FRotator::NormalizeAxis(Rot.Pitch);
+		const float YawDeg = FRotator::NormalizeAxis(Rot.Yaw);
+		const float YawCompass = (YawDeg < 0.f) ? (YawDeg + 360.f) : YawDeg;
+
+		const FVector2D HudPos(ContentPos.X + ContentSize.X - 100.f, ContentPos.Y + 6.f);
+		DrawTextLine(HudPos,                            FString::Printf(TEXT("SPD %5.1f m/s"), SpeedMs), AccentColor, NextLayer + 4, SmallFont);
+		DrawTextLine(HudPos + FVector2D(0.f, 13.f),    FString::Printf(TEXT("PITCH %+5.1f\u00B0"), PitchDeg), (FMath::Abs(PitchDeg) > 20.f ? PriorityColor : AccentColor), NextLayer + 4, SmallFont);
+		DrawTextLine(HudPos + FVector2D(0.f, 26.f),    FString::Printf(TEXT("HDG %5.0f\u00B0"), YawCompass), AccentColor, NextLayer + 4, SmallFont);
+	}
 
 	return NextLayer + 5;
 }
