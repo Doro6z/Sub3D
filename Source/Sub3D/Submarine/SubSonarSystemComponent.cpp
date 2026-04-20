@@ -1,4 +1,5 @@
 #include "SubSonarSystemComponent.h"
+#include "Sub3DDebugSettings.h"
 
 #include "EngineUtils.h"
 #include "Net/UnrealNetwork.h"
@@ -335,7 +336,7 @@ void USubSonarSystemComponent::UpdateSelfNoise(float DeltaTime)
 		SelfNoiseState.WeaponNoise +
 		SelfNoiseState.SystemNoise;
 
-	if (bEnableDebugLogs && DeltaTime > 0.f)
+	if (GetDefault<USub3DDebugSettings>()->bLogSonar && DeltaTime > 0.f)
 	{
 		UE_LOG(LogSubSonarSystem, Verbose, TEXT("SelfNoise | Aggregate=%.2f"), SelfNoiseState.AggregateNoise);
 	}
@@ -763,7 +764,7 @@ void USubSonarSystemComponent::SeedTopologyFromRoute()
 	}
 
 	bRouteSeedApplied = true;
-	if (bEnableDebugLogs)
+	if (GetDefault<USub3DDebugSettings>()->bLogSonar)
 	{
 		UE_LOG(LogSubSonarSystem, Log, TEXT("Route seed applied | Points=%d"), SeedPoints.Num());
 	}

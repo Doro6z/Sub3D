@@ -43,12 +43,6 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Submarine|Crew")
 	float SnapThresholdCm = 200.f;
 
-	UPROPERTY(EditAnywhere, Category = "Submarine|Debug")
-	bool bDebugLogCrewMovement = false;
-
-	UPROPERTY(EditAnywhere, Category = "Submarine|Debug")
-	bool bDebugDrawCrewMovement = false;
-
 	UPROPERTY(BlueprintReadOnly, Category = "Submarine|Crew|Support")
 	bool bHasValidEmbarkedFloor = false;
 

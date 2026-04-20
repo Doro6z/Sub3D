@@ -1,4 +1,5 @@
 #include "SubInteriorFrameComponent.h"
+#include "Sub3DDebugSettings.h"
 
 #include "DrawDebugHelpers.h"
 #include "GameFramework/Actor.h"
@@ -99,7 +100,7 @@ void USubInteriorFrameComponent::TickComponent(float DeltaTime, ELevelTick TickT
 		FMath::Abs(FrameRotationDelta.Yaw),
 		FMath::Abs(FrameRotationDelta.Roll));
 
-	if (bDebugLogFrame && (FrameLocationDelta.Size() > 1.f || MaxAbsRotationDelta > 0.1f))
+	if (GetDefault<USub3DDebugSettings>()->bLogInteriorFrame && (FrameLocationDelta.Size() > 1.f || MaxAbsRotationDelta > 0.1f))
 	{
 		UE_LOG(
 			LogSubInteriorFrame,
@@ -109,7 +110,7 @@ void USubInteriorFrameComponent::TickComponent(float DeltaTime, ELevelTick TickT
 			*FrameRotationDelta.ToCompactString());
 	}
 
-	if (bDebugDrawFrame && GetWorld())
+	if (GetDefault<USub3DDebugSettings>()->bDrawInteriorFrame && GetWorld())
 	{
 		const FVector Origin = CurrentLocation;
 		DrawDebugSphere(GetWorld(), Origin, 20.f, 12, FColor::Green, false, 0.f, 0, 1.5f);
@@ -119,7 +120,7 @@ void USubInteriorFrameComponent::TickComponent(float DeltaTime, ELevelTick TickT
 		DrawDebugDirectionalArrow(GetWorld(), Origin, Origin + FrameLocationDelta, 20.f, FColor::Cyan, false, 0.f, 0, 1.5f);
 	}
 
-	if (bDebugLogFrame)
+	if (GetDefault<USub3DDebugSettings>()->bLogInteriorFrame)
 	{
 		DebugLogTimer += DeltaTime;
 		if (DebugLogTimer >= 1.f)

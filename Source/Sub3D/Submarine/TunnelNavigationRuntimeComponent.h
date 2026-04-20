@@ -647,12 +647,6 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="TunnelNav")
 	bool bIncludeOptionalBranchesInLookahead = false;
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="TunnelNav|Debug")
-	bool bEnableDebugDraw = false;
-
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="TunnelNav|Debug")
-	bool bEnableDebugLogs = false;
-
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="TunnelNav|Debug", meta=(ClampMin="1000.0"))
 	float DebugLookaheadCm = 10000.f;
 

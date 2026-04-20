@@ -16,9 +16,6 @@ public:
 
 	virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Submarine|Interaction|Debug")
-	bool bDebugInteractionTrace = false;
-
 	UFUNCTION(BlueprintCallable, Category = "Submarine|Interaction")
 	void TryPrimaryInteract();
 

@@ -52,12 +52,6 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Submarine|InteriorFrame")
 	FTransform GetSubTransform() const;
 
-	UPROPERTY(EditAnywhere, Category = "Submarine|Debug")
-	bool bDebugLogFrame = false;
-
-	UPROPERTY(EditAnywhere, Category = "Submarine|Debug")
-	bool bDebugDrawFrame = false;
-
 	bool IsFrameValid() const { return bFrameValid; }
 
 private:

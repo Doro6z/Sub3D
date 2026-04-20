@@ -30,9 +30,6 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Sonar|Runtime")
 	bool bEnableRouteCoarseSeed = true;
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Sonar|Runtime")
-	bool bEnableDebugLogs = false;
-
 	UPROPERTY(ReplicatedUsing = OnRep_RuntimeState, BlueprintReadOnly, Category = "Sonar|Runtime")
 	ESonarMode CurrentMode = ESonarMode::PassiveStandard;
 

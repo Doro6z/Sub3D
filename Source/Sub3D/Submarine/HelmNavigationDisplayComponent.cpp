@@ -1,4 +1,5 @@
 #include "HelmNavigationDisplayComponent.h"
+#include "Sub3DDebugSettings.h"
 
 #include "HAL/PlatformTime.h"
 #include "SubmarineBase.h"
@@ -66,7 +67,7 @@ bool UHelmNavigationDisplayComponent::RefreshViewData()
 	{
 		ResetCachedViewData();
 		UpdateInstrumentStatus(false, static_cast<float>((FPlatformTime::Seconds() - RefreshStartS) * 1000.0));
-		if (bEnableDebugLogs && !bLoggedMissingRuntime)
+		if (GetDefault<USub3DDebugSettings>()->bLogHelmNavigationDisplay && !bLoggedMissingRuntime)
 		{
 			UE_LOG(LogTemp, Warning, TEXT("[%s] HelmNavigationDisplay: missing TunnelNavigationRuntime."), *GetName());
 			bLoggedMissingRuntime = true;
@@ -88,7 +89,7 @@ bool UHelmNavigationDisplayComponent::RefreshViewData()
 
 	if (!CachedTunnelRuntime->ProjectSubmarineToRoute(CachedProjection))
 	{
-		if (bEnableDebugLogs)
+		if (GetDefault<USub3DDebugSettings>()->bLogHelmNavigationDisplay)
 		{
 			UTunnelNavigationRuntimeComponent* Runtime = CachedTunnelRuntime.Get();
 			UE_LOG(
@@ -130,7 +131,7 @@ bool UHelmNavigationDisplayComponent::RefreshViewData()
 			const float UpOverflowCm = FMath::Max(0.f, FMath::Abs(CrossSection.SubProjectedOffsetUpCm) - ((CrossSection.SubProjectedOffsetUpCm >= 0.f) ? CrossSection.ClearanceUpCm : CrossSection.ClearanceDownCm));
 			const float WorstOverflowCm = FMath::Max(RightOverflowCm, UpOverflowCm);
 			bProjectionSuspect = WorstOverflowCm > 250.f;
-			if (bEnableDebugLogs && bProjectionSuspect)
+			if (GetDefault<USub3DDebugSettings>()->bLogHelmNavigationDisplay && bProjectionSuspect)
 			{
 				UE_LOG(
 					LogTemp,
@@ -167,7 +168,7 @@ bool UHelmNavigationDisplayComponent::RefreshViewData()
 	{
 		BuildGraphView(GraphWindow, CachedProjection, CachedGraphView);
 	}
-	else if (bEnableDebugLogs)
+	else if (GetDefault<USub3DDebugSettings>()->bLogHelmNavigationDisplay)
 	{
 		UE_LOG(
 			LogTemp,
@@ -190,7 +191,7 @@ bool UHelmNavigationDisplayComponent::RefreshViewData()
 		static_cast<float>((FPlatformTime::Seconds() - RefreshStartS) * 1000.0));
 	BuildReconstructionView();
 
-	if (bEnableDebugLogs && bHasValidData)
+	if (GetDefault<USub3DDebugSettings>()->bLogHelmNavigationDisplay && bHasValidData)
 	{
 		UE_LOG(
 			LogTemp,

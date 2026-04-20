@@ -1,4 +1,5 @@
 #include "TunnelNavigationRuntimeComponent.h"
+#include "Sub3DDebugSettings.h"
 
 #include "DrawDebugHelpers.h"
 #include "EngineUtils.h"
@@ -114,7 +115,7 @@ void UTunnelNavigationRuntimeComponent::TickComponent(float DeltaTime, ELevelTic
 		}
 	}
 
-	if (bEnableDebugDraw)
+	if (GetDefault<USub3DDebugSettings>()->bDrawTunnelNavigation)
 	{
 		DrawDebugOverlay();
 	}
@@ -981,7 +982,7 @@ void UTunnelNavigationRuntimeComponent::ResolveRouteActorFromWorld()
 		CachedTunnelNavData = nullptr;
 	}
 
-	if (bEnableDebugLogs)
+	if (GetDefault<USub3DDebugSettings>()->bLogTunnelNavigation)
 	{
 		const int32 SampleCount = IsValid(CachedTunnelNavData) ? CachedTunnelNavData->Samples.Num() : 0;
 		UE_LOG(

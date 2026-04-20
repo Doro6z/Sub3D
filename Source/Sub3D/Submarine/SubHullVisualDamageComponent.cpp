@@ -1,4 +1,5 @@
 #include "SubHullVisualDamageComponent.h"
+#include "Sub3DDebugSettings.h"
 
 #include "Components/MeshComponent.h"
 #include "GameFramework/Actor.h"
@@ -101,7 +102,7 @@ void USubHullVisualDamageComponent::HandleBreachesUpdated(const TArray<FBreachCl
 
 	ApplyMaterialParameters();
 
-	if (bDebugLogVisualBreaches)
+	if (GetDefault<USub3DDebugSettings>()->bLogHullVisualBreaches)
 	{
 		UE_LOG(
 			LogTemp,
@@ -354,7 +355,7 @@ bool USubHullVisualDamageComponent::BuildVisualState(const FBreachClusterState& 
 	const float SheetSpaceX = FVector::DotProduct(LocalOffset, TangentX);
 	const float SheetSpaceY = FVector::DotProduct(LocalOffset, TangentY);
 	const FStructuralSheetCompiledBinding* Binding = FindCompiledBinding(Cluster.SheetId);
-	if (!Binding && bDebugLogVisualBreaches)
+	if (!Binding && GetDefault<USub3DDebugSettings>()->bLogHullVisualBreaches)
 	{
 		UE_LOG(LogTemp, Warning, TEXT("HullVisualDamage | Missing compiled binding for sheet %s"), *Cluster.SheetId.ToString());
 	}

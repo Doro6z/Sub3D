@@ -24,6 +24,7 @@ public class Sub3D : ModuleRules
 			"PhysicsCore",
 			"RuntimeSyncDiagnostics",
 			"AnimGraphRuntime",
+			"DeveloperSettings",
 			"Sub3DRuntime",
 			"Sub3DCore"
 		});
@@ -47,7 +48,8 @@ public class Sub3D : ModuleRules
 			"Sub3D/Submarine",
 			"Sub3D/Submarine/Generator",
 			"Sub3D/WorldGen",
-			"Sub3D/Diagnostics"
+			"Sub3D/Diagnostics",
+			"Sub3D/Debug"
 		});
 	}
 }

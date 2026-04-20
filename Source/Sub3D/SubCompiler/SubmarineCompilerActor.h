@@ -164,9 +164,6 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "SubCompiler|Collision")
 	bool bShowExteriorCollisionProxyInEditor = false;
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "SubCompiler|Collision")
-	bool bDebugLogExteriorCollisionProxy = false;
-
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "SubCompiler")
 	bool bUseMvpDefaultsWhenUnset = true;
 

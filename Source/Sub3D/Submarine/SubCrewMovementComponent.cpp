@@ -1,4 +1,5 @@
 #include "SubCrewMovementComponent.h"
+#include "Sub3DDebugSettings.h"
 
 #include "SubCrewCharacter.h"
 #include "SubInteriorFrameComponent.h"
@@ -185,7 +186,7 @@ void USubCrewMovementComponent::UpdateRelativeState(float DeltaTime)
 	PreviousRelativeLocation = RelativeLocation;
 	bHasPreviousRelativeLocation = true;
 
-	if (bDebugLogCrewMovement)
+	if (GetDefault<USub3DDebugSettings>()->bLogCrewMovement)
 	{
 		UE_LOG(
 			LogSubCrewMovement,
@@ -251,7 +252,7 @@ void USubCrewMovementComponent::AttemptEmbarkedFloorRecovery(float DeltaTime)
 	FloorRecoveryTimer = 0.f;
 	RefreshEmbarkedFlooring();
 
-	if (bDebugLogCrewMovement)
+	if (GetDefault<USub3DDebugSettings>()->bLogCrewMovement)
 	{
 		UE_LOG(
 			LogSubCrewMovement,
@@ -405,7 +406,7 @@ void USubCrewMovementComponent::ApplyYawCompensation()
 			ControlRotation.Yaw = FRotator::NormalizeAxis(ControlRotation.Yaw + YawDelta);
 			Controller->SetControlRotation(ControlRotation);
 
-			if (bDebugLogCrewMovement)
+			if (GetDefault<USub3DDebugSettings>()->bLogCrewMovement)
 			{
 				UE_LOG(
 					LogSubCrewMovement,
@@ -472,7 +473,7 @@ void USubCrewMovementComponent::CheckAndLogBaseChange()
 void USubCrewMovementComponent::DebugDrawState()
 {
 	const USubInteriorFrameComponent* Frame = GetInteriorFrame();
-	if (!bDebugDrawCrewMovement || !Frame || !Frame->IsFrameValid() || !CharacterOwner || !GetWorld())
+	if (!GetDefault<USub3DDebugSettings>()->bDrawCrewMovement || !Frame || !Frame->IsFrameValid() || !CharacterOwner || !GetWorld())
 	{
 		return;
 	}
@@ -529,7 +530,7 @@ void USubCrewMovementComponent::DebugDrawState()
 
 void USubCrewMovementComponent::LogPeriodicState(float DeltaTime)
 {
-	if (!bDebugLogCrewMovement || !CharacterOwner)
+	if (!GetDefault<USub3DDebugSettings>()->bLogCrewMovement || !CharacterOwner)
 	{
 		DebugLogTimer = 0.f;
 		return;

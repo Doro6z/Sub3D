@@ -1,4 +1,5 @@
 #include "SubmarineBase.h"
+#include "Sub3DDebugSettings.h"
 
 #include "BreachVfxManagerComponent.h"
 #include "CompartmentVolumeComponent.h"
@@ -950,7 +951,7 @@ void ASubmarineBase::OnHullHit(
 
 	if (ApproachSpeedCmS < HullCollisionDamageMinSpeedCmS)
 	{
-		if (bDebugLogHullCollisions)
+		if (GetDefault<USub3DDebugSettings>()->bLogSubHullCollisions)
 		{
 			UE_LOG(
 				LogTemp,
@@ -1006,7 +1007,7 @@ void ASubmarineBase::OnHullHit(
 		FeedbackManager->DispatchHullImpactFeedback(Hit.ImpactPoint, Damage, HullImpactRadiusCm);
 	}
 
-	if (bDebugLogHullCollisions)
+	if (GetDefault<USub3DDebugSettings>()->bLogSubHullCollisions)
 	{
 		UE_LOG(
 			LogTemp,

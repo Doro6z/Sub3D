@@ -1,4 +1,5 @@
 #include "SubmarineCompilerActor.h"
+#include "Sub3DDebugSettings.h"
 
 #include "Curves/RichCurve.h"
 #include "Components/CapsuleComponent.h"
@@ -631,7 +632,7 @@ void ASubmarineCompilerActor::RefreshExteriorCollisionProxy()
 			: ECollisionEnabled::QueryAndPhysics);
 	}
 
-	if (bDebugLogExteriorCollisionProxy)
+	if (GetDefault<USub3DDebugSettings>()->bLogCompilerExteriorCollisionProxy)
 	{
 		LogExteriorCollisionProxyState();
 	}

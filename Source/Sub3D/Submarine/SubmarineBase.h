@@ -233,9 +233,6 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Submarine|Damage", meta = (ClampMin = "1.0"))
 	float HullCollisionDamageExponent = 2.f;
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Submarine|Damage|Debug")
-	bool bDebugLogHullCollisions = false;
-
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Replicated, Category = "Submarine|Debug")
 	bool bFreezeMovementForTesting = false;
 

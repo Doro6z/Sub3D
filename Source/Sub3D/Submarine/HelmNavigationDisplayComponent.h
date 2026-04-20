@@ -315,9 +315,6 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="HelmNav")
 	FSubmarineNavigationProfile CanonicalNavigationProfile;
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="HelmNav|Debug")
-	bool bEnableDebugLogs = false;
-
 	UFUNCTION(BlueprintCallable, Category="HelmNav")
 	void SetTunnelNavigationRuntime(UTunnelNavigationRuntimeComponent* InRuntime);
 

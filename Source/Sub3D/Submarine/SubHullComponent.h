@@ -116,19 +116,6 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Submarine|Hull|Tuning")
 	float CreatureEnterRadiusCm = 75.f;
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Submarine|Hull|Debug")
-	bool bDrawDebug = false;
-
-	/** Draw structural sheets as world-space rectangles with normals and per-cell
-	 *  damage coloring. Separate flag so it does not pollute the breach/flow debug. */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Submarine|Hull|Debug")
-	bool bDrawDebugSheets = false;
-
-	/** If true AND bDrawDebugSheets is on, every cell is drawn tinted by damage.
-	 *  If false, only damaged cells are drawn. Keep false in a healthy state to
-	 *  avoid flooding the viewport with 1600 draws per frame. */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Submarine|Hull|Debug")
-	bool bDrawDebugSheetCellsAlways = false;
 
 	UPROPERTY(BlueprintAssignable, Category = "Submarine|Hull|Events")
 	FOnHullDamageUpdated OnHullDamageUpdated;

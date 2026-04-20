@@ -1,4 +1,5 @@
 #include "SubInteractionComponent.h"
+#include "Sub3DDebugSettings.h"
 
 #include "Camera/CameraComponent.h"
 #include "DrawDebugHelpers.h"
@@ -32,7 +33,7 @@ void USubInteractionComponent::TryPrimaryInteract()
 	AActor* TargetActor = ResolvePrimaryInteractTarget();
 	if (!TargetActor)
 	{
-		if (bDebugInteractionTrace)
+		if (GetDefault<USub3DDebugSettings>()->bDrawInteractionTrace)
 		{
 			UE_LOG(LogSubInteraction, Warning, TEXT("TryPrimaryInteract: no interactable target resolved for %s"),
 				*GetNameSafe(GetOwner()));
@@ -40,7 +41,7 @@ void USubInteractionComponent::TryPrimaryInteract()
 		return;
 	}
 
-	if (bDebugInteractionTrace)
+	if (GetDefault<USub3DDebugSettings>()->bDrawInteractionTrace)
 	{
 		UE_LOG(LogSubInteraction, Log, TEXT("TryPrimaryInteract: resolved target %s for %s"),
 			*GetNameSafe(TargetActor), *GetNameSafe(GetOwner()));
@@ -102,14 +103,14 @@ void USubInteractionComponent::ServerTryPrimaryInteract_Implementation(AActor* T
 
 	if (UInteractableComponent* Interactable = TargetActor->FindComponentByClass<UInteractableComponent>())
 	{
-		if (bDebugInteractionTrace)
+		if (GetDefault<USub3DDebugSettings>()->bDrawInteractionTrace)
 		{
 			UE_LOG(LogSubInteraction, Log, TEXT("ServerTryPrimaryInteract: TriggerInteract on %s for crew %s"),
 				*GetNameSafe(TargetActor), *GetNameSafe(Crew));
 		}
 		Interactable->TriggerInteract(Crew);
 	}
-	else if (bDebugInteractionTrace)
+	else if (GetDefault<USub3DDebugSettings>()->bDrawInteractionTrace)
 	{
 		UE_LOG(LogSubInteraction, Warning, TEXT("ServerTryPrimaryInteract: target %s has no UInteractableComponent"),
 			*GetNameSafe(TargetActor));
@@ -187,7 +188,7 @@ AActor* USubInteractionComponent::ResolvePrimaryInteractTarget(FVector* OutTrace
 
 	if (Crew->GetWorld()->LineTraceSingleByChannel(Hit, Start, End, ECC_Visibility, Params))
 	{
-		if (bDebugInteractionTrace)
+		if (GetDefault<USub3DDebugSettings>()->bDrawInteractionTrace)
 		{
 			DrawDebugLine(Crew->GetWorld(), Start, Hit.ImpactPoint, FColor::Green, false, 1.5f, 0, 1.f);
 			DrawDebugSphere(Crew->GetWorld(), Hit.ImpactPoint, 8.f, 12, FColor::Green, false, 1.5f);
@@ -200,13 +201,13 @@ AActor* USubInteractionComponent::ResolvePrimaryInteractTarget(FVector* OutTrace
 			return InteractableActor;
 		}
 
-		if (bDebugInteractionTrace)
+		if (GetDefault<USub3DDebugSettings>()->bDrawInteractionTrace)
 		{
 			UE_LOG(LogSubInteraction, Warning, TEXT("ResolvePrimaryInteractTarget: blocking hit %s is not interactable, trying fallback"),
 				*GetNameSafe(Hit.GetActor()));
 		}
 	}
-	else if (bDebugInteractionTrace)
+	else if (GetDefault<USub3DDebugSettings>()->bDrawInteractionTrace)
 	{
 		DrawDebugLine(Crew->GetWorld(), Start, End, FColor::Red, false, 1.5f, 0, 1.f);
 		UE_LOG(LogSubInteraction, Warning, TEXT("ResolvePrimaryInteractTarget: no direct visibility hit"));
@@ -286,7 +287,7 @@ AActor* USubInteractionComponent::ResolveNearbyInteractableFallback(const FVecto
 		}
 	}
 
-	if (bDebugInteractionTrace)
+	if (GetDefault<USub3DDebugSettings>()->bDrawInteractionTrace)
 	{
 		if (BestActor)
 		{

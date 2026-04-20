@@ -1,4 +1,5 @@
 #include "SubCrewCharacter.h"
+#include "Sub3DDebugSettings.h"
 #include "Engine/DamageEvents.h"
 #include "SubmarineBase.h"
 #include "SubCrewMovementComponent.h"
@@ -687,7 +688,7 @@ void ASubCrewCharacter::UpdateEnvironmentalEffects(float DeltaSeconds)
 	ApplyWaterMovementState(CurrentWaterImmersion01);
 	ApplyPressureEffects(DeltaSeconds, CurrentAmbientPressureKPa);
 
-	if (bDebugLogEnvironmentState && CurrentSubmarine)
+	if (GetDefault<USub3DDebugSettings>()->bLogCrewEnvironmentState && CurrentSubmarine)
 	{
 		EnvironmentDebugLogTimer += DeltaSeconds;
 		if (EnvironmentDebugLogTimer >= FMath::Max(0.1f, EnvironmentDebugLogIntervalSeconds))

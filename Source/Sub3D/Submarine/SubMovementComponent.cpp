@@ -1,4 +1,5 @@
 #include "SubMovementComponent.h"
+#include "Sub3DDebugSettings.h"
 
 #include "Components/PrimitiveComponent.h"
 #include "Components/StaticMeshComponent.h"
@@ -509,7 +510,7 @@ void USubMovementComponent::ApplyPhysics(float DeltaTime)
 	ForwardSpeedCmS = ClampedLocalVelocity.X;
 
 	// ── 7. Debug logging ────────────────────────────────────────────────
-	if (bDebugLogSubMovement)
+	if (GetDefault<USub3DDebugSettings>()->bLogSubMovement)
 	{
 		static float ServerDebugLogTimer = 0.f;
 		ServerDebugLogTimer += DeltaTime;
@@ -565,7 +566,7 @@ void USubMovementComponent::ApplyPhysics(float DeltaTime)
 
 		if (UsesComplexAsSimpleSweep(SweepShape))
 		{
-			if (bDebugLogCollisionSweeps || bDebugLogSubMovement)
+			if (GetDefault<USub3DDebugSettings>()->bLogSubCollisionSweeps || GetDefault<USub3DDebugSettings>()->bLogSubMovement)
 			{
 				UE_LOG(
 					LogSubMovement,
@@ -651,7 +652,7 @@ void USubMovementComponent::ApplyPhysics(float DeltaTime)
 			RemainingDelta = FVector::VectorPlaneProject(RemainingDelta * RemainingFraction, Blocking.Normal);
 			InOutVelocity = FVector::VectorPlaneProject(InOutVelocity, Blocking.Normal);
 
-			if (bDebugLogCollisionSweeps)
+			if (GetDefault<USub3DDebugSettings>()->bLogSubCollisionSweeps)
 			{
 				UE_LOG(LogSubMovement, Log,
 					TEXT("HullSweep hit | Iter=%d | Comp=%s | OtherActor=%s | OtherComp=%s | Normal=%s | Time=%.3f"),
@@ -670,7 +671,7 @@ void USubMovementComponent::ApplyPhysics(float DeltaTime)
 		// because no sweep was performed for that final segment. The
 		// player feels a tiny stick in true corners, but the sub never
 		// teleports through walls. Sticky > tunneling.
-		if (!RemainingDelta.IsNearlyZero() && bDebugLogCollisionSweeps)
+		if (!RemainingDelta.IsNearlyZero() && GetDefault<USub3DDebugSettings>()->bLogSubCollisionSweeps)
 		{
 			UE_LOG(LogSubMovement, Verbose,
 				TEXT("HullSweep | iter exhausted, dropping residual=%s (mag=%.2f)"),
@@ -914,7 +915,7 @@ void USubMovementComponent::InterpolateClient(float DeltaTime)
 	AActor* Owner = GetOwner();
 	if (!Owner || !bHasReceivedSnapshot)
 	{
-		if (!bDebugLogSubMovement)
+		if (!GetDefault<USub3DDebugSettings>()->bLogSubMovement)
 		{
 			DebugLogTimer = 0.f;
 		}
@@ -957,7 +958,7 @@ void USubMovementComponent::InterpolateClient(float DeltaTime)
 		}
 	}
 
-	if (bDebugLogSubMovement)
+	if (GetDefault<USub3DDebugSettings>()->bLogSubMovement)
 	{
 		DebugLogTimer += DeltaTime;
 		if (DebugLogTimer >= 1.f)

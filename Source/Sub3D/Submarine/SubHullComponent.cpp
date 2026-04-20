@@ -1,4 +1,5 @@
 #include "SubHullComponent.h"
+#include "Sub3DDebugSettings.h"
 
 #include "DrawDebugHelpers.h"
 #include "Components/PrimitiveComponent.h"
@@ -57,7 +58,7 @@ void USubHullComponent::TickComponent(float DeltaTime, ELevelTick TickType, FAct
 		return;
 	}
 
-	if (bDrawDebug)
+	if (GetDefault<USub3DDebugSettings>()->bDrawHull)
 	{
 		const FTransform ActorTransform = GetOwner()->GetActorTransform();
 
@@ -76,7 +77,7 @@ void USubHullComponent::TickComponent(float DeltaTime, ELevelTick TickType, FAct
 		}
 	}
 
-	if (bDrawDebugSheets)
+	if (GetDefault<USub3DDebugSettings>()->bDrawHullSheets)
 	{
 		DrawDebugSheets();
 	}
@@ -162,7 +163,7 @@ void USubHullComponent::DrawDebugSheets() const
 		DrawDebugString(World, WorldOrigin + WorldNormal * 30.f, Label, nullptr, FColor::White, 0.f, true, 1.2f);
 
 		// Per-cell coloring. Skipped by default to avoid 1600 draws/frame; opt in
-		// via bDrawDebugSheetCellsAlways, or the damaged ones are always drawn.
+		// via GetDefault<USub3DDebugSettings>()->bDrawHullSheetCellsAlways, or the damaged ones are always drawn.
 		if (!SheetStates.IsValidIndex(SheetIndex))
 		{
 			continue;
@@ -179,7 +180,7 @@ void USubHullComponent::DrawDebugSheets() const
 		{
 			const FStructuralCellState& Cell = State.Cells[CellIdx];
 			const bool bDamaged = Cell.Damage01 > 0.01f;
-			if (!bDamaged && !bDrawDebugSheetCellsAlways)
+			if (!bDamaged && !GetDefault<USub3DDebugSettings>()->bDrawHullSheetCellsAlways)
 			{
 				continue;
 			}

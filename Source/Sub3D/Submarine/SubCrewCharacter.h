@@ -195,9 +195,6 @@ public:
 	UPROPERTY(BlueprintReadOnly, Category = "Crew|Camera")
 	float CameraBlendAlpha = 0.f;
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crew|Debug")
-	bool bDebugLogEnvironmentState = false;
-
 	/** Show the anim tuner panel at startup */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crew|Debug")
 	bool bShowAnimDebugPanel = true;

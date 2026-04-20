@@ -80,9 +80,6 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Breach|Visual|Parameters")
 	FName BreachRadiusParameterPrefix = TEXT("BreachRadius");
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Breach|Visual|Debug")
-	bool bDebugLogVisualBreaches = false;
-
 protected:
 	UFUNCTION()
 	void HandleBreachesUpdated(const TArray<FBreachClusterState>& Breaches);

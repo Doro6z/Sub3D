@@ -196,12 +196,6 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Net", meta = (ClampMin = "0.0"))
 	float MaxClientExtrapolationSec = 0.2f;
 
-	UPROPERTY(EditAnywhere, Category = "Submarine|Debug")
-	bool bDebugLogSubMovement = false;
-
-	UPROPERTY(EditAnywhere, Category = "Submarine|Debug")
-	bool bDebugLogCollisionSweeps = false;
-
 	FOnSubmarineSnapped OnSubmarineSnapped;
 
 	// -------------------------------------------------------------------------

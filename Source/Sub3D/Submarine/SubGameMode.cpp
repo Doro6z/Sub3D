@@ -1,4 +1,5 @@
 #include "SubGameMode.h"
+#include "Sub3DDebugSettings.h"
 
 #include "Components/PrimitiveComponent.h"
 #include "EngineUtils.h"
@@ -235,7 +236,7 @@ void ASubGameMode::BeginDeparture()
 	if (ActiveSubmarine)
 	{
 		if (ActiveSubmarine->SubMovement
-			&& (ActiveSubmarine->SubMovement->bDebugLogCollisionSweeps || ActiveSubmarine->SubMovement->bDebugLogSubMovement))
+			&& (GetDefault<USub3DDebugSettings>()->bLogSubCollisionSweeps || GetDefault<USub3DDebugSettings>()->bLogSubMovement))
 		{
 			LogDepartureCollisionSnapshot(ActiveSubmarine);
 		}
