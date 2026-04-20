@@ -27,6 +27,14 @@ public:
 	UPROPERTY(Config, EditAnywhere, Category = "Crew")
 	bool bLogCrewEnvironmentState = false;
 
+	/** Per-tick log of crew position in world + sub-local frame, movement base, falling flag. For diagnosing airborne/walkable-transition jitter. */
+	UPROPERTY(Config, EditAnywhere, Category = "Crew")
+	bool bLogCrewJitter = false;
+
+	/** Warn when crew relative-frame position jumps more than this in a single tick. */
+	UPROPERTY(Config, EditAnywhere, Category = "Crew", meta = (ClampMin = "1.0"))
+	float CrewJitterWarnThresholdCm = 25.f;
+
 	// ── Submarine | Movement ──────────────────────────────────
 	UPROPERTY(Config, EditAnywhere, Category = "Submarine|Movement")
 	bool bLogSubMovement = false;

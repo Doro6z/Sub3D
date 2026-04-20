@@ -172,6 +172,9 @@ void USubCrewMovementComponent::UpdateRelativeState(float DeltaTime)
 	}
 
 	const FVector NewRelativeLocation = Frame->WorldToLocal(CharacterOwner->GetActorLocation());
+	const float RelFrameDeltaCm = bHasPreviousRelativeLocation
+		? static_cast<float>((NewRelativeLocation - PreviousRelativeLocation).Size())
+		: 0.f;
 	if (bHasPreviousRelativeLocation && DeltaTime > KINDA_SMALL_NUMBER)
 	{
 		RelativeLinearVelocity = (NewRelativeLocation - PreviousRelativeLocation) / DeltaTime;
@@ -183,6 +186,44 @@ void USubCrewMovementComponent::UpdateRelativeState(float DeltaTime)
 
 	RelativeLocation = NewRelativeLocation;
 	RelativeRotation = Frame->WorldToLocalRotation(CharacterOwner->GetActorRotation());
+
+	const USub3DDebugSettings* DebugSettings = GetDefault<USub3DDebugSettings>();
+	if (DebugSettings->bLogCrewJitter)
+	{
+		const UPrimitiveComponent* Base = CharacterOwner->GetMovementBase();
+		const ENetRole LocalRole = CharacterOwner->GetLocalRole();
+		const FString MovementModeStr = GetMovementName();
+		const FVector SubWorldLoc = Frame->GetOwner() ? Frame->GetOwner()->GetActorLocation() : FVector::ZeroVector;
+		const bool bJitterSpike = bHasPreviousRelativeLocation && RelFrameDeltaCm > DebugSettings->CrewJitterWarnThresholdCm;
+		UE_LOG(
+			LogSubCrewMovement,
+			Log,
+			TEXT("Jitter | Role=%d | dt=%.4f | World=%s | Sub=%s | Rel=%s | RelDeltaCm=%.2f%s | Mode=%s | Falling=%d | Base=%s | FrameValid=%d"),
+			static_cast<int32>(LocalRole),
+			DeltaTime,
+			*CharacterOwner->GetActorLocation().ToCompactString(),
+			*SubWorldLoc.ToCompactString(),
+			*NewRelativeLocation.ToCompactString(),
+			RelFrameDeltaCm,
+			bJitterSpike ? TEXT(" [SPIKE]") : TEXT(""),
+			*MovementModeStr,
+			IsFalling() ? 1 : 0,
+			*GetNameSafe(Base),
+			Frame->IsFrameValid() ? 1 : 0);
+		if (bJitterSpike)
+		{
+			UE_LOG(
+				LogSubCrewMovement,
+				Warning,
+				TEXT("Jitter SPIKE | RelDeltaCm=%.2f > threshold=%.2f | Mode=%s | Falling=%d | Base=%s"),
+				RelFrameDeltaCm,
+				DebugSettings->CrewJitterWarnThresholdCm,
+				*MovementModeStr,
+				IsFalling() ? 1 : 0,
+				*GetNameSafe(Base));
+		}
+	}
+
 	PreviousRelativeLocation = RelativeLocation;
 	bHasPreviousRelativeLocation = true;
 
