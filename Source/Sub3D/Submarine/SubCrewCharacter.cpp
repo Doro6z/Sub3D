@@ -5,6 +5,7 @@
 #include "SubCrewMovementComponent.h"
 #include "SubFloodComponent.h"
 #include "SubHullComponent.h"
+#include "SubInteriorFrameComponent.h"
 #include "SubLegacyLog.h"
 #include "SubmarineLayoutAsset.h"
 #include "SubMovementComponent.h"
@@ -397,6 +398,20 @@ void ASubCrewCharacter::EnterOnFootInSubmarine(ASubmarineBase* Sub, const FTrans
 					*TraceEnd.ToCompactString());
 			}
 		}
+
+		// Seed GridSpaceTransform from the final world pose (post floor-snap) so
+		// the first rebase is a no-op and the extract loop starts coherent.
+		if (Sub)
+		{
+			const FTransform SubTransform = Sub->GetActorTransform();
+			const FVector LocalPos = SubTransform.InverseTransformPosition(GetActorLocation());
+			const FRotator WorldRot = GetActorRotation();
+			const float LocalYaw = FRotator::NormalizeAxis(WorldRot.Yaw - SubTransform.Rotator().Yaw);
+			CrewMov->GridSpaceTransform = FTransform(
+				FRotator(0.f, LocalYaw, 0.f).Quaternion(),
+				LocalPos);
+			CrewMov->bIsGridSpaceAuthority = true;
+		}
 	}
 
 	UE_LOG(
@@ -430,6 +445,15 @@ void ASubCrewCharacter::BoardSubmarine(ASubmarineBase* Submarine)
 	{
 		CrewMov->InitializeForSubmarine();
 		CrewMov->RefreshEmbarkedFlooring();
+
+		const FTransform SubTransform = Submarine->GetActorTransform();
+		const FVector LocalPos = SubTransform.InverseTransformPosition(GetActorLocation());
+		const FRotator WorldRot = GetActorRotation();
+		const float LocalYaw = FRotator::NormalizeAxis(WorldRot.Yaw - SubTransform.Rotator().Yaw);
+		CrewMov->GridSpaceTransform = FTransform(
+			FRotator(0.f, LocalYaw, 0.f).Quaternion(),
+			LocalPos);
+		CrewMov->bIsGridSpaceAuthority = true;
 	}
 
 	UE_LOG(
@@ -443,7 +467,27 @@ void ASubCrewCharacter::BoardSubmarine(ASubmarineBase* Submarine)
 
 void ASubCrewCharacter::DisembarkSubmarine()
 {
-	const ASubmarineBase* PreviousSubmarine = CurrentSubmarine;
+	ASubmarineBase* PreviousSubmarine = CurrentSubmarine;
+
+	// Before clearing the sub pointer, flush GridSpaceTransform into world pose
+	// and inherit sub velocity so the disembark is physically continuous.
+	if (USubCrewMovementComponent* CrewMov = Cast<USubCrewMovementComponent>(GetCharacterMovement()))
+	{
+		if (CrewMov->bIsGridSpaceAuthority && PreviousSubmarine)
+		{
+			const FTransform SubTransform = PreviousSubmarine->GetActorTransform();
+			const FVector WorldPos = SubTransform.TransformPosition(CrewMov->GridSpaceTransform.GetLocation());
+			const FRotator LocalRot = CrewMov->GridSpaceTransform.Rotator();
+			const FRotator WorldRot(0.f, FRotator::NormalizeAxis(SubTransform.Rotator().Yaw + LocalRot.Yaw), 0.f);
+			SetActorLocationAndRotation(WorldPos, WorldRot, false, nullptr, ETeleportType::TeleportPhysics);
+
+			if (USubMovementComponent* SubMov = PreviousSubmarine->SubMovement)
+			{
+				CrewMov->Velocity = SubMov->Velocity;
+			}
+		}
+		CrewMov->bIsGridSpaceAuthority = false;
+	}
 
 	DetachFromActor(FDetachmentTransformRules::KeepWorldTransform);
 	SetCurrentSubmarine(nullptr);

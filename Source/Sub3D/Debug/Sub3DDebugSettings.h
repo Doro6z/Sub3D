@@ -35,18 +35,6 @@ public:
 	UPROPERTY(Config, EditAnywhere, Category = "Crew", meta = (ClampMin = "10.0"))
 	float CrewJitterWarnVelocityCmPerSec = 1200.f;
 
-	/** When true, snap crew world-pos back to expected Rel if single-tick relative speed exceeds CrewTetherVelocityCmPerSec. Fixes sub-world-jump jitter (hitch recovery / network snapshot) that CMC MovementBase fails to carry. */
-	UPROPERTY(Config, EditAnywhere, Category = "Crew")
-	bool bEnableCrewTether = true;
-
-	/** Threshold above which the crew tether fires. Set above max plausible foot speed (~500 cm/s) so only sub-jump-driven jitter triggers. */
-	UPROPERTY(Config, EditAnywhere, Category = "Crew", meta = (ClampMin = "10.0"))
-	float CrewTetherVelocityCmPerSec = 800.f;
-
-	/** Log when the crew tether fires. */
-	UPROPERTY(Config, EditAnywhere, Category = "Crew")
-	bool bLogCrewTether = true;
-
 	// ── Submarine | Movement ──────────────────────────────────
 	UPROPERTY(Config, EditAnywhere, Category = "Submarine|Movement")
 	bool bLogSubMovement = false;

@@ -37,6 +37,14 @@ public:
 	UPROPERTY(BlueprintReadOnly, Category = "Submarine|Crew")
 	FRotator RelativeRotation = FRotator::ZeroRotator;
 
+	/** Authoritative crew pose in the submarine's local space. Updated each tick via rebase/extract. */
+	UPROPERTY(BlueprintReadOnly, Category = "Submarine|Crew|LocalGrid")
+	FTransform GridSpaceTransform = FTransform::Identity;
+
+	/** When true, crew transport is driven by the rebase/extract pipeline; MovementBase carry is bypassed. */
+	UPROPERTY(BlueprintReadOnly, Category = "Submarine|Crew|LocalGrid")
+	bool bIsGridSpaceAuthority = false;
+
 	UPROPERTY(BlueprintReadOnly, Category = "Submarine|Crew")
 	FVector RelativeLinearVelocity = FVector::ZeroVector;
 
@@ -199,7 +207,6 @@ private:
 	void UpdateBraceState();
 	bool ShouldEvaluateHandIK() const;
 	bool QueryBraceSupportHit(const FVector& Start, const FVector& End, FHitResult& OutHit) const;
-	void ApplyYawCompensation();
 	void CheckAndLogBaseChange();
 	void DebugDrawState();
 	void LogPeriodicState(float DeltaTime);
@@ -214,4 +221,7 @@ private:
 	bool bHasPreviousRelativeLocation = false;
 	float FloorRecoveryTimer = 0.f;
 	float DebugLogTimer = 0.f;
+
+	/** Submarine world transform cached at the end of the previous tick. Used to compute the controller yaw delta. */
+	FTransform LastSubWorldTransform = FTransform::Identity;
 };

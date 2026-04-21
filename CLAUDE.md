@@ -75,6 +75,44 @@ USubmarineDefinition             — RUNTIME SOURCE OF TRUTH (output)
 - **No Chaos physics** — Movement is math-based via USubMovementComponent.
 - **No runtime auto-spawn for UI** — Prefer editor-assigned widgets, explicit names, stable layout rules, and predictable asset wiring.
 
+## Crew embarked movement — Local Grid Space Authority
+
+Authoritative architecture: `reports/plans/2026-04-21_local_grid_space_authority_architecture.md`.
+
+**Principle** — each crew tick when embarked:
+
+1. **REBASE** (pre-CMC): teleport character to `SubTransform * GridSpaceTransform` via `UpdatedComponent->SetWorldLocationAndRotation(..., bSweep=false, ETeleportType::TeleportPhysics)`. Rotation is **Yaw-only** (Pitch=Roll=0 on the capsule).
+2. **SIMULATE**: `Super::TickComponent(...)` — CMC runs natively against the sub's world-space geometry, which is static from its point of view.
+3. **EXTRACT** (post-CMC): `GridSpaceTransform = SubTransform.Inverse() * Character->GetActorTransform()` (yaw-only extraction for rotation).
+
+`GridSpaceTransform` (FTransform, on USubCrewMovementComponent) is the authoritative pose. The rebase runs in **all** movement modes (Walking, Falling, Swimming, Flying, Custom).
+
+**Invariants:**
+
+- Use `UpdatedComponent->SetWorldLocationAndRotation`, never `SetActorLocation`/`SetActorTransform` for the rebase.
+- `bSweep=false` + `ETeleportType::TeleportPhysics`.
+- `bIgnoreBaseRotation = bIsGridSpaceAuthority` — disable CMC's built-in base-rotation carry.
+- `UpdateBasedMovement` and `UpdateBasedRotation` are no-ops when `bIsGridSpaceAuthority`.
+- Controller yaw delta is applied in `TickComponent` (pre-CMC) from `SubRot.Yaw - LastSubWorldTransform.Rotator().Yaw`.
+- Tick prereqs: `SubMovement → InteriorFrame → CrewMovement` (set in `InitializeForSubmarine`).
+
+**Legacy to be removed — do NOT extend:**
+
+- `ApplyYawCompensation()` — obsolete, rebase handles rotation.
+- Crew tether (`bEnableCrewTether`, world-snap safety net added 2026-04-21) — obsolete, rebase does not drift.
+- `UpdateBasedMovement`/`UpdateBasedRotation` as transport path — no-op'd in grid mode.
+- Treating `MovementBase` as the carry mechanism — it still exists for CMC's floor-finding, but no longer transports the crew.
+
+**Kept as validation harness:**
+
+- `USub3DDebugSettings` (Project Settings > Game > Sub3D Debug) — all debug toggles live here.
+- `bLogCrewJitter` + related fields in Crew category — per-tick diagnostic log for verifying the new architecture holds. The SPIKE threshold (`CrewJitterWarnVelocityCmPerSec`, default 1200 cm/s) should now stay clean.
+
+**Implementation phases:**
+
+- **Phase 1** — solo PIE validation. No FSavedMove override yet; network off. Jitter must reach zero in solo before Phase 2.
+- **Phase 2** — override `FSavedMove_Character` to carry `GridSpaceTransform` in the net payload, `ServerMove` validates in local space, replicate `GridSpaceTransform` with `COND_SkipOwner`.
+
 ## Custom plugins
 
 - **LevelSwitcher** — Editor-only level switching widget.

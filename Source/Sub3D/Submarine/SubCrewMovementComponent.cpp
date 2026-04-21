@@ -40,10 +40,50 @@ USubCrewMovementComponent::USubCrewMovementComponent()
 
 void USubCrewMovementComponent::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
 {
-	// Scope bIgnoreBaseRotation to embarked state only: our ApplyYawCompensation
-	// owns the yaw while embarked, but off-sub moving bases must keep the stock
-	// rotation behavior.
-	bIgnoreBaseRotation = IsEmbarked();
+	// Grid-space authority owns yaw while embarked; CMC's base-rotation carry is bypassed.
+	bIgnoreBaseRotation = bIsGridSpaceAuthority;
+
+	// ─── REBASE (pre-CMC) ───
+	// Teleport the capsule to the expected world pose so CMC sees a static world
+	// around the character. Must use UpdatedComponent (not SetActorLocation) to
+	// avoid triggering overlap/move events before the real CMC tick.
+	if (bIsGridSpaceAuthority && IsEmbarked() && UpdatedComponent && CharacterOwner)
+	{
+		if (USubInteriorFrameComponent* Frame = GetInteriorFrame())
+		{
+			const FTransform SubTransform = Frame->GetSubTransform();
+
+			const FVector RebasedWorldPos = SubTransform.TransformPosition(GridSpaceTransform.GetLocation());
+			const FRotator LocalRot = GridSpaceTransform.Rotator();
+			const FRotator SubRot = SubTransform.Rotator();
+			// Yaw-only capsule rotation: the capsule must stay aligned with world gravity
+			// so CMC's collision resolution behaves. Pitch/roll of the sub are cosmetic only.
+			const FRotator RebasedWorldRot(0.f, FRotator::NormalizeAxis(SubRot.Yaw + LocalRot.Yaw), 0.f);
+
+			UpdatedComponent->SetWorldLocationAndRotation(
+				RebasedWorldPos, RebasedWorldRot.Quaternion(),
+				/*bSweep*/ false, nullptr, ETeleportType::TeleportPhysics);
+
+			// Carry the controller yaw by the sub's yaw delta so the locally-controlled
+			// view stays anchored relative to the sub.
+			if (CharacterOwner->IsLocallyControlled())
+			{
+				if (AController* C = CharacterOwner->GetController())
+				{
+					const FRotator PrevSubRot = LastSubWorldTransform.Rotator();
+					const float DeltaYaw = FRotator::NormalizeAxis(SubRot.Yaw - PrevSubRot.Yaw);
+					if (!FMath::IsNearlyZero(DeltaYaw, KINDA_SMALL_NUMBER))
+					{
+						FRotator CtrlRot = C->GetControlRotation();
+						CtrlRot.Yaw = FRotator::NormalizeAxis(CtrlRot.Yaw + DeltaYaw);
+						C->SetControlRotation(CtrlRot);
+					}
+				}
+			}
+
+			LastSubWorldTransform = SubTransform;
+		}
+	}
 
 	Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
 
@@ -51,6 +91,23 @@ void USubCrewMovementComponent::TickComponent(float DeltaTime, ELevelTick TickTy
 
 	if (IsEmbarked())
 	{
+		// ─── EXTRACT (post-CMC) ───
+		// The CMC has applied input, gravity, and collision resolution in world space.
+		// Project the new world pose back into sub-local space; that becomes the
+		// authoritative GridSpaceTransform for next frame's rebase.
+		if (bIsGridSpaceAuthority && CharacterOwner)
+		{
+			if (USubInteriorFrameComponent* Frame = GetInteriorFrame())
+			{
+				const FTransform SubTransform = Frame->GetSubTransform();
+				const FVector NewLocalPos = SubTransform.InverseTransformPosition(CharacterOwner->GetActorLocation());
+				const FRotator WorldRot = CharacterOwner->GetActorRotation();
+				const FRotator SubRot = SubTransform.Rotator();
+				const float LocalYaw = FRotator::NormalizeAxis(WorldRot.Yaw - SubRot.Yaw);
+				GridSpaceTransform = FTransform(FRotator(0.f, LocalYaw, 0.f).Quaternion(), NewLocalPos);
+			}
+		}
+
 		UpdateRelativeState(DeltaTime);
 		UpdateInertialState();
 		UpdateSupportState();
@@ -58,7 +115,6 @@ void USubCrewMovementComponent::TickComponent(float DeltaTime, ELevelTick TickTy
 		UpdateBraceState();
 		UpdateHandIKProbes();
 		UpdateFootIKTraces();
-		ApplyYawCompensation();
 		CheckAndLogBaseChange();
 		LogPeriodicState(DeltaTime);
 		DebugDrawState();
@@ -96,19 +152,29 @@ void USubCrewMovementComponent::TickComponent(float DeltaTime, ELevelTick TickTy
 		PreviousRelativeLocation = FVector::ZeroVector;
 		FloorRecoveryTimer = 0.f;
 		DebugLogTimer = 0.f;
+		LastSubWorldTransform = FTransform::Identity;
+		GridSpaceTransform = FTransform::Identity;
 	}
 }
 
 void USubCrewMovementComponent::UpdateBasedMovement(float DeltaSeconds)
 {
-	// D4: Stock based-movement re-enabled as the stabilization experiment.
+	// In grid-space authority mode the rebase transports the crew; CMC's
+	// base-carry must not also apply the base delta or we double-advance.
+	if (bIsGridSpaceAuthority)
+	{
+		return;
+	}
 	Super::UpdateBasedMovement(DeltaSeconds);
 }
 
 void USubCrewMovementComponent::UpdateBasedRotation(FRotator& FinalRotation, const FRotator& ReducedRotation)
 {
-	// D4: Stock based-rotation re-enabled.
-	// Controller yaw follow is handled separately in ApplyYawCompensation().
+	// Same rule for rotation: the rebase owns the capsule yaw relative to the sub.
+	if (bIsGridSpaceAuthority)
+	{
+		return;
+	}
 	Super::UpdateBasedRotation(FinalRotation, ReducedRotation);
 }
 
@@ -171,45 +237,20 @@ void USubCrewMovementComponent::UpdateRelativeState(float DeltaTime)
 		return;
 	}
 
-	FVector NewRelativeLocation = Frame->WorldToLocal(CharacterOwner->GetActorLocation());
-	float RelFrameDeltaCm = bHasPreviousRelativeLocation
+	// In grid-space authority mode GridSpaceTransform is the post-extract pose;
+	// derive Rel* directly from it rather than re-projecting world state.
+	// Legacy path (not authority) keeps the previous WorldToLocal derivation
+	// so off-sub moving bases continue to report a Rel pose.
+	const FVector NewRelativeLocation = bIsGridSpaceAuthority
+		? GridSpaceTransform.GetLocation()
+		: Frame->WorldToLocal(CharacterOwner->GetActorLocation());
+	const FRotator NewRelativeRotation = bIsGridSpaceAuthority
+		? GridSpaceTransform.Rotator()
+		: Frame->WorldToLocalRotation(CharacterOwner->GetActorRotation());
+
+	const float RelFrameDeltaCm = bHasPreviousRelativeLocation
 		? static_cast<float>((NewRelativeLocation - PreviousRelativeLocation).Size())
 		: 0.f;
-	float PreTetherRelSpeed = (bHasPreviousRelativeLocation && DeltaTime > KINDA_SMALL_NUMBER)
-		? RelFrameDeltaCm / DeltaTime
-		: 0.f;
-
-	const USub3DDebugSettings* DebugSettingsRef = GetDefault<USub3DDebugSettings>();
-	bool bTetherApplied = false;
-	if (bHasPreviousRelativeLocation
-		&& DebugSettingsRef->bEnableCrewTether
-		&& DeltaTime > KINDA_SMALL_NUMBER
-		&& PreTetherRelSpeed > DebugSettingsRef->CrewTetherVelocityCmPerSec
-		&& !IsFalling())
-	{
-		// Sub-world discontinuity (hitch recovery / network snapshot) that CMC
-		// MovementBase failed to carry. Snap crew world-pos to preserve previous
-		// relative pose. CMC resumes normally next tick with a coherent base.
-		const FVector TetheredWorld = Frame->LocalToWorld(PreviousRelativeLocation);
-		CharacterOwner->SetActorLocation(TetheredWorld, false, nullptr, ETeleportType::TeleportPhysics);
-		NewRelativeLocation = PreviousRelativeLocation;
-		RelFrameDeltaCm = 0.f;
-		bTetherApplied = true;
-
-		if (DebugSettingsRef->bLogCrewTether)
-		{
-			UE_LOG(
-				LogSubCrewMovement,
-				Warning,
-				TEXT("Crew tether applied | PreSpeed=%.0f cm/s > %.0f | Role=%d | dt=%.4f | Mode=%s | Base=%s"),
-				PreTetherRelSpeed,
-				DebugSettingsRef->CrewTetherVelocityCmPerSec,
-				static_cast<int32>(CharacterOwner->GetLocalRole()),
-				DeltaTime,
-				*GetMovementName(),
-				*GetNameSafe(CharacterOwner->GetMovementBase()));
-		}
-	}
 
 	if (bHasPreviousRelativeLocation && DeltaTime > KINDA_SMALL_NUMBER)
 	{
@@ -221,8 +262,9 @@ void USubCrewMovementComponent::UpdateRelativeState(float DeltaTime)
 	}
 
 	RelativeLocation = NewRelativeLocation;
-	RelativeRotation = Frame->WorldToLocalRotation(CharacterOwner->GetActorRotation());
+	RelativeRotation = NewRelativeRotation;
 
+	const USub3DDebugSettings* DebugSettingsRef = GetDefault<USub3DDebugSettings>();
 	if (DebugSettingsRef->bLogCrewJitter)
 	{
 		const UPrimitiveComponent* Base = CharacterOwner->GetMovementBase();
@@ -236,7 +278,7 @@ void USubCrewMovementComponent::UpdateRelativeState(float DeltaTime)
 		UE_LOG(
 			LogSubCrewMovement,
 			Log,
-			TEXT("Jitter | Role=%d | dt=%.4f | World=%s | Sub=%s | Rel=%s | RelDeltaCm=%.2f | RelSpeed=%.0f cm/s | PreTetherSpeed=%.0f%s%s | Mode=%s | Falling=%d | Base=%s | FrameValid=%d"),
+			TEXT("Jitter | Role=%d | dt=%.4f | World=%s | Sub=%s | Rel=%s | RelDeltaCm=%.2f | RelSpeed=%.0f cm/s%s%s | Mode=%s | Falling=%d | Base=%s | FrameValid=%d | GridAuth=%d"),
 			static_cast<int32>(LocalRole),
 			DeltaTime,
 			*CharacterOwner->GetActorLocation().ToCompactString(),
@@ -244,32 +286,33 @@ void USubCrewMovementComponent::UpdateRelativeState(float DeltaTime)
 			*NewRelativeLocation.ToCompactString(),
 			RelFrameDeltaCm,
 			RelSpeedCmPerSec,
-			PreTetherRelSpeed,
-			bTetherApplied ? TEXT(" [TETHERED]") : TEXT(""),
 			bJitterSpike ? TEXT(" [SPIKE]") : TEXT(""),
+			bIsGridSpaceAuthority ? TEXT("") : TEXT(" [LegacyBaseCarry]"),
 			*MovementModeStr,
 			IsFalling() ? 1 : 0,
 			*GetNameSafe(Base),
-			Frame->IsFrameValid() ? 1 : 0);
+			Frame->IsFrameValid() ? 1 : 0,
+			bIsGridSpaceAuthority ? 1 : 0);
 		if (bJitterSpike)
 		{
 			UE_LOG(
 				LogSubCrewMovement,
 				Warning,
-				TEXT("Jitter SPIKE | RelSpeed=%.0f cm/s > threshold=%.0f cm/s | dt=%.4f | Mode=%s | Falling=%d | Base=%s"),
+				TEXT("Jitter SPIKE | RelSpeed=%.0f cm/s > threshold=%.0f cm/s | dt=%.4f | Mode=%s | Falling=%d | Base=%s | GridAuth=%d"),
 				RelSpeedCmPerSec,
 				DebugSettingsRef->CrewJitterWarnVelocityCmPerSec,
 				DeltaTime,
 				*MovementModeStr,
 				IsFalling() ? 1 : 0,
-				*GetNameSafe(Base));
+				*GetNameSafe(Base),
+				bIsGridSpaceAuthority ? 1 : 0);
 		}
 	}
 
 	PreviousRelativeLocation = RelativeLocation;
 	bHasPreviousRelativeLocation = true;
 
-	if (GetDefault<USub3DDebugSettings>()->bLogCrewMovement)
+	if (DebugSettingsRef->bLogCrewMovement)
 	{
 		UE_LOG(
 			LogSubCrewMovement,
@@ -449,57 +492,6 @@ void USubCrewMovementComponent::UpdateBraceState()
 	NearbyBraceDistanceCm = BestDistance;
 	NearbyBraceWorldLocation = BestHit.ImpactPoint;
 	NearbyBraceWorldNormal = BestHit.ImpactNormal;
-}
-
-void USubCrewMovementComponent::ApplyYawCompensation()
-{
-	if (!CharacterOwner)
-	{
-		return;
-	}
-
-	const USubInteriorFrameComponent* Frame = GetInteriorFrame();
-	if (!Frame || !Frame->IsFrameValid())
-	{
-		return;
-	}
-
-	const float YawDelta = Frame->GetFrameRotationDelta().Yaw;
-	if (FMath::Abs(YawDelta) <= KINDA_SMALL_NUMBER)
-	{
-		return;
-	}
-
-	// Rotate the actor to follow the sub's yaw. Applied on every instance so
-	// the crew tracks the sub on both server and clients. On remote peers the
-	// sub transform is interpolated/extrapolated (see USubMovementComponent
-	// client interp path), so the yaw delta is not bit-identical across peers;
-	// it is close enough for visual coherence but not a replication guarantee.
-	FRotator NewActorRotation = CharacterOwner->GetActorRotation();
-	NewActorRotation.Yaw = FRotator::NormalizeAxis(NewActorRotation.Yaw + YawDelta);
-	CharacterOwner->SetActorRotation(NewActorRotation);
-
-	// Keep the local camera in sync so bUseControllerRotationYaw does not
-	// snap the pawn yaw back on the next FaceRotation pass.
-	if (CharacterOwner->IsLocallyControlled())
-	{
-		if (AController* Controller = CharacterOwner->GetController())
-		{
-			FRotator ControlRotation = Controller->GetControlRotation();
-			ControlRotation.Yaw = FRotator::NormalizeAxis(ControlRotation.Yaw + YawDelta);
-			Controller->SetControlRotation(ControlRotation);
-
-			if (GetDefault<USub3DDebugSettings>()->bLogCrewMovement)
-			{
-				UE_LOG(
-					LogSubCrewMovement,
-					Log,
-					TEXT("YawCompensation | DeltaYaw=%.3f | NewControlYaw=%.3f"),
-					YawDelta,
-					ControlRotation.Yaw);
-			}
-		}
-	}
 }
 
 void USubCrewMovementComponent::CheckAndLogBaseChange()
