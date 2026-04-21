@@ -45,6 +45,9 @@ public:
 	UPROPERTY(BlueprintReadOnly, Category = "Submarine|Crew|LocalGrid")
 	bool bIsGridSpaceAuthority = false;
 
+	/** Submarine world transform cached at the end of the previous tick. Used to compute the controller yaw delta and seeded on authority transitions. */
+	FTransform LastSubWorldTransform = FTransform::Identity;
+
 	UPROPERTY(BlueprintReadOnly, Category = "Submarine|Crew")
 	FVector RelativeLinearVelocity = FVector::ZeroVector;
 
@@ -221,7 +224,4 @@ private:
 	bool bHasPreviousRelativeLocation = false;
 	float FloorRecoveryTimer = 0.f;
 	float DebugLogTimer = 0.f;
-
-	/** Submarine world transform cached at the end of the previous tick. Used to compute the controller yaw delta. */
-	FTransform LastSubWorldTransform = FTransform::Identity;
 };

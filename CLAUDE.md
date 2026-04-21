@@ -110,8 +110,8 @@ Authoritative architecture: `reports/plans/2026-04-21_local_grid_space_authority
 
 **Implementation phases:**
 
-- **Phase 1** — solo PIE validation. No FSavedMove override yet; network off. Jitter must reach zero in solo before Phase 2.
-- **Phase 2** — override `FSavedMove_Character` to carry `GridSpaceTransform` in the net payload, `ServerMove` validates in local space, replicate `GridSpaceTransform` with `COND_SkipOwner`.
+- **Phase 1 (COMPLETED — 24b1cb7)** — Solo PIE validation. Base architecture implemented. `LastSubWorldTransform` added to avoid yaw spikes. `bIsGridSpaceAuthority` explicitly controls `UpdateBasedMovement`.
+- **Phase 2 (TODO)** — Override `FSavedMove_Character` to carry `GridSpaceTransform` in the net payload. `ServerMove` validates in local space. Replicate `GridSpaceTransform` with `COND_SkipOwner`.
 
 ## Custom plugins
 

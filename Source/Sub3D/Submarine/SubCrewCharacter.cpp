@@ -411,6 +411,7 @@ void ASubCrewCharacter::EnterOnFootInSubmarine(ASubmarineBase* Sub, const FTrans
 				FRotator(0.f, LocalYaw, 0.f).Quaternion(),
 				LocalPos);
 			CrewMov->bIsGridSpaceAuthority = true;
+			CrewMov->LastSubWorldTransform = SubTransform;
 		}
 	}
 
@@ -454,6 +455,7 @@ void ASubCrewCharacter::BoardSubmarine(ASubmarineBase* Submarine)
 			FRotator(0.f, LocalYaw, 0.f).Quaternion(),
 			LocalPos);
 		CrewMov->bIsGridSpaceAuthority = true;
+		CrewMov->LastSubWorldTransform = SubTransform;
 	}
 
 	UE_LOG(
