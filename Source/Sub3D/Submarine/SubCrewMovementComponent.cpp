@@ -171,10 +171,46 @@ void USubCrewMovementComponent::UpdateRelativeState(float DeltaTime)
 		return;
 	}
 
-	const FVector NewRelativeLocation = Frame->WorldToLocal(CharacterOwner->GetActorLocation());
-	const float RelFrameDeltaCm = bHasPreviousRelativeLocation
+	FVector NewRelativeLocation = Frame->WorldToLocal(CharacterOwner->GetActorLocation());
+	float RelFrameDeltaCm = bHasPreviousRelativeLocation
 		? static_cast<float>((NewRelativeLocation - PreviousRelativeLocation).Size())
 		: 0.f;
+	float PreTetherRelSpeed = (bHasPreviousRelativeLocation && DeltaTime > KINDA_SMALL_NUMBER)
+		? RelFrameDeltaCm / DeltaTime
+		: 0.f;
+
+	const USub3DDebugSettings* DebugSettingsRef = GetDefault<USub3DDebugSettings>();
+	bool bTetherApplied = false;
+	if (bHasPreviousRelativeLocation
+		&& DebugSettingsRef->bEnableCrewTether
+		&& DeltaTime > KINDA_SMALL_NUMBER
+		&& PreTetherRelSpeed > DebugSettingsRef->CrewTetherVelocityCmPerSec
+		&& !IsFalling())
+	{
+		// Sub-world discontinuity (hitch recovery / network snapshot) that CMC
+		// MovementBase failed to carry. Snap crew world-pos to preserve previous
+		// relative pose. CMC resumes normally next tick with a coherent base.
+		const FVector TetheredWorld = Frame->LocalToWorld(PreviousRelativeLocation);
+		CharacterOwner->SetActorLocation(TetheredWorld, false, nullptr, ETeleportType::TeleportPhysics);
+		NewRelativeLocation = PreviousRelativeLocation;
+		RelFrameDeltaCm = 0.f;
+		bTetherApplied = true;
+
+		if (DebugSettingsRef->bLogCrewTether)
+		{
+			UE_LOG(
+				LogSubCrewMovement,
+				Warning,
+				TEXT("Crew tether applied | PreSpeed=%.0f cm/s > %.0f | Role=%d | dt=%.4f | Mode=%s | Base=%s"),
+				PreTetherRelSpeed,
+				DebugSettingsRef->CrewTetherVelocityCmPerSec,
+				static_cast<int32>(CharacterOwner->GetLocalRole()),
+				DeltaTime,
+				*GetMovementName(),
+				*GetNameSafe(CharacterOwner->GetMovementBase()));
+		}
+	}
+
 	if (bHasPreviousRelativeLocation && DeltaTime > KINDA_SMALL_NUMBER)
 	{
 		RelativeLinearVelocity = (NewRelativeLocation - PreviousRelativeLocation) / DeltaTime;
@@ -187,8 +223,7 @@ void USubCrewMovementComponent::UpdateRelativeState(float DeltaTime)
 	RelativeLocation = NewRelativeLocation;
 	RelativeRotation = Frame->WorldToLocalRotation(CharacterOwner->GetActorRotation());
 
-	const USub3DDebugSettings* DebugSettings = GetDefault<USub3DDebugSettings>();
-	if (DebugSettings->bLogCrewJitter)
+	if (DebugSettingsRef->bLogCrewJitter)
 	{
 		const UPrimitiveComponent* Base = CharacterOwner->GetMovementBase();
 		const ENetRole LocalRole = CharacterOwner->GetLocalRole();
@@ -197,11 +232,11 @@ void USubCrewMovementComponent::UpdateRelativeState(float DeltaTime)
 		const float RelSpeedCmPerSec = (bHasPreviousRelativeLocation && DeltaTime > KINDA_SMALL_NUMBER)
 			? RelFrameDeltaCm / DeltaTime
 			: 0.f;
-		const bool bJitterSpike = bHasPreviousRelativeLocation && RelSpeedCmPerSec > DebugSettings->CrewJitterWarnVelocityCmPerSec;
+		const bool bJitterSpike = bHasPreviousRelativeLocation && RelSpeedCmPerSec > DebugSettingsRef->CrewJitterWarnVelocityCmPerSec;
 		UE_LOG(
 			LogSubCrewMovement,
 			Log,
-			TEXT("Jitter | Role=%d | dt=%.4f | World=%s | Sub=%s | Rel=%s | RelDeltaCm=%.2f | RelSpeed=%.0f cm/s%s | Mode=%s | Falling=%d | Base=%s | FrameValid=%d"),
+			TEXT("Jitter | Role=%d | dt=%.4f | World=%s | Sub=%s | Rel=%s | RelDeltaCm=%.2f | RelSpeed=%.0f cm/s | PreTetherSpeed=%.0f%s%s | Mode=%s | Falling=%d | Base=%s | FrameValid=%d"),
 			static_cast<int32>(LocalRole),
 			DeltaTime,
 			*CharacterOwner->GetActorLocation().ToCompactString(),
@@ -209,6 +244,8 @@ void USubCrewMovementComponent::UpdateRelativeState(float DeltaTime)
 			*NewRelativeLocation.ToCompactString(),
 			RelFrameDeltaCm,
 			RelSpeedCmPerSec,
+			PreTetherRelSpeed,
+			bTetherApplied ? TEXT(" [TETHERED]") : TEXT(""),
 			bJitterSpike ? TEXT(" [SPIKE]") : TEXT(""),
 			*MovementModeStr,
 			IsFalling() ? 1 : 0,
@@ -221,7 +258,7 @@ void USubCrewMovementComponent::UpdateRelativeState(float DeltaTime)
 				Warning,
 				TEXT("Jitter SPIKE | RelSpeed=%.0f cm/s > threshold=%.0f cm/s | dt=%.4f | Mode=%s | Falling=%d | Base=%s"),
 				RelSpeedCmPerSec,
-				DebugSettings->CrewJitterWarnVelocityCmPerSec,
+				DebugSettingsRef->CrewJitterWarnVelocityCmPerSec,
 				DeltaTime,
 				*MovementModeStr,
 				IsFalling() ? 1 : 0,
