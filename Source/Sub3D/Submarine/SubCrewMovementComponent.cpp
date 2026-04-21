@@ -40,6 +40,38 @@ USubCrewMovementComponent::USubCrewMovementComponent()
 
 void USubCrewMovementComponent::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
 {
+	// Lazy authority latch. Enter/Disembark/Board paths already toggle the flag,
+	// but the crew may become embarked outside those paths (spawn, replication,
+	// editor play). Follow IsEmbarked() here so the rebase runs whenever a sub
+	// is present, and seed GridSpaceTransform from the current world pose on
+	// each transition into embarked so the first rebase is a no-op.
+	if (IsEmbarked() && !bIsGridSpaceAuthority && CharacterOwner)
+	{
+		if (USubInteriorFrameComponent* Frame = GetInteriorFrame())
+		{
+			const FTransform SubTransform = Frame->GetSubTransform();
+			const FVector LocalPos = SubTransform.InverseTransformPosition(CharacterOwner->GetActorLocation());
+			const FRotator WorldRot = CharacterOwner->GetActorRotation();
+			const float LocalYaw = FRotator::NormalizeAxis(WorldRot.Yaw - SubTransform.Rotator().Yaw);
+			GridSpaceTransform = FTransform(FRotator(0.f, LocalYaw, 0.f).Quaternion(), LocalPos);
+			LastSubWorldTransform = SubTransform;
+			bIsGridSpaceAuthority = true;
+
+			UE_LOG(
+				LogSubCrewMovement,
+				Log,
+				TEXT("GridAuthority ON (lazy) | Sub=%s | LocalPos=%s | LocalYaw=%.2f"),
+				*GetNameSafe(Frame->GetOwner()),
+				*LocalPos.ToCompactString(),
+				LocalYaw);
+		}
+	}
+	else if (!IsEmbarked() && bIsGridSpaceAuthority)
+	{
+		bIsGridSpaceAuthority = false;
+		UE_LOG(LogSubCrewMovement, Log, TEXT("GridAuthority OFF (lazy) | embark ended"));
+	}
+
 	// Grid-space authority owns yaw while embarked; CMC's base-rotation carry is bypassed.
 	bIgnoreBaseRotation = bIsGridSpaceAuthority;
 
@@ -363,6 +395,15 @@ void USubCrewMovementComponent::UpdateSupportState()
 
 void USubCrewMovementComponent::AttemptEmbarkedFloorRecovery(float DeltaTime)
 {
+	// In grid-space authority mode the rebase guarantees the player is at the
+	// expected pose each tick, so the recovery sweep (which also wipes Velocity
+	// via RefreshEmbarkedFlooring) would fight the CMC's legitimate motion.
+	if (bIsGridSpaceAuthority)
+	{
+		FloorRecoveryTimer = 0.f;
+		return;
+	}
+
 	if (!bNeedsEmbarkedFloorRecovery || !CharacterOwner || MovementMode != MOVE_Walking)
 	{
 		FloorRecoveryTimer = 0.f;
