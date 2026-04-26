@@ -201,6 +201,20 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Submarine")
 	void ClearPilot();
 
+	// ── Flood Visuals (Water Planes) ─────────────────────────────────────
+	// Defaults applied to every UFloodWaterPlaneComponent spawned at bootstrap
+	// (one per UCompartmentVolumeComponent placed in the BP). Art designer sets
+	// these on the BP class; each plane inherits unless overridden.
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "Submarine|FloodVisuals")
+	TObjectPtr<class UMaterialInterface> DefaultWaterMaterial = nullptr;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "Submarine|FloodVisuals")
+	TObjectPtr<class UStaticMesh> DefaultWaterPlaneMesh = nullptr;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "Submarine|FloodVisuals", meta = (ClampMin = "100.0"))
+	float DefaultWaterPlaneWorldSizeCm = 8000.f;
+
 	// ── Hull damage (Proto 02) ──────────────────────────────────────────
 
 	// Legacy fallback: when a physics impulse is available, convert it to hull damage.
@@ -233,6 +247,12 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Submarine|Damage", meta = (ClampMin = "1.0"))
 	float HullCollisionDamageExponent = 2.f;
 
+	/**
+	 * Diagnostic freeze toggle. When true, the sub's physics tick zeroes velocity/rates
+	 * and early-returns. Useful for isolating crew rebase jitter from sub-induced jitter.
+	 * NOT touched by the bootstrap pipeline — designer-controlled per-instance via the
+	 * editor inspector (or via SetFreezeMovementForTesting BP node at runtime).
+	 */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Replicated, Category = "Submarine|Debug")
 	bool bFreezeMovementForTesting = false;
 
@@ -291,6 +311,17 @@ public:
 
 	UFUNCTION(BlueprintPure, Category = "Submarine")
 	FTransform GetPrimaryCrewSpawnTransform() const;
+
+	/**
+	 * Returns the world transform for the crew spawn slot. Looks up, in order:
+	 *   1) a USceneComponent child named "CrewSocket{N}" where N = SlotIndex + 1
+	 *   2) a static-mesh socket of the same name on HullMesh
+	 *   3) legacy CrewSpawnSocketP1 (slot 0 only)
+	 *   4) actor transform (warning logged)
+	 * Slot 0 → CrewSocket1, slot 1 → CrewSocket2, etc.
+	 */
+	UFUNCTION(BlueprintCallable, Category = "Submarine")
+	FTransform GetCrewSpawnTransformForSlot(int32 SlotIndex) const;
 
 	UFUNCTION(BlueprintPure, Category = "Submarine")
 	float GetTotalFloodWaterMassKg() const;

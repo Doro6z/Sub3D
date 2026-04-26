@@ -6,8 +6,6 @@
 #include "SubmarineTypes.h"
 #include "SubMovementComponent.generated.h"
 
-DECLARE_MULTICAST_DELEGATE_TwoParams(FOnSubmarineSnapped, float, const FSubmarineNetState&);
-
 UCLASS(ClassGroup = (Submarine), meta = (BlueprintSpawnableComponent))
 class SUB3D_API USubMovementComponent : public UActorComponent
 {
@@ -154,8 +152,19 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physics|Thrust")
 	float EngineSpoolDownRate = 3.f;
 
+	// Scales the effect of flooded-water mass (kg) on the sub's total mass
+	// in ComputeTotalMass. 1.0 = each kg of interior water is 1 kg of gravity;
+	// 0.0 = flood has no effect on vertical motion.
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physics|Flooding")
 	float FloodedMassInfluence = 1.f;
+
+	// Authoritative input written by USubFloodComponent each tick: total interior
+	// water mass in kg. Consumed by SimulateStep (fixed-tick 60 Hz) and folded into
+	// ComputeTotalMass via FloodedMassInfluence. Server-only; clients receive the
+	// resulting FloodedMassKg through FSubmarineNetState. Tick prereq in BeginPlay
+	// guarantees SubFlood writes before SubMovement reads.
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Physics|Flooding")
+	float FloodImpactKg = 0.f;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Replicated, Category = "Ballasts")
 	TArray<FBallastTank> Ballasts;
@@ -187,17 +196,6 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Net")
 	float FixedSimulationHz = 60.f;
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Net")
-	float InterpSnapDistanceCm = 500.f;
-
-	// How long the client may extrapolate past the latest snapshot using the
-	// replicated velocity before clamping. Caps unbounded drift if a snapshot
-	// is dropped or arrives very late. 200 ms = 6 frames at 30 fps server sim.
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Net", meta = (ClampMin = "0.0"))
-	float MaxClientExtrapolationSec = 0.2f;
-
-	FOnSubmarineSnapped OnSubmarineSnapped;
-
 	// -------------------------------------------------------------------------
 	// Input — server-authoritative, replicated to clients for visual feedback.
 	// The PlayerController owning the helmsman routes raw input to the server
@@ -228,6 +226,10 @@ public:
 	/** Set dive plane input clamped to [-1, 1]. Server-authoritative. */
 	UFUNCTION(BlueprintCallable, Category = "Submarine|Input", BlueprintAuthorityOnly)
 	void SetDivePlaneInput(float Value);
+
+	/** Set interior flood-water mass in kg. Server-authoritative; written by USubFloodComponent. */
+	UFUNCTION(BlueprintCallable, Category = "Submarine|Input", BlueprintAuthorityOnly)
+	void SetFloodImpactKg(float Value);
 
 	/** Current rudder input, -1..1, replicated to all clients. Use this for mesh rotation. */
 	UFUNCTION(BlueprintPure, Category = "Submarine|Input")
@@ -294,55 +296,44 @@ private:
 	float SimAccumulator = 0.f;
 	int32 SimFrameCounter = 0;
 
-	FSubmarineNetState PrevSnapshot;
-	FSubmarineNetState TargetSnapshot;
-	float InterpAlpha = 1.f;
-	float InterpDuration = 1.f / 20.f;
-	float DebugLogTimer = 0.f;
-	bool bHasReceivedSnapshot = false;
-	float ClientExtrapolationElapsedSec = 0.f;
-
-	// Latest sim-authoritative pose ("CurrSim"). Captured after each
-	// SimulateStep. Used to restore the actor before the next sim step
-	// (undo of visual offset) and as the upper bound of the render-frame
-	// interpolation Lerp(PrevSim, CurrSim, alpha).
-	FVector AuthoritativeLocation = FVector::ZeroVector;
-	FRotator AuthoritativeRotation = FRotator::ZeroRotator;
-
-	// Sim-authoritative pose one step earlier ("PrevSim"). Captured at the
-	// start of each SimulateStep inside TickComponent. Lower bound of the
-	// render-frame interpolation.
-	FVector PrevSimLocation = FVector::ZeroVector;
-	FRotator PrevSimRotation = FRotator::ZeroRotator;
-
-	// False until the first SimulateStep has produced a (PrevSim, CurrSim)
-	// pair. Interpolation is skipped while this is false.
-	bool bHasSimBuffer = false;
-
-	// True when the actor root holds a visual pose offset from the sim
-	// pose (i.e. the frame-time interpolated pose between PrevSim and
-	// CurrSim). The next tick's start restores the actor to
-	// AuthoritativeLocation so the sim never operates on a visual pose.
-	bool bHasVisualOffset = false;
-
-	// Set at the end of each authority SimulateStep. Read by TickComponent
-	// (to suppress visual interpolation during contact — Option A) and by
-	// the next SimulateStep (to damp applied yaw — Option C).
+	// Set at the end of each authority SimulateStep. Read publicly by
+	// HadBlockingHitLastStep() and by SimulateStep to damp applied yaw.
 	bool bLastStepHadBlockingHit = false;
 
-	// Last pose written to the actor root at end of TickComponent (either
-	// the interpolated pose or the sim pose if interp was suppressed/disabled).
-	// Read at the next tick's start to detect external writers that modified
-	// the actor between our final write and the next tick. Populated once
-	// per authoritative tick; unused on remote clients.
-	FVector LastPostTickLocation = FVector::ZeroVector;
-	FRotator LastPostTickRotation = FRotator::ZeroRotator;
-	bool bHasLastPostTick = false;
+	// ── Client-side snapshot interpolation (non-authority only) ──────────────
+	// Two-snapshot ring with receive timestamps. The actor pose each render frame is
+	// Lerp(PrevSnapshot, TargetSnapshot, alpha) where alpha advances from 0 to 1 over
+	// (TargetSnapshotTime - PrevSnapshotTime). One-snapshot playback lag in exchange for
+	// continuous motion between discrete server snapshots — eliminates the per-snapshot
+	// teleport that exposes jitter to anything observing the sub in world space (EVA crew,
+	// debug volumes, peer crew SimulatedProxies).
+	FSubmarineNetState ClientPrevSnapshot;
+	FSubmarineNetState ClientTargetSnapshot;
+	double ClientPrevSnapshotTime = 0.0;
+	double ClientTargetSnapshotTime = 0.0;
+	// Wall-clock receive time (FPlatformTime::Seconds), independent of world time so it
+	// keeps advancing even when the world is throttled (alt-tab, focus loss). Used to
+	// detect "snapshot avalanche after throttle" without relying on the throttled clock.
+	double ClientLastReceiveRealTime = 0.0;
+	bool bHasReceivedClientSnapshot = false;
+
+	// Sim-authoritative poses used to smooth the sub's visual render between fixed-tick
+	// sim steps. CurrSim (updated each sim step) and PrevSim (the pose one step earlier)
+	// bracket the Lerp that produces the rendered pose. Without this smoothing, at render
+	// rates that differ from the sim rate (e.g. 45fps render vs 60Hz sim), the actor root
+	// advances in discrete sim-step chunks (0, ~1, or ~2 chunks per render tick) which is
+	// perceptible as jitter. The crew rebase reads the actor transform, which is this
+	// interpolated pose — the rebase stays consistent because both the sub visual and the
+	// crew see the same smoothed pose.
+	FVector CurrSimLocation = FVector::ZeroVector;
+	FRotator CurrSimRotation = FRotator::ZeroRotator;
+	FVector PrevSimLocation = FVector::ZeroVector;
+	FRotator PrevSimRotation = FRotator::ZeroRotator;
+	bool bHasSimBuffer = false;
+	bool bHasVisualOffset = false;
 
 	void UpdateBallasts(float DeltaTime);
 	void SimulateStep(float DeltaTime);
 	void ApplyPhysics(float DeltaTime);
-	float ComputeFloodedMassKg() const;
-	void InterpolateClient(float DeltaTime);
 	void InitializeNeutralBuoyancy();
 };

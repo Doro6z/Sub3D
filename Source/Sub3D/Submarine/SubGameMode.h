@@ -61,6 +61,22 @@ public:
 	UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Category = "Run|Bootstrap")
 	ESubBootstrapPhase BootstrapPhase = ESubBootstrapPhase::None;
 
+	/**
+	 * If true, bootstrap requires an ATraversalRouteActor in the world to advance past WorldReady.
+	 * Set false on prototype/test maps that have no route. Default false (so test maps don't stall).
+	 * Production GameMode subclasses (or DefaultEngine.ini override) should set true.
+	 */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Run|Bootstrap")
+	bool bRequireActiveRoute = false;
+
+	/**
+	 * Watchdog: if TryAdvanceBootstrap fails to advance the phase for this many seconds,
+	 * an Error log is emitted (and re-emitted at the same cadence) describing the stall.
+	 * The bootstrap retry timer ticks every 0.5s, so a stall is detected within one timeout window.
+	 */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Run|Bootstrap", meta = (ClampMin = "1.0"))
+	float BootstrapPhaseTimeoutSeconds = 5.f;
+
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Run|Breach", meta = (ClampMin = "1.0"))
 	float ScriptedBreachDamageAmount = 150.f;
 
@@ -78,9 +94,6 @@ public:
 
 	UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Category = "Run")
 	bool bSubmarineInApproachZone = false;
-
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Submarine")
-	FVector CrewSpawnOffset = FVector::ZeroVector;
 
 	UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Category = "Run|Campaign")
 	FName CampaignSegmentID = NAME_None;
@@ -137,7 +150,8 @@ protected:
 	void RefreshRunBootstrapReferences();
 	void RefreshBreachObservationBinding();
 	void RefreshCampaignSeamData();
-	FTransform ResolveCrewSpawnTransform() const;
+	FTransform ResolveCrewSpawnTransform(int32 SlotIndex) const;
+	int32 AssignNextSpawnSlot();
 	void InitializePlayerCrewState(APlayerController* NewPlayer);
 
 	void SetBootstrapPhase(ESubBootstrapPhase NewPhase);
@@ -159,6 +173,14 @@ private:
 	bool IsBreachClusterPresent(FName BreachSheetId, const TArray<FBreachClusterState>& Breaches) const;
 	void SyncRunStateToGameState() const;
 
+	void StartBootstrapRetryTimer();
+	void StopBootstrapRetryTimer();
+	void LogStallIfStuck(const TCHAR* Reason);
+
 	UPROPERTY(Transient)
 	TObjectPtr<USubHullComponent> ObservedSubHull = nullptr;
+
+	double PhaseEnteredAtSeconds = 0.;
+	double LastStallLogSeconds = 0.;
+	FTimerHandle BootstrapRetryTimerHandle;
 };

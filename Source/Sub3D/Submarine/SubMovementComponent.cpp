@@ -11,55 +11,11 @@
 #include "Net/UnrealNetwork.h"
 #include "SubFloodComponent.h"
 #include "SubmarineBase.h"
-#include "SubmarineCompartmentComponent.h"
 #include "SubmarineSystemsComponent.h"
 
 DEFINE_LOG_CATEGORY_STATIC(LogSubMovement, Log, All);
 
 static constexpr float G_SI = 9.81f;
-
-// Runtime debug toggles for Point 1 jitter diagnosis. Set from the UE console
-// in PIE, e.g. `sub.DisableVisualInterp 1` or `sub.LogVisualInterp 1`.
-static TAutoConsoleVariable<bool> CVarSubDisableVisualInterp(
-	TEXT("sub.DisableVisualInterp"),
-	false,
-	TEXT("Authoritative path only. When true, skip the Lerp(PrevSim, CurrSim, alpha) ")
-	TEXT("visual write — actor root sits on CurrSim. Use to isolate whether Point 1 ")
-	TEXT("interpolation is the source of observed jitter."),
-	ECVF_Default);
-
-static TAutoConsoleVariable<bool> CVarSubLogVisualInterp(
-	TEXT("sub.LogVisualInterp"),
-	false,
-	TEXT("Emit SUB_TRACE per-tick log: PreUndo / PostUndo / PostSim / PostInterp poses, ")
-	TEXT("alpha, sim-steps-this-tick, external-drift (vs last tick end), tick delta. ")
-	TEXT("Flags BACKWARD and EXTERNAL_WRITE anomalies as Error."),
-	ECVF_Default);
-
-static TAutoConsoleVariable<float> CVarSubTraceExternalDriftThresholdCm(
-	TEXT("sub.TraceExternalDriftThresholdCm"),
-	0.01f,
-	TEXT("Threshold (cm) above which an ExtDrift delta is flagged as EXTERNAL_WRITE. ")
-	TEXT("Distance between actor.Location at tick start and the pose we wrote at end of ")
-	TEXT("previous tick. Non-zero in standalone means a foreign writer exists."),
-	ECVF_Default);
-
-static TAutoConsoleVariable<float> CVarSubTraceBackwardThresholdCm(
-	TEXT("sub.TraceBackwardThresholdCm"),
-	0.1f,
-	TEXT("Threshold (cm) below which TickDelta.X is flagged as BACKWARD motion. ")
-	TEXT("Negative forward delta during cruise is a hard anomaly."),
-	ECVF_Default);
-
-static TAutoConsoleVariable<float> CVarSubMaxInterpDurationSec(
-	TEXT("sub.MaxInterpDurationSec"),
-	0.1f,
-	TEXT("Upper bound (seconds) on the InterpDuration computed by HandleReplicatedNetState. ")
-	TEXT("Without this clamp, a large server-side frame gap or a client-side framerate dip ")
-	TEXT("produces FrameDelta * FixedSimDt values of several hundred ms, which makes the ")
-	TEXT("client visually crawl over the true sub distance rather than catch up. Default 100ms. ")
-	TEXT("Set <= 0 to disable the clamp (legacy adaptive-only behavior)."),
-	ECVF_Default);
 
 namespace
 {
@@ -105,6 +61,16 @@ void USubMovementComponent::BeginPlay()
 {
 	Super::BeginPlay();
 	InitializeNeutralBuoyancy();
+
+	// Tick order: SubFlood → SubMovement → InteriorFrame → CrewMovement.
+	// SubFlood must advance and push FloodImpactKg before SimulateStep reads it.
+	if (const ASubmarineBase* Sub = Cast<ASubmarineBase>(GetOwner()))
+	{
+		if (Sub->SubFlood)
+		{
+			AddTickPrerequisiteComponent(Sub->SubFlood);
+		}
+	}
 }
 
 void USubMovementComponent::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const
@@ -146,6 +112,11 @@ void USubMovementComponent::SetDivePlaneInput(float Value)
 	DivePlaneInput = FMath::Clamp(Value, -1.f, 1.f);
 }
 
+void USubMovementComponent::SetFloodImpactKg(float Value)
+{
+	FloodImpactKg = FMath::Max(0.f, Value);
+}
+
 void USubMovementComponent::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
 {
 	AActor* Owner = GetOwner();
@@ -159,26 +130,17 @@ void USubMovementComponent::TickComponent(float DeltaTime, ELevelTick TickType, 
 		Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
 	}
 
-	const bool bTraceEnabled = CVarSubLogVisualInterp.GetValueOnGameThread();
-	const bool bDisableInterp = CVarSubDisableVisualInterp.GetValueOnGameThread();
-
-	// Captured at the very top for EXTERNAL_WRITE detection: any delta
-	// between LastPostTickLocation (end of our previous tick) and PreUndoLoc
-	// (start of this tick, before we do anything) means a foreign writer
-	// modified the actor root between ticks.
-	const FVector PreUndoLoc = Owner->GetActorLocation();
-	const FRotator PreUndoRot = Owner->GetActorRotation();
-
-	// Undo visual offset from previous frame so the sim operates on the
-	// authoritative post-step pose, not on the frame-time interpolated pose.
+	// Undo the previous frame's visual interpolation offset BEFORE the sim step so
+	// the sim operates on the authoritative pose, not on the render-time lerped pose.
 	if (bHasVisualOffset && Owner->HasAuthority())
 	{
-		Owner->SetActorLocationAndRotation(AuthoritativeLocation, AuthoritativeRotation, false, nullptr, ETeleportType::TeleportPhysics);
+		Owner->SetActorLocationAndRotation(CurrSimLocation, CurrSimRotation, false, nullptr, ETeleportType::TeleportPhysics);
 		bHasVisualOffset = false;
 	}
 
-	const FVector PostUndoLoc = Owner->GetActorLocation();
-
+	// Diagnostic freeze: when set on the submarine instance (editor inspector or BP node),
+	// zero velocities and skip the sim/interp pipeline. Useful to isolate crew rebase jitter
+	// from sub-induced motion. The bootstrap pipeline does NOT touch this flag.
 	if (const ASubmarineBase* Submarine = Cast<ASubmarineBase>(Owner))
 	{
 		if (Submarine->bFreezeMovementForTesting)
@@ -195,10 +157,6 @@ void USubMovementComponent::TickComponent(float DeltaTime, ELevelTick TickType, 
 					MutableSub->RefreshRepState();
 				}
 			}
-			else
-			{
-				InterpAlpha = 1.f;
-			}
 
 			return;
 		}
@@ -206,29 +164,57 @@ void USubMovementComponent::TickComponent(float DeltaTime, ELevelTick TickType, 
 
 	if (!Owner->HasAuthority())
 	{
-		InterpolateClient(DeltaTime);
+		// Non-authority: Hermite cubic interpolation between the two most recent snapshots.
+		// Tangents = LinearVelocity * Δt at each endpoint. The replicated velocity guarantees
+		// C¹ continuity at snapshot boundaries — the velocity at α=1 of segment N matches the
+		// velocity at α=0 of segment N+1, eliminating the velocity-discontinuity jerk that
+		// linear lerp produced when the sub was accelerating (e.g., sinking under flood load).
+		// One-snapshot playback lag is unchanged.
+		if (bHasReceivedClientSnapshot && ClientTargetSnapshotTime > ClientPrevSnapshotTime)
+		{
+			const double Now = Owner->GetWorld() ? Owner->GetWorld()->GetTimeSeconds() : 0.0;
+			const double InterpDuration = ClientTargetSnapshotTime - ClientPrevSnapshotTime;
+			const float Alpha = FMath::Clamp(
+				static_cast<float>((Now - ClientTargetSnapshotTime) / InterpDuration), 0.f, 1.f);
+
+			const float DeltaSec = static_cast<float>(InterpDuration);
+			const FVector P0 = ClientPrevSnapshot.WorldLocation;
+			const FVector P1 = ClientTargetSnapshot.WorldLocation;
+			const FVector T0 = ClientPrevSnapshot.LinearVelocity * DeltaSec;
+			const FVector T1 = ClientTargetSnapshot.LinearVelocity * DeltaSec;
+			const FVector InterpLoc = FMath::CubicInterp(P0, T0, P1, T1, Alpha);
+
+			// Rotation: linear interp. Hermite on rotation needs angular-velocity tangent
+			// application, which is non-trivial because rotations don't compose like
+			// translations. Position jerk dominates visually for a translating sub; revisit
+			// if rotational jitter becomes prominent.
+			const FRotator InterpRot = FMath::Lerp(
+				ClientPrevSnapshot.QuantizedRotation,
+				ClientTargetSnapshot.QuantizedRotation,
+				Alpha);
+
+			Owner->SetActorLocationAndRotation(InterpLoc, InterpRot, false, nullptr, ETeleportType::None);
+		}
 		return;
 	}
 
+	// Authoritative path. Sim runs at FixedSimulationHz (default 60Hz). At render rates
+	// that differ from the sim rate, the actor root would otherwise advance in discrete
+	// chunks (0/1/2 sim steps per render tick) which is perceptible as jitter. We smooth
+	// the render pose via a Lerp(PrevSim, CurrSim, alpha) after the sim loop. The Undo
+	// above runs at the start of next tick so the sim always starts from the authoritative
+	// pose.
 	SimAccumulator += DeltaTime;
 	const float FixedSimDt = FixedSimulationHz > KINDA_SMALL_NUMBER ? (1.f / FixedSimulationHz) : (1.f / 30.f);
 	bool bSimulated = false;
-	int32 StepsThisTick = 0;
 
 	while (SimAccumulator >= FixedSimDt)
 	{
-		// Capture the pre-step pose as PrevSim. After the loop exits,
-		// PrevSimLocation/Rotation hold the pose at the start of the last
-		// executed SimulateStep. When the loop runs multiple steps in one
-		// tick (catch-up after a frame spike), only the last two poses are
-		// retained — intermediate steps are not visualized.
 		PrevSimLocation = Owner->GetActorLocation();
 		PrevSimRotation = Owner->GetActorRotation();
-
 		SimulateStep(FixedSimDt);
 		SimAccumulator -= FixedSimDt;
 		++SimFrameCounter;
-		++StepsThisTick;
 		bSimulated = true;
 		bHasSimBuffer = true;
 	}
@@ -237,98 +223,23 @@ void USubMovementComponent::TickComponent(float DeltaTime, ELevelTick TickType, 
 	{
 		if (ASubmarineBase* Sub = Cast<ASubmarineBase>(Owner))
 		{
-			// Tick-order invariant: RefreshRepState must run before any
-			// visual offset is written to the actor. It samples the actor
-			// transform directly (SubmarineBase::RefreshRepState), and the
-			// actor currently holds CurrSim (post-last-step pose). Writing
-			// an interpolated pose below would poison replication with a
-			// non-authoritative transform.
+			// RepState must sample the authoritative pose, not the interp pose below.
 			Sub->RefreshRepState();
 		}
 	}
 
-	// Capture the latest sim-authoritative pose as CurrSim.
-	AuthoritativeLocation = Owner->GetActorLocation();
-	AuthoritativeRotation = Owner->GetActorRotation();
+	// Capture the latest sim pose as CurrSim, then apply the visual interp.
+	CurrSimLocation = Owner->GetActorLocation();
+	CurrSimRotation = Owner->GetActorRotation();
 
-	const FVector PostSimLoc = AuthoritativeLocation;
-
-	// Visual interpolation between PrevSim and CurrSim. Alpha = how far
-	// we are into the next sim step (SimAccumulator / FixedSimDt). The
-	// rendered pose trails CurrSim by at most one sim step (~16.6ms at
-	// 60Hz), which is the cost of showing only known poses instead of
-	// velocity-based predictions that diverge each step due to drag,
-	// damping, pitch/vertical coupling, and idle restore.
-	//
-	// Suppressed while in contact (Option A): holding CurrSim directly on
-	// the wall avoids visual oscillation between pre- and post-depenetration
-	// poses.
-	// Suppressed when `sub.DisableVisualInterp 1` (debug): actor sits on
-	// CurrSim so we can isolate the jitter source in PIE.
-	float AlphaUsed = 0.f;
-	bool bWroteInterp = false;
-	if (!bDisableInterp && bHasSimBuffer && !bLastStepHadBlockingHit)
+	if (bHasSimBuffer && !bLastStepHadBlockingHit)
 	{
-		AlphaUsed = FMath::Clamp(SimAccumulator / FixedSimDt, 0.f, 1.f);
-		const FVector InterpLocation = FMath::Lerp(PrevSimLocation, AuthoritativeLocation, AlphaUsed);
-		const FRotator InterpRotation = FMath::Lerp(PrevSimRotation, AuthoritativeRotation, AlphaUsed);
-
+		const float Alpha = FMath::Clamp(SimAccumulator / FixedSimDt, 0.f, 1.f);
+		const FVector InterpLocation = FMath::Lerp(PrevSimLocation, CurrSimLocation, Alpha);
+		const FRotator InterpRotation = FMath::Lerp(PrevSimRotation, CurrSimRotation, Alpha);
 		Owner->SetActorLocationAndRotation(InterpLocation, InterpRotation, false, nullptr, ETeleportType::None);
 		bHasVisualOffset = true;
-		bWroteInterp = true;
 	}
-
-	// Snapshot the final pose we leave on the actor root, for the next
-	// tick's EXTERNAL_WRITE check and the BACKWARD anomaly check.
-	const FVector PostInterpLoc = Owner->GetActorLocation();
-	const FRotator PostInterpRot = Owner->GetActorRotation();
-
-	if (bTraceEnabled)
-	{
-		const FVector ExtDrift = bHasLastPostTick ? (PreUndoLoc - LastPostTickLocation) : FVector::ZeroVector;
-		const FVector TickDelta = bHasLastPostTick ? (PostInterpLoc - LastPostTickLocation) : FVector::ZeroVector;
-
-		UE_LOG(LogSubMovement, Log,
-			TEXT("SUB_TRACE | DT=%.4f Accum=%.4f Alpha=%.3f Steps=%d Contact=%d Interp=%d")
-			TEXT(" | PreUndo=(%.2f,%.2f,%.2f) PostUndo=(%.2f,%.2f,%.2f) PostSim=(%.2f,%.2f,%.2f) PostInterp=(%.2f,%.2f,%.2f)")
-			TEXT(" | PrevSim=(%.2f,%.2f,%.2f) CurrSim=(%.2f,%.2f,%.2f)")
-			TEXT(" | ExtDrift=(%.3f,%.3f,%.3f) TickDelta=(%.3f,%.3f,%.3f)"),
-			DeltaTime, SimAccumulator, AlphaUsed, StepsThisTick,
-			bLastStepHadBlockingHit ? 1 : 0, bWroteInterp ? 1 : 0,
-			PreUndoLoc.X, PreUndoLoc.Y, PreUndoLoc.Z,
-			PostUndoLoc.X, PostUndoLoc.Y, PostUndoLoc.Z,
-			PostSimLoc.X, PostSimLoc.Y, PostSimLoc.Z,
-			PostInterpLoc.X, PostInterpLoc.Y, PostInterpLoc.Z,
-			PrevSimLocation.X, PrevSimLocation.Y, PrevSimLocation.Z,
-			AuthoritativeLocation.X, AuthoritativeLocation.Y, AuthoritativeLocation.Z,
-			ExtDrift.X, ExtDrift.Y, ExtDrift.Z,
-			TickDelta.X, TickDelta.Y, TickDelta.Z);
-
-		const float ExtDriftThreshold = CVarSubTraceExternalDriftThresholdCm.GetValueOnGameThread();
-		if (bHasLastPostTick && ExtDrift.Size() > ExtDriftThreshold)
-		{
-			UE_LOG(LogSubMovement, Error,
-				TEXT("SUB_TRACE EXTERNAL_WRITE | A foreign writer modified the actor between last tick's end and this tick's start.")
-				TEXT(" | LastPostTick=(%.3f,%.3f,%.3f) PreUndo=(%.3f,%.3f,%.3f) Drift=%.3f"),
-				LastPostTickLocation.X, LastPostTickLocation.Y, LastPostTickLocation.Z,
-				PreUndoLoc.X, PreUndoLoc.Y, PreUndoLoc.Z,
-				ExtDrift.Size());
-		}
-
-		const float BackwardThreshold = CVarSubTraceBackwardThresholdCm.GetValueOnGameThread();
-		if (bHasLastPostTick && TickDelta.X < -BackwardThreshold)
-		{
-			UE_LOG(LogSubMovement, Error,
-				TEXT("SUB_TRACE BACKWARD | Actor moved backward on X this tick during forward cruise.")
-				TEXT(" | TickDelta.X=%.3f Alpha=%.3f Steps=%d PrevSim.X=%.3f CurrSim.X=%.3f"),
-				TickDelta.X, AlphaUsed, StepsThisTick,
-				PrevSimLocation.X, AuthoritativeLocation.X);
-		}
-	}
-
-	LastPostTickLocation = PostInterpLoc;
-	LastPostTickRotation = PostInterpRot;
-	bHasLastPostTick = true;
 }
 
 void USubMovementComponent::SimulateStep(float DeltaTime)
@@ -341,7 +252,7 @@ void USubMovementComponent::SimulateStep(float DeltaTime)
 		}
 	}
 
-	FloodedMassKg = ComputeFloodedMassKg();
+	FloodedMassKg = FloodImpactKg;
 	UpdateBallasts(DeltaTime);
 	ApplyPhysics(DeltaTime);
 }
@@ -806,25 +717,6 @@ void USubMovementComponent::ApplyCommandState(const FSubmarineCommandState& Comm
 	GlobalTargetFill = CommandState.GlobalBallastTarget01;
 }
 
-float USubMovementComponent::ComputeFloodedMassKg() const
-{
-	if (const ASubmarineBase* Sub = Cast<ASubmarineBase>(GetOwner()))
-	{
-		// Prefer SubFlood (new pipeline) when initialized
-		if (Sub->SubFlood && Sub->SubFlood->IsInitialized())
-		{
-			return Sub->SubFlood->GetTotalWaterMassKg();
-		}
-
-		if (Sub->Compartments)
-		{
-			return Sub->Compartments->GetTotalWaterMassKg();
-		}
-	}
-
-	return 0.f;
-}
-
 void USubMovementComponent::HandleReplicatedNetState(const FSubmarineNetState& NewState)
 {
 	AActor* Owner = GetOwner();
@@ -833,151 +725,87 @@ void USubMovementComponent::HandleReplicatedNetState(const FSubmarineNetState& N
 		return;
 	}
 
-	const float FixedSimDt = FixedSimulationHz > KINDA_SMALL_NUMBER ? (1.f / FixedSimulationHz) : (1.f / 30.f);
-	const int32 PreviousFrame = bHasReceivedSnapshot ? TargetSnapshot.SimFrame : NewState.SimFrame;
-	const int32 FrameDelta = (bHasReceivedSnapshot && NewState.SimFrame >= PreviousFrame)
-		? (NewState.SimFrame - PreviousFrame)
-		: 1;
-	const float RawInterpDuration = FMath::Max(FixedSimDt, FrameDelta * FixedSimDt);
-	const float MaxInterpDurationSec = CVarSubMaxInterpDurationSec.GetValueOnGameThread();
-	const float NewInterpDuration = (MaxInterpDurationSec > 0.f)
-		? FMath::Min(RawInterpDuration, FMath::Max(FixedSimDt, MaxInterpDurationSec))
-		: RawInterpDuration;
-	const float SnapshotDistanceCm = FVector::Dist(Owner->GetActorLocation(), NewState.WorldLocation);
+	const double Now = Owner->GetWorld() ? Owner->GetWorld()->GetTimeSeconds() : 0.0;
+	const double RealNow = FPlatformTime::Seconds();
+	// Wall-clock gap since last snapshot receive. Independent of world time, so it keeps
+	// advancing even when this client's world is throttled (alt-tab, focus loss). World-time
+	// gap was useless here because both Now and ClientTargetSnapshotTime tick at the same
+	// throttled rate during alt-tab → gap stays small → snap-apply never fired.
+	const double RealGapSeconds = bHasReceivedClientSnapshot ? (RealNow - ClientLastReceiveRealTime) : 0.0;
+	ClientLastReceiveRealTime = RealNow;
 
-	UE_LOG(
-		LogSubMovement,
-		Log,
-		TEXT("Snapshot received | Frame=%d->%d | Loc=%s | Dist=%.1f | InterpDuration=%.3f"),
-		PreviousFrame,
-		NewState.SimFrame,
-		*NewState.WorldLocation.ToCompactString(),
-		SnapshotDistanceCm,
-		NewInterpDuration);
-
-	if (!bHasReceivedSnapshot)
+	if (!bHasReceivedClientSnapshot)
 	{
-		PrevSnapshot = NewState;
-		TargetSnapshot = NewState;
-		InterpAlpha = 1.f;
-		InterpDuration = NewInterpDuration;
-		DebugLogTimer = 0.f;
-		bHasReceivedSnapshot = true;
-		ClientExtrapolationElapsedSec = 0.f;
+		// First snapshot: nothing to lerp from yet. Snap-apply the pose so the actor starts
+		// at the correct position. Subsequent snapshots will buffer for interpolation.
+		ClientPrevSnapshot = NewState;
+		ClientTargetSnapshot = NewState;
+		ClientPrevSnapshotTime = Now;
+		ClientTargetSnapshotTime = Now;
+		bHasReceivedClientSnapshot = true;
 
-		Velocity = NewState.LinearVelocity;
-		YawRateDegPerSec = NewState.AngularVelocity.Z;
-		PitchRateDegPerSec = NewState.AngularVelocity.Y;
-		CurrentDepth = NewState.DepthMeters;
-		FloodedMassKg = NewState.FloodedMassKg;
-		ForwardSpeedCmS = NewState.ForwardSpeed;
-		Owner->SetActorLocationAndRotation(NewState.WorldLocation, NewState.QuantizedRotation, false, nullptr, ETeleportType::TeleportPhysics);
-		return;
-	}
-
-	// Use the currently presented transform as the start of the new lerp,
-	// not the theoretical end of the previous one. This prevents visual jumps
-	// when a snapshot arrives before the previous lerp completes (alpha < 1)
-	// or when a snapshot arrives during post-alpha extrapolation.
-	PrevSnapshot.WorldLocation = Owner->GetActorLocation();
-	PrevSnapshot.QuantizedRotation = Owner->GetActorRotation();
-	TargetSnapshot = NewState;
-	InterpAlpha = 0.f;
-	InterpDuration = NewInterpDuration;
-	ClientExtrapolationElapsedSec = 0.f;
-
-	Velocity = TargetSnapshot.LinearVelocity;
-	YawRateDegPerSec = TargetSnapshot.AngularVelocity.Z;
-	PitchRateDegPerSec = TargetSnapshot.AngularVelocity.Y;
-	CurrentDepth = TargetSnapshot.DepthMeters;
-	FloodedMassKg = TargetSnapshot.FloodedMassKg;
-	ForwardSpeedCmS = TargetSnapshot.ForwardSpeed;
-
-	if (SnapshotDistanceCm > InterpSnapDistanceCm)
-	{
-		UE_LOG(
-			LogSubMovement,
-			Warning,
-			TEXT("SUBMARINE SNAP | Distance=%.1f cm | OldLoc=%s -> NewLoc=%s | Frame=%d"),
-			SnapshotDistanceCm,
-			*Owner->GetActorLocation().ToCompactString(),
-			*TargetSnapshot.WorldLocation.ToCompactString(),
-			TargetSnapshot.SimFrame);
-
-		OnSubmarineSnapped.Broadcast(SnapshotDistanceCm, NewState);
-		InterpAlpha = 1.f;
-		Owner->SetActorLocationAndRotation(TargetSnapshot.WorldLocation, TargetSnapshot.QuantizedRotation, false, nullptr, ETeleportType::TeleportPhysics);
-	}
-}
-
-void USubMovementComponent::InterpolateClient(float DeltaTime)
-{
-	AActor* Owner = GetOwner();
-	if (!Owner || !bHasReceivedSnapshot)
-	{
-		if (!GetDefault<USub3DDebugSettings>()->bLogSubMovement)
-		{
-			DebugLogTimer = 0.f;
-		}
-		return;
-	}
-
-	// Phase 1: lerp from PrevSnapshot to TargetSnapshot during InterpDuration.
-	if (InterpAlpha < 1.f)
-	{
-		InterpAlpha = FMath::Clamp(InterpAlpha + (DeltaTime / FMath::Max(KINDA_SMALL_NUMBER, InterpDuration)), 0.f, 1.f);
-
-		const FVector SmoothedLocation = FMath::Lerp(
-			FVector(PrevSnapshot.WorldLocation),
-			FVector(TargetSnapshot.WorldLocation),
-			InterpAlpha);
-		const FRotator SmoothedRotation = FMath::Lerp(
-			PrevSnapshot.QuantizedRotation,
-			TargetSnapshot.QuantizedRotation,
-			InterpAlpha);
-
-		Owner->SetActorLocationAndRotation(SmoothedLocation, SmoothedRotation, false, nullptr, ETeleportType::None);
-	}
-	else if (MaxClientExtrapolationSec > KINDA_SMALL_NUMBER)
-	{
-		// Phase 2: snapshot lerp finished, extrapolate from current pose using
-		// the replicated linear / angular velocities to bridge the gap until
-		// the next snapshot arrives. Bounded by MaxClientExtrapolationSec to
-		// avoid wild drift on dropped packets.
-		ClientExtrapolationElapsedSec = FMath::Min(ClientExtrapolationElapsedSec + DeltaTime, MaxClientExtrapolationSec);
-
-		// Extrap step is just DeltaTime worth of velocity since we already
-		// applied prior steps to the actor on previous frames; the cap above
-		// only stops further accumulation, it doesn't gate this frame's step.
-		Owner->AddActorWorldOffset(Velocity * DeltaTime, false, nullptr, ETeleportType::None);
-
-		if (!FMath::IsNearlyZero(YawRateDegPerSec) || !FMath::IsNearlyZero(PitchRateDegPerSec))
-		{
-			const FRotator AngularStep(PitchRateDegPerSec * DeltaTime, YawRateDegPerSec * DeltaTime, 0.f);
-			Owner->AddActorWorldRotation(AngularStep, false, nullptr, ETeleportType::None);
-		}
-	}
-
-	if (GetDefault<USub3DDebugSettings>()->bLogSubMovement)
-	{
-		DebugLogTimer += DeltaTime;
-		if (DebugLogTimer >= 1.f)
-		{
-			DebugLogTimer = 0.f;
-			UE_LOG(
-				LogSubMovement,
-				Log,
-				TEXT("Interp | Alpha=%.3f | Duration=%.3f | Extrap=%.3fs | Loc=%s -> %s"),
-				InterpAlpha,
-				InterpDuration,
-				ClientExtrapolationElapsedSec,
-				*PrevSnapshot.WorldLocation.ToCompactString(),
-				*TargetSnapshot.WorldLocation.ToCompactString());
-		}
+		Owner->SetActorLocationAndRotation(
+			NewState.WorldLocation, NewState.QuantizedRotation,
+			false, nullptr, ETeleportType::TeleportPhysics);
 	}
 	else
 	{
-		DebugLogTimer = 0.f;
+		// Throttle / focus-loss / hitch detection (real-time based). When the editor loses
+		// focus (alt-tab, another PIE window comes to front, OS app switch), UE throttles
+		// the unfocused world. World time advances slowly. But the network keeps queuing
+		// snapshots from the server. On focus return, snapshots arrive in rapid burst and
+		// the client world processes them. World-time gap stays small (Now barely advanced),
+		// but real-time gap is large. Snap directly to the latest authoritative pose to
+		// skip the stale-snapshot avalanche.
+		constexpr double SnapGapThresholdRealSeconds = 0.2;
+		if (RealGapSeconds > SnapGapThresholdRealSeconds)
+		{
+			ClientPrevSnapshot = NewState;
+			ClientTargetSnapshot = NewState;
+			ClientPrevSnapshotTime = Now;
+			ClientTargetSnapshotTime = Now;
+			Owner->SetActorLocationAndRotation(
+				NewState.WorldLocation, NewState.QuantizedRotation,
+				false, nullptr, ETeleportType::TeleportPhysics);
+		}
+		else
+		{
+			// Normal shift: previous Target becomes Prev. New state becomes Target.
+			//
+			// Robust shift: if the previous segment's Hermite hadn't reached α=1 yet
+			// (snapshot arrived early relative to the previous InterpDuration), the actor
+			// is at some intermediate pose, NOT at the old Target's pose. Using the old
+			// Target as new Prev would cause a visible jump from current rendered pose to
+			// old Target on the next tick. Instead, anchor new Prev to the currently-rendered
+			// pose. The replicated LinearVelocity (carried over from old Target) stays as
+			// the new Prev's tangent — it's the server's authoritative velocity at the
+			// previous snapshot moment.
+			ClientPrevSnapshot = ClientTargetSnapshot;
+			ClientPrevSnapshot.WorldLocation = Owner->GetActorLocation();
+			ClientPrevSnapshot.QuantizedRotation = Owner->GetActorRotation();
+			ClientPrevSnapshotTime = ClientTargetSnapshotTime;
+			ClientTargetSnapshot = NewState;
+			ClientTargetSnapshotTime = Now;
+		}
+	}
+
+	// Non-positional state is sampled directly each snapshot — used by HUD / Sub3D debugger.
+	Velocity = NewState.LinearVelocity;
+	YawRateDegPerSec = NewState.AngularVelocity.Z;
+	PitchRateDegPerSec = NewState.AngularVelocity.Y;
+	CurrentDepth = NewState.DepthMeters;
+	FloodedMassKg = NewState.FloodedMassKg;
+	ForwardSpeedCmS = NewState.ForwardSpeed;
+
+	if (GetDefault<USub3DDebugSettings>()->bLogSubMovement)
+	{
+		UE_LOG(
+			LogSubMovement,
+			Log,
+			TEXT("Snapshot received | Frame=%d | Loc=%s | Δt=%.3fs"),
+			NewState.SimFrame,
+			*NewState.WorldLocation.ToCompactString(),
+			static_cast<float>(ClientTargetSnapshotTime - ClientPrevSnapshotTime));
 	}
 }
 

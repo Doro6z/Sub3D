@@ -42,6 +42,19 @@ public class Sub3D : ModuleRules
 			});
 		}
 
+		// Gameplay Debugger (F1 in-game overlay). Available in non-Shipping/Test configurations.
+		// The module auto-defines WITH_GAMEPLAY_DEBUGGER=1 when present.
+		if (Target.Configuration != UnrealTargetConfiguration.Shipping
+			&& Target.Configuration != UnrealTargetConfiguration.Test)
+		{
+			PrivateDependencyModuleNames.Add("GameplayDebugger");
+			PublicDefinitions.Add("WITH_GAMEPLAY_DEBUGGER=1");
+		}
+		else
+		{
+			PublicDefinitions.Add("WITH_GAMEPLAY_DEBUGGER=0");
+		}
+
 		PublicIncludePaths.AddRange(new string[]
 		{
 			"Sub3D",

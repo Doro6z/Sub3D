@@ -11,6 +11,10 @@ class ASubmarineBase;
 class UInteractableComponent;
 class USubInteractionComponent;
 class USubCrewMovementComponent;
+class UCompartmentVolumeComponent;
+class USubHullBoundaryComponent;
+class UCrewUnderwaterPPComponent;
+class UMaterialInterface;
 
 /**
  * Crew member character.
@@ -43,6 +47,18 @@ public:
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
 	USubInteractionComponent* InteractionComponent;
 
+	/**
+	 * Drives the underwater post-process effect. Passive C++: compares camera Z to
+	 * current compartment's water surface Z, blends PP weight, fires BP events for
+	 * designer hooks (droplets, splash). Material-driven visual intelligence.
+	 */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
+	UCrewUnderwaterPPComponent* UnderwaterPP;
+
+	/** Default underwater post-process material applied to UnderwaterPP at BeginPlay. Art designer sets this on the BP class. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "Crew|Underwater")
+	TObjectPtr<UMaterialInterface> DefaultUnderwaterPPMaterial = nullptr;
+
 	/** Typed getter for the custom movement component. No cast needed in BP. */
 	UFUNCTION(BlueprintPure, Category = "Crew")
 	USubCrewMovementComponent* GetCrewMovement() const;
@@ -70,7 +86,7 @@ public:
 	UFUNCTION()
 	void OnRep_CurrentSubmarine();
 
-	// Set the submarine reference without any physical attachment
+	// Set the submarine reference without any physical attachment or locomotion transition
 	UFUNCTION(BlueprintCallable, Category = "Crew")
 	void SetCurrentSubmarine(ASubmarineBase* Sub);
 
@@ -78,11 +94,12 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Crew")
 	void EnterOnFootInSubmarine(ASubmarineBase* Sub, const FTransform& SpawnXform);
 
-	// Legacy attachment boarding
-	UFUNCTION(BlueprintCallable, Category = "Crew")
+	// Legacy compatibility wrapper. Use EnterOnFootInSubmarine for spawn/bootstrap.
+	UFUNCTION(BlueprintCallable, Category = "Crew", meta = (DeprecatedFunction, DeprecationMessage = "Use EnterOnFootInSubmarine for spawn/bootstrap."))
 	void BoardSubmarine(ASubmarineBase* Submarine);
 
-	UFUNCTION(BlueprintCallable, Category = "Crew")
+	// Legacy hard-detach path. EVA uses HandleHullCrossing via hull boundaries.
+	UFUNCTION(BlueprintCallable, Category = "Crew", meta = (DeprecatedFunction, DeprecationMessage = "Use hull boundary crossing for EVA. This function is a legacy hard-detach path."))
 	void DisembarkSubmarine();
 
 	// ── Helm ──────────────────────────────────────────────────────────────
@@ -197,13 +214,64 @@ public:
 
 	/** Show the anim tuner panel at startup */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crew|Debug")
-	bool bShowAnimDebugPanel = true;
+	bool bShowAnimDebugPanel = false;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crew|Debug", meta = (ClampMin = "0.1"))
 	float EnvironmentDebugLogIntervalSeconds = 1.f;
 
-	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Crew|Environment")
+	/**
+	 * Authoritative compartment ID (server-side overlap detection).
+	 * Replicated with COND_SkipOwner: the owning client's own overlap handlers populate this,
+	 * non-owning clients receive it and resolve CurrentCompartment pointer in OnRep.
+	 */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, ReplicatedUsing = OnRep_CurrentCompartmentId, Category = "Crew|Environment")
 	FName CurrentCompartmentId = NAME_None;
+
+	UFUNCTION()
+	void OnRep_CurrentCompartmentId();
+
+	/**
+	 * Environment axis pointer: spatial zone currently occupied by the crew capsule.
+	 * nullptr = ocean (outside hull). Updated by overlap events on ECC_CompartmentProbe.
+	 * Orthogonal to locomotion state (ECrewEmbarkState).
+	 */
+	UPROPERTY(Transient, BlueprintReadOnly, Category = "Crew|Environment")
+	TWeakObjectPtr<UCompartmentVolumeComponent> CurrentCompartment;
+
+	/** True if the capsule center is below the water level of the current compartment (or always true in ocean). */
+	UFUNCTION(BlueprintPure, Category = "Crew|Environment")
+	bool IsInWater() const;
+
+	/** True if the current compartment still has oxygen. False in ocean unless the crew has an external supply. */
+	UFUNCTION(BlueprintPure, Category = "Crew|Environment")
+	bool HasOxygen() const;
+
+	UFUNCTION()
+	void OnCompartmentOverlapBegin(
+		UPrimitiveComponent* OverlappedComponent,
+		AActor* OtherActor,
+		UPrimitiveComponent* OtherComp,
+		int32 OtherBodyIndex,
+		bool bFromSweep,
+		const FHitResult& SweepResult);
+
+	UFUNCTION()
+	void OnCompartmentOverlapEnd(
+		UPrimitiveComponent* OverlappedComponent,
+		AActor* OtherActor,
+		UPrimitiveComponent* OtherComp,
+		int32 OtherBodyIndex);
+
+	/**
+	 * Hull-plane crossing handler. Called by USubHullBoundaryComponent when the crew capsule
+	 * crosses the hull plane. Applies velocity blending and flips ECrewEmbarkState.
+	 *
+	 * bOutgoing = true  : Embarked -> Outside. Inject sub velocity so the crew keeps world momentum.
+	 * bOutgoing = false : Outside  -> Embarked. Subtract sub velocity and seed GridSpaceTransform
+	 *                     from the current world pose.
+	 */
+	UFUNCTION(BlueprintCallable, Category = "Crew|EVA")
+	void HandleHullCrossing(USubHullBoundaryComponent* Boundary, bool bOutgoing);
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Crew|Environment")
 	float CurrentAmbientPressureKPa = 101.325f;
@@ -253,8 +321,6 @@ public:
 	void Server_ResyncBallasts(float GlobalTarget);
 
 private:
-	ASubmarineBase* ResolveSubmarineFromMovementBase() const;
-	void EnsureEmbarkedSubmarineBinding(const TCHAR* Context);
 	void UpdateEnvironmentalEffects(float DeltaSeconds);
 	bool ResolveCurrentCompartment(FCompartmentState& OutState, FBox& OutLocalBounds) const;
 	void ApplyPressureEffects(float DeltaSeconds, float AmbientPressureKPa);
@@ -263,6 +329,12 @@ private:
 	void UpdateCameraMode(float DeltaSeconds);
 	void UpdateCameraRig();
 	void UpdateLocalHeadVisibility();
+
+	/** Picks the best active overlap (nearest center) and assigns it to CurrentCompartment. */
+	void RecomputeCurrentCompartment();
+
+	/** Transient set of compartments currently overlapping the capsule. Runtime-only, no UPROPERTY. */
+	TSet<TWeakObjectPtr<UCompartmentVolumeComponent>> ActiveCompartmentOverlaps;
 
 	UFUNCTION(Server, Reliable)
 	void Server_TakeHelm();
@@ -275,4 +347,13 @@ private:
 	float EnvironmentDebugLogTimer = 0.f;
 	bool bWantsFirstPerson = true;
 	bool bHeadHiddenForLocalView = false;
+
+	/**
+	 * Guard flag: SetCurrentSubmarine(nullptr) is only legitimate from inside DisembarkSubmarine.
+	 * Any other caller hitting the null path indicates an upstream bug (replication race,
+	 * accidental BP wire, sub destruction without disembark). DisembarkSubmarine sets this true
+	 * via TGuardValue around its SetCurrentSubmarine(nullptr) call; the ensure in SetCurrentSubmarine
+	 * fires when this is false.
+	 */
+	bool bAllowSubmarineUnbind = false;
 };

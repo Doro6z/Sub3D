@@ -31,6 +31,14 @@ public:
 	UPROPERTY(BlueprintReadWrite, Replicated, Category = "Crew Control")
 	ECrewControlMode CurrentControlMode = ECrewControlMode::OnFoot;
 
+	/**
+	 * Spawn slot assigned by ASubGameMode::PostLogin. Indexes into the game mode's
+	 * CrewSpawnSlotOffsetsLocal array. Replicated so the owning client can see its
+	 * own assignment (useful for HUD/debug). -1 = not yet assigned.
+	 */
+	UPROPERTY(BlueprintReadOnly, Replicated, Category = "Crew|Spawn")
+	int32 AssignedSpawnSlot = -1;
+
 	// ── HUD ───────────────────────────────────────────────────────────────
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HUD")
@@ -213,6 +221,14 @@ public:
 
 	ASubmarineBase* ResolveCurrentSubmarine() const;
 
+	/**
+	 * Dev-cheat resolution: tries ResolveCurrentSubmarine() first, then falls back to iterating
+	 * world actors for the first ASubmarineBase with a valid SubFlood. Used by Server_DevCheat_*
+	 * handlers where the server-side PC may not yet have a possessed crew or replicated station.
+	 * Solo / single-sub assumption — for multi-sub testing, use the normal resolution path.
+	 */
+	ASubmarineBase* ResolveSubmarineForDevCheat() const;
+
 	// ── Dev cheats (console commands, Exec) ─────────────────────────────
 	// Used to validate the First Playable gameplay loop without relying on
 	// full runtime simulation. All cheats resolve the current submarine and
@@ -221,6 +237,10 @@ public:
 	/** Create or update a breach on the given compartment at RateLps liters/sec. */
 	UFUNCTION(Exec, Category = "Debug|Submarine")
 	void DevCheat_CreateBreach(FName CompartmentId, float RateLps);
+
+	/** Server-side counterpart: the Exec routes here so the authoritative SubFlood sim receives the breach. */
+	UFUNCTION(Server, Reliable, Category = "Debug|Submarine")
+	void Server_DevCheat_CreateBreach(FName CompartmentId, float RateLps);
 
 	/** Force a door/hatch connection state via its ConnectionId. */
 	UFUNCTION(Exec, Category = "Debug|Submarine")

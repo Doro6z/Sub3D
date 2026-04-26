@@ -2,6 +2,7 @@
 #include "Sub3DDebugSettings.h"
 
 #include "Components/PrimitiveComponent.h"
+#include "Engine/World.h"
 #include "EngineUtils.h"
 #include "GameFramework/CharacterMovementComponent.h"
 #include "SubCrewCharacter.h"
@@ -10,6 +11,7 @@
 #include "SubMovementComponent.h"
 #include "SubPlayerController.h"
 #include "SubmarineBase.h"
+#include "TimerManager.h"
 #include "TraversalRouteActor.h"
 
 DEFINE_LOG_CATEGORY_STATIC(LogSubRun, Log, All);
@@ -57,10 +59,9 @@ void LogDepartureCollisionSnapshot(const ASubmarineBase* Submarine)
 	UE_LOG(
 		LogSubRun,
 		Log,
-		TEXT("DepartureCollision | Submarine=%s | MovementCollision=%s | Freeze=%d | Location=%s | Rotation=%s"),
+		TEXT("DepartureCollision | Submarine=%s | MovementCollision=%s | Location=%s | Rotation=%s"),
 		*GetNameSafe(Submarine),
 		*GetNameSafe(MovementCollision),
-		Submarine->bFreezeMovementForTesting ? 1 : 0,
 		*Submarine->GetActorLocation().ToCompactString(),
 		*Submarine->GetActorRotation().ToCompactString());
 
@@ -116,8 +117,21 @@ void ASubGameMode::StartPlay()
 {
 	Super::StartPlay();
 
+	PhaseEnteredAtSeconds = FPlatformTime::Seconds();
+	LastStallLogSeconds = 0.;
+
 	RefreshRunBootstrapReferences();
 	TryAdvanceBootstrap();
+
+	// Watchdog + retry: TryAdvanceBootstrap is only called event-driven (StartPlay,
+	// PostLogin). If a phase blocks (no route, sub collision not ready, crew validation
+	// failing), nothing else would re-attempt. The timer keeps trying every 0.5s and
+	// the LogStallIfStuck helper emits an Error log when a phase is stuck longer than
+	// BootstrapPhaseTimeoutSeconds. Cleared in SetBootstrapPhase when Ready/Failed.
+	if (BootstrapPhase != ESubBootstrapPhase::Ready && BootstrapPhase != ESubBootstrapPhase::Failed)
+	{
+		StartBootstrapRetryTimer();
+	}
 }
 
 void ASubGameMode::HandleStartingNewPlayer_Implementation(APlayerController* NewPlayer)
@@ -140,6 +154,18 @@ void ASubGameMode::PostLogin(APlayerController* NewPlayer)
 		return;
 	}
 
+	// Assign the next free spawn slot. Replicated so the owning client can query its slot too.
+	if (SubPC->AssignedSpawnSlot < 0)
+	{
+		SubPC->AssignedSpawnSlot = AssignNextSpawnSlot();
+		UE_LOG(
+			LogSubRun,
+			Log,
+			TEXT("PostLogin | Controller=%s | AssignedSpawnSlot=%d"),
+			*GetNameSafe(NewPlayer),
+			SubPC->AssignedSpawnSlot);
+	}
+
 	if (!PendingBootstrapControllers.Contains(NewPlayer))
 	{
 		PendingBootstrapControllers.Add(NewPlayer);
@@ -152,7 +178,42 @@ void ASubGameMode::PostLogin(APlayerController* NewPlayer)
 		*GetNameSafe(NewPlayer),
 		PendingBootstrapControllers.Num());
 
+	// Late arrival path: if bootstrap already reached Ready, TryAdvanceBootstrap
+	// returns early at its top guard. Process the new controller inline through
+	// the same spawn pipeline. This handles late joins (split-screen second PC,
+	// client reconnect, mid-session join) without re-entering the phase machine.
+	if (BootstrapPhase == ESubBootstrapPhase::Ready)
+	{
+		const int32 PendingBefore = PendingBootstrapControllers.Num();
+		SpawnAndEmbarkPendingControllers();
+		UE_LOG(
+			LogSubRun,
+			Log,
+			TEXT("PostLogin | Late-arrival spawn | Controller=%s | Pending %d -> %d"),
+			*GetNameSafe(NewPlayer),
+			PendingBefore,
+			PendingBootstrapControllers.Num());
+		return;
+	}
+
 	TryAdvanceBootstrap();
+}
+
+int32 ASubGameMode::AssignNextSpawnSlot()
+{
+	// Find the highest currently-assigned slot across all PCs, return Max+1.
+	int32 Max = -1;
+	if (UWorld* World = GetWorld())
+	{
+		for (FConstPlayerControllerIterator It = World->GetPlayerControllerIterator(); It; ++It)
+		{
+			if (const ASubPlayerController* OtherPC = Cast<ASubPlayerController>(It->Get()))
+			{
+				Max = FMath::Max(Max, OtherPC->AssignedSpawnSlot);
+			}
+		}
+	}
+	return Max + 1;
 }
 
 void ASubGameMode::RestartPlayer(AController* NewPlayer)
@@ -171,12 +232,15 @@ void ASubGameMode::RestartPlayer(AController* NewPlayer)
 		return;
 	}
 
-	const FTransform SpawnTransform = ResolveCrewSpawnTransform();
+	const ASubPlayerController* SubPC = Cast<ASubPlayerController>(NewPlayer);
+	const int32 SlotIndex = SubPC ? SubPC->AssignedSpawnSlot : 0;
+	const FTransform SpawnTransform = ResolveCrewSpawnTransform(SlotIndex);
 	UE_LOG(
 		LogSubRun,
 		Log,
-		TEXT("RestartPlayer | Controller=%s | SpawnLoc=%s | SpawnRot=%s | Sub=%s"),
+		TEXT("RestartPlayer | Controller=%s | Slot=%d | SpawnLoc=%s | SpawnRot=%s | Sub=%s"),
 		*GetNameSafe(NewPlayer),
+		SlotIndex,
 		*SpawnTransform.GetLocation().ToCompactString(),
 		*SpawnTransform.GetRotation().Rotator().ToCompactString(),
 		*GetNameSafe(ActiveSubmarine));
@@ -233,15 +297,11 @@ void ASubGameMode::BeginDeparture()
 		return;
 	}
 
-	if (ActiveSubmarine)
+	if (ActiveSubmarine
+		&& ActiveSubmarine->SubMovement
+		&& (GetDefault<USub3DDebugSettings>()->bLogSubCollisionSweeps || GetDefault<USub3DDebugSettings>()->bLogSubMovement))
 	{
-		if (ActiveSubmarine->SubMovement
-			&& (GetDefault<USub3DDebugSettings>()->bLogSubCollisionSweeps || GetDefault<USub3DDebugSettings>()->bLogSubMovement))
-		{
-			LogDepartureCollisionSnapshot(ActiveSubmarine);
-		}
-
-		ActiveSubmarine->SetFreezeMovementForTesting(false);
+		LogDepartureCollisionSnapshot(ActiveSubmarine);
 	}
 
 	AdvanceRunPhase(ESubRunPhase::Departure);
@@ -522,17 +582,13 @@ void ASubGameMode::RefreshCampaignSeamData()
 	RouteEndTransform = ActiveRoute->GetRouteEndTransformWorld();
 }
 
-FTransform ASubGameMode::ResolveCrewSpawnTransform() const
+FTransform ASubGameMode::ResolveCrewSpawnTransform(int32 SlotIndex) const
 {
-	FTransform SpawnXform = FTransform::Identity;
-
 	if (IsValid(ActiveSubmarine))
 	{
-		SpawnXform = ActiveSubmarine->GetCrewEmbarkTransform();
+		return ActiveSubmarine->GetCrewSpawnTransformForSlot(SlotIndex);
 	}
-
-	SpawnXform.AddToTranslation(CrewSpawnOffset);
-	return SpawnXform;
+	return FTransform::Identity;
 }
 
 void ASubGameMode::InitializePlayerCrewState(APlayerController* NewPlayer)
@@ -553,7 +609,8 @@ void ASubGameMode::InitializePlayerCrewState(APlayerController* NewPlayer)
 		return;
 	}
 
-	const FTransform SpawnTransform = ResolveCrewSpawnTransform();
+	const int32 SlotIndex = SubPC->AssignedSpawnSlot >= 0 ? SubPC->AssignedSpawnSlot : 0;
+	const FTransform SpawnTransform = ResolveCrewSpawnTransform(SlotIndex);
 	Crew->EnterOnFootInSubmarine(ActiveSubmarine, SpawnTransform);
 
 	SubPC->CurrentControlMode = ECrewControlMode::OnFoot;
@@ -685,12 +742,86 @@ void ASubGameMode::SetBootstrapPhase(ESubBootstrapPhase NewPhase)
 	const ESubBootstrapPhase OldPhase = BootstrapPhase;
 	BootstrapPhase = NewPhase;
 
+	// Reset watchdog timing on every phase transition so each phase gets its own
+	// timeout window. Stall logs are throttled by LastStallLogSeconds.
+	PhaseEnteredAtSeconds = FPlatformTime::Seconds();
+	LastStallLogSeconds = 0.;
+
 	UE_LOG(
 		LogSubRun,
 		Log,
 		TEXT("Bootstrap | Phase=%s -> %s"),
 		*StaticEnum<ESubBootstrapPhase>()->GetValueAsString(OldPhase),
 		*StaticEnum<ESubBootstrapPhase>()->GetValueAsString(BootstrapPhase));
+
+	if (BootstrapPhase == ESubBootstrapPhase::Ready || BootstrapPhase == ESubBootstrapPhase::Failed)
+	{
+		StopBootstrapRetryTimer();
+	}
+}
+
+void ASubGameMode::StartBootstrapRetryTimer()
+{
+	UWorld* World = GetWorld();
+	if (!World)
+	{
+		return;
+	}
+
+	if (BootstrapRetryTimerHandle.IsValid())
+	{
+		return;
+	}
+
+	World->GetTimerManager().SetTimer(
+		BootstrapRetryTimerHandle,
+		this,
+		&ASubGameMode::TryAdvanceBootstrap,
+		0.5f,
+		true);
+}
+
+void ASubGameMode::StopBootstrapRetryTimer()
+{
+	UWorld* World = GetWorld();
+	if (!World || !BootstrapRetryTimerHandle.IsValid())
+	{
+		return;
+	}
+
+	World->GetTimerManager().ClearTimer(BootstrapRetryTimerHandle);
+	BootstrapRetryTimerHandle.Invalidate();
+}
+
+void ASubGameMode::LogStallIfStuck(const TCHAR* Reason)
+{
+	const double Now = FPlatformTime::Seconds();
+	const double SecondsInPhase = Now - PhaseEnteredAtSeconds;
+
+	if (SecondsInPhase < BootstrapPhaseTimeoutSeconds)
+	{
+		return;
+	}
+
+	const double SecondsSinceLog = Now - LastStallLogSeconds;
+	if (LastStallLogSeconds > 0. && SecondsSinceLog < BootstrapPhaseTimeoutSeconds)
+	{
+		return;
+	}
+
+	LastStallLogSeconds = Now;
+
+	UE_LOG(
+		LogSubRun,
+		Error,
+		TEXT("Bootstrap STALLED in phase %s for %.1fs | Reason=%s | ActiveRoute=%s | ActiveSubmarine=%s | PendingControllers=%d | bRequireActiveRoute=%d"),
+		*StaticEnum<ESubBootstrapPhase>()->GetValueAsString(BootstrapPhase),
+		SecondsInPhase,
+		Reason,
+		*GetNameSafe(ActiveRoute),
+		*GetNameSafe(ActiveSubmarine),
+		PendingBootstrapControllers.Num(),
+		bRequireActiveRoute ? 1 : 0);
 }
 
 void ASubGameMode::TryAdvanceBootstrap()
@@ -702,7 +833,7 @@ void ASubGameMode::TryAdvanceBootstrap()
 
 	if (!ResolveWorldBootstrap())
 	{
-		UE_LOG(LogSubRun, Log, TEXT("Bootstrap waiting | World not ready"));
+		LogStallIfStuck(TEXT("World not ready (bRequireActiveRoute=true and ActiveRoute is null)"));
 		return;
 	}
 	if (BootstrapPhase < ESubBootstrapPhase::WorldReady)
@@ -712,7 +843,7 @@ void ASubGameMode::TryAdvanceBootstrap()
 
 	if (!ResolveSubmarineBootstrap())
 	{
-		UE_LOG(LogSubRun, Log, TEXT("Bootstrap waiting | Submarine not resolved"));
+		LogStallIfStuck(TEXT("Submarine not resolved (no ASubmarineBase in world or movement collision not ready)"));
 		return;
 	}
 	if (BootstrapPhase < ESubBootstrapPhase::SubResolved)
@@ -722,28 +853,23 @@ void ASubGameMode::TryAdvanceBootstrap()
 
 	if (!ValidateSubmarineBootstrap())
 	{
-		UE_LOG(LogSubRun, Warning, TEXT("Bootstrap waiting | Submarine spawn collision invalid"));
+		LogStallIfStuck(TEXT("Submarine spawn collision invalid (ValidateSpawnCollision returned false)"));
 		return;
 	}
 	if (BootstrapPhase < ESubBootstrapPhase::SubValidated)
 	{
 		SetBootstrapPhase(ESubBootstrapPhase::SubValidated);
-
-		if (ActiveSubmarine)
-		{
-			ActiveSubmarine->SetFreezeMovementForTesting(true);
-		}
 	}
 
 	if (PendingBootstrapControllers.Num() == 0)
 	{
-		UE_LOG(LogSubRun, Log, TEXT("Bootstrap waiting | No pending controllers"));
+		// Not a stall: just no clients connected yet. Quiet log to avoid spam.
 		return;
 	}
 
 	if (!SpawnAndEmbarkPendingControllers())
 	{
-		UE_LOG(LogSubRun, Warning, TEXT("Bootstrap waiting | Crew spawn/embark incomplete"));
+		LogStallIfStuck(TEXT("Crew spawn/embark incomplete (see CrewValidation warnings above)"));
 		return;
 	}
 	if (BootstrapPhase < ESubBootstrapPhase::CrewEmbarked)
@@ -762,7 +888,16 @@ void ASubGameMode::TryAdvanceBootstrap()
 bool ASubGameMode::ResolveWorldBootstrap()
 {
 	ResolveActiveRoute();
-	return ActiveRoute != nullptr;
+
+	// Route is required only on production maps that opt in. Test/proto maps
+	// can boot the gameplay loop without one. The flag is editor-authored on
+	// the GameMode subclass so behaviour is per-map deterministic.
+	if (bRequireActiveRoute && !ActiveRoute)
+	{
+		return false;
+	}
+
+	return true;
 }
 
 bool ASubGameMode::ResolveSubmarineBootstrap()
@@ -813,7 +948,9 @@ bool ASubGameMode::SpawnAndEmbarkPendingControllers()
 		ASubCrewCharacter* ExistingCrew = Cast<ASubCrewCharacter>(PC->GetPawn());
 		if (!ExistingCrew)
 		{
-			const FTransform SpawnTransform = ResolveCrewSpawnTransform();
+			const ASubPlayerController* SubPC = Cast<ASubPlayerController>(PC);
+			const int32 SlotIndex = SubPC ? SubPC->AssignedSpawnSlot : 0;
+			const FTransform SpawnTransform = ResolveCrewSpawnTransform(SlotIndex);
 			RestartPlayerAtTransform(PC, SpawnTransform);
 			ExistingCrew = Cast<ASubCrewCharacter>(PC->GetPawn());
 		}

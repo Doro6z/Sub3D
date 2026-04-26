@@ -7,7 +7,7 @@
 #include "ProceduralMeshComponent.h"
 #include "UObject/ObjectMacros.h"
 
-namespace
+namespace SubmarineRuntimeActorPrivate
 {
 static void DestroyProceduralMeshes(TArray<TObjectPtr<UProceduralMeshComponent>>& Components)
 {
@@ -101,6 +101,12 @@ static UProceduralMeshComponent* CreateManagedMeshComponent(
     return ProceduralMesh;
 }
 }
+
+// Bring the two non-conflicting helpers into file scope. DestroyProceduralMeshes
+// stays inside the namespace because SubmarineAuthoringActors.cpp defines a same-signature
+// global function that would clash in unity build (C2375 different-linkage).
+using SubmarineRuntimeActorPrivate::ApplyCompiledSectionToProceduralMesh;
+using SubmarineRuntimeActorPrivate::CreateManagedMeshComponent;
 
 ASubmarineRuntimeActor::ASubmarineRuntimeActor()
 {
@@ -223,7 +229,7 @@ bool ASubmarineRuntimeActor::BuildCollisionComponents()
         return false;
     }
 
-    DestroyProceduralMeshes(CollisionMeshComponents);
+    SubmarineRuntimeActorPrivate::DestroyProceduralMeshes(CollisionMeshComponents);
 
     int32 BuiltComponentCount = 0;
 
@@ -346,6 +352,6 @@ bool ASubmarineRuntimeActor::InitializeFromRuntimeAsset()
 
 void ASubmarineRuntimeActor::ClearBuiltGeometry()
 {
-    DestroyProceduralMeshes(RenderMeshComponents);
-    DestroyProceduralMeshes(CollisionMeshComponents);
+    SubmarineRuntimeActorPrivate::DestroyProceduralMeshes(RenderMeshComponents);
+    SubmarineRuntimeActorPrivate::DestroyProceduralMeshes(CollisionMeshComponents);
 }

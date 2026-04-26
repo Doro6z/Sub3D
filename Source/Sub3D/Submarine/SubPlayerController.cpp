@@ -16,6 +16,7 @@
 #include "Generator/SubmarineDefinition.h"
 #include "Generator/SubmarineDefinitionTypes.h"
 #include "Net/UnrealNetwork.h"
+#include "EngineUtils.h"
 
 DEFINE_LOG_CATEGORY_STATIC(LogSubController, Log, All);
 
@@ -25,6 +26,7 @@ void ASubPlayerController::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>&
 	DOREPLIFETIME(ASubPlayerController, CurrentControlMode);
 	DOREPLIFETIME(ASubPlayerController, CurrentStation);
 	DOREPLIFETIME(ASubPlayerController, CurrentStationType);
+	DOREPLIFETIME(ASubPlayerController, AssignedSpawnSlot);
 }
 
 void ASubPlayerController::BeginPlay()
@@ -76,27 +78,49 @@ void ASubPlayerController::ServerEnterStation_Implementation(AActor* Station)
 		return;
 	}
 
-	CurrentStation = Station;
-	CurrentStationType = ISubStationInterface::Execute_GetStationType(Station);
 	ASubmarineBase* StationSubmarine = ISubStationInterface::Execute_GetOwningSubmarine(Station);
 
-	ISubStationInterface::Execute_RequestEnterStation(Station, this);
-
-	if (ASubCrewCharacter* Crew = Cast<ASubCrewCharacter>(GetPawn()))
+	// Hard-reject upstream invariant violations. Reaching this point with no crew, no
+	// CurrentSubmarine, or a mismatched sub means the bootstrap pipeline failed to
+	// embark the crew before they reached the helm. The previous "recover from station"
+	// fallback masked these bugs; we now surface them and refuse the interaction.
+	ASubCrewCharacter* Crew = Cast<ASubCrewCharacter>(GetPawn());
+	if (!Crew)
 	{
-		if (StationSubmarine && Crew->CurrentSubmarine != StationSubmarine)
-		{
-			Crew->SetCurrentSubmarine(StationSubmarine);
-		}
+		UE_LOG(LogSubController, Error,
+			TEXT("[%s] ServerEnterStation REJECTED | Pawn is not ASubCrewCharacter | Pawn=%s"),
+			*GetName(), *GetNameSafe(GetPawn()));
+		return;
 	}
+	if (!Crew->CurrentSubmarine)
+	{
+		UE_LOG(LogSubController, Error,
+			TEXT("[%s] ServerEnterStation REJECTED | Crew->CurrentSubmarine is null. ")
+			TEXT("Bootstrap failed to embark this crew. Station=%s | StationSub=%s"),
+			*GetName(), *GetNameSafe(Station), *GetNameSafe(StationSubmarine));
+		return;
+	}
+	if (StationSubmarine && Crew->CurrentSubmarine != StationSubmarine)
+	{
+		UE_LOG(LogSubController, Error,
+			TEXT("[%s] ServerEnterStation REJECTED | Crew/Station sub mismatch. ")
+			TEXT("CrewSub=%s | StationSub=%s | Station=%s"),
+			*GetName(),
+			*GetNameSafe(Crew->CurrentSubmarine),
+			*GetNameSafe(StationSubmarine),
+			*GetNameSafe(Station));
+		return;
+	}
+
+	CurrentStation = Station;
+	CurrentStationType = ISubStationInterface::Execute_GetStationType(Station);
+
+	ISubStationInterface::Execute_RequestEnterStation(Station, this);
 
 	if (CurrentStationType == ESubStationType::Helm)
 	{
 		CurrentControlMode = ECrewControlMode::HelmDriving;
-		if (ASubCrewCharacter* Crew = Cast<ASubCrewCharacter>(GetPawn()))
-		{
-			Crew->ForceHelm();
-		}
+		Crew->ForceHelm();
 	}
 	else
 	{
@@ -913,10 +937,49 @@ ASubmarineBase* ASubPlayerController::ResolveCurrentSubmarine() const
 	return nullptr;
 }
 
+ASubmarineBase* ASubPlayerController::ResolveSubmarineForDevCheat() const
+{
+	if (ASubmarineBase* Sub = ResolveCurrentSubmarine())
+	{
+		return Sub;
+	}
+
+	UWorld* World = GetWorld();
+	if (!World)
+	{
+		return nullptr;
+	}
+
+	for (TActorIterator<ASubmarineBase> It(World); It; ++It)
+	{
+		ASubmarineBase* Sub = *It;
+		if (Sub && Sub->SubFlood)
+		{
+			UE_LOG(LogSubController, Log,
+				TEXT("[%s] ResolveSubmarineForDevCheat fallback: found %s in world."),
+				*GetName(), *Sub->GetName());
+			return Sub;
+		}
+	}
+
+	return nullptr;
+}
+
 // ── Dev cheats ────────────────────────────────────────────────────────────────
 
 void ASubPlayerController::DevCheat_CreateBreach(FName CompartmentId, float RateLps)
 {
+	// Route to server: SubFlood is authoritative. In Play-as-Client or dedicated server
+	// setups the client-side CreateBreach would no-op silently.
+	if (!HasAuthority())
+	{
+		Server_DevCheat_CreateBreach(CompartmentId, RateLps);
+		UE_LOG(LogSubController, Log,
+			TEXT("[DevCheat_CreateBreach] Routed to server for '%s' at %.1f L/s"),
+			*CompartmentId.ToString(), RateLps);
+		return;
+	}
+
 	ASubmarineBase* Sub = ResolveCurrentSubmarine();
 	if (!Sub || !Sub->SubFlood)
 	{
@@ -927,6 +990,21 @@ void ASubPlayerController::DevCheat_CreateBreach(FName CompartmentId, float Rate
 	Sub->SubFlood->CreateBreach(CompartmentId, RateLps);
 	UE_LOG(LogSubController, Log,
 		TEXT("[DevCheat_CreateBreach] %s: created breach on '%s' at %.1f L/s"),
+		*Sub->GetName(), *CompartmentId.ToString(), RateLps);
+}
+
+void ASubPlayerController::Server_DevCheat_CreateBreach_Implementation(FName CompartmentId, float RateLps)
+{
+	ASubmarineBase* Sub = ResolveSubmarineForDevCheat();
+	if (!Sub || !Sub->SubFlood)
+	{
+		UE_LOG(LogSubController, Warning, TEXT("[Server_DevCheat_CreateBreach] No submarine or SubFlood resolved (no possessed crew, no station, and no submarine in world)."));
+		return;
+	}
+
+	Sub->SubFlood->CreateBreach(CompartmentId, RateLps);
+	UE_LOG(LogSubController, Log,
+		TEXT("[Server_DevCheat_CreateBreach] %s: created breach on '%s' at %.1f L/s"),
 		*Sub->GetName(), *CompartmentId.ToString(), RateLps);
 }
 
@@ -1107,7 +1185,6 @@ void ASubPlayerController::Anim(const FString& ParamName, float Value)
 	// Sub motion
 	else if (P == "sublean")        AI->SubLeanMultiplier = Value;
 	else if (P == "substumble")     AI->SubStumbleMultiplier = Value;
-	else if (P == "debug")          AI->bShowDebugHUD = Value > 0.5f;
 	else
 	{
 		UE_LOG(LogSubController, Warning, TEXT("Anim: Unknown param '%s'. Use AnimList for list."), *ParamName);
@@ -1154,6 +1231,5 @@ void ASubPlayerController::AnimList()
 	UE_LOG(LogSubController, Log, TEXT("  posturebend    %.1f"), AI->MaxPostureBendDeg);
 	UE_LOG(LogSubController, Log, TEXT("  breathamp %.1f  breathrate %.2f"), AI->BreathingAmplitudeDeg, AI->BreathingRate);
 	UE_LOG(LogSubController, Log, TEXT("  sublean %.2f  substumble %.3f"), AI->SubLeanMultiplier, AI->SubStumbleMultiplier);
-	UE_LOG(LogSubController, Log, TEXT("  debug %d"), AI->bShowDebugHUD ? 1 : 0);
 	UE_LOG(LogSubController, Log, TEXT("Usage: Anim <param> <value>  (e.g. Anim armrestr_r -85)"));
 }

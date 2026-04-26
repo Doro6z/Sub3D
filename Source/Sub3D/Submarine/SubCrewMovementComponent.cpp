@@ -1,7 +1,9 @@
 #include "SubCrewMovementComponent.h"
 #include "Sub3DDebugSettings.h"
 
+#include "CompartmentVolumeComponent.h"
 #include "SubCrewCharacter.h"
+#include "SubCrewNetTypes.h"
 #include "SubInteriorFrameComponent.h"
 #include "SubmarineBase.h"
 #include "SubMovementComponent.h"
@@ -9,6 +11,7 @@
 #include "Components/PrimitiveComponent.h"
 #include "Camera/CameraComponent.h"
 #include "DrawDebugHelpers.h"
+#include "Engine/Engine.h"
 #include "Engine/World.h"
 #include "GameFramework/Character.h"
 #include "GameFramework/Controller.h"
@@ -36,16 +39,39 @@ bool IsComponentOnSubmarine(const ASubmarineBase* Submarine, const UPrimitiveCom
 USubCrewMovementComponent::USubCrewMovementComponent()
 {
 	SetIsReplicatedByDefault(true);
+
+	// FP EVA swim stub: ocean is state-driven (ECrewEmbarkState::Outside), not PhysicsVolume-driven.
+	// We piggy-back on MOVE_Flying with water-tuned params so it reads as "swim" in game terms.
+	// Swap for MOVE_Swimming + buoyancy when a proper ocean sim lands.
+	MaxFlySpeed = 250.f;                  // below walking (300) → heavy-water feel
+	BrakingDecelerationFlying = 1200.f;   // quick decel on input release → water drag
+
+	// The rebase is the sole transport path. CMC must never impart the MovementBase's
+	// velocity into the crew's Velocity on base change (ladder -> deck, deck -> deck, etc.)
+	// — that would inject V_sub world-space velocity and fight the rebase each tick,
+	// producing persistent jitter scaling with sub speed.
+	bImpartBaseVelocityX = false;
+	bImpartBaseVelocityY = false;
+	bImpartBaseVelocityZ = false;
+	bImpartBaseAngularVelocity = false;
+
+	// Custom network move data container: packs GridSpaceTransform + EmbarkState + handoff
+	// event bits into the ServerMove RPC payload. Server reads these in MoveAutonomous.
+	SubCrewMoveDataContainer = MakeUnique<FCharacterNetworkMoveDataContainer_SubCrew>();
+	SetNetworkMoveDataContainer(*SubCrewMoveDataContainer);
 }
 
 void USubCrewMovementComponent::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
 {
-	// Lazy authority latch. Enter/Disembark/Board paths already toggle the flag,
-	// but the crew may become embarked outside those paths (spawn, replication,
-	// editor play). Follow IsEmbarked() here so the rebase runs whenever a sub
-	// is present, and seed GridSpaceTransform from the current world pose on
-	// each transition into embarked so the first rebase is a no-op.
-	if (IsEmbarked() && !bIsGridSpaceAuthority && CharacterOwner)
+	// Lazy authority latch — RISING-EDGE ONLY.
+	// Fires only when submarine binding transitions false->true (spawn into sub, replication).
+	// After that, EmbarkState is explicit (SetEmbarkState via EnterOnFoot, Board, Disembark,
+	// HandleHullCrossing) and the latch must NOT re-set Embarked when the crew is legitimately
+	// Outside (EVA) while still holding a sub pointer.
+	const bool bHasSubmarineBindingNow = HasSubmarineBinding();
+	const bool bJustGainedSubBinding = bHasSubmarineBindingNow && !bHadSubmarineBindingLastTick;
+
+	if (bJustGainedSubBinding && !IsGridAuthoritative() && CharacterOwner)
 	{
 		if (USubInteriorFrameComponent* Frame = GetInteriorFrame())
 		{
@@ -55,31 +81,34 @@ void USubCrewMovementComponent::TickComponent(float DeltaTime, ELevelTick TickTy
 			const float LocalYaw = FRotator::NormalizeAxis(WorldRot.Yaw - SubTransform.Rotator().Yaw);
 			GridSpaceTransform = FTransform(FRotator(0.f, LocalYaw, 0.f).Quaternion(), LocalPos);
 			LastSubWorldTransform = SubTransform;
-			bIsGridSpaceAuthority = true;
+			SetEmbarkState(ECrewEmbarkState::Embarked);
 
 			UE_LOG(
 				LogSubCrewMovement,
 				Log,
-				TEXT("GridAuthority ON (lazy) | Sub=%s | LocalPos=%s | LocalYaw=%.2f"),
+				TEXT("GridAuthority ON (lazy edge) | Sub=%s | LocalPos=%s | LocalYaw=%.2f"),
 				*GetNameSafe(Frame->GetOwner()),
 				*LocalPos.ToCompactString(),
 				LocalYaw);
 		}
 	}
-	else if (!IsEmbarked() && bIsGridSpaceAuthority)
+	else if (!bHasSubmarineBindingNow && IsGridAuthoritative())
 	{
-		bIsGridSpaceAuthority = false;
-		UE_LOG(LogSubCrewMovement, Log, TEXT("GridAuthority OFF (lazy) | embark ended"));
+		// Defensive: lost the sub pointer while still flagged grid-authoritative. Reset to Outside.
+		SetEmbarkState(ECrewEmbarkState::Outside);
+		UE_LOG(LogSubCrewMovement, Log, TEXT("GridAuthority OFF (sub lost) | submarine context ended"));
 	}
 
+	bHadSubmarineBindingLastTick = bHasSubmarineBindingNow;
+
 	// Grid-space authority owns yaw while embarked; CMC's base-rotation carry is bypassed.
-	bIgnoreBaseRotation = bIsGridSpaceAuthority;
+	bIgnoreBaseRotation = IsGridAuthoritative();
 
 	// ─── REBASE (pre-CMC) ───
 	// Teleport the capsule to the expected world pose so CMC sees a static world
 	// around the character. Must use UpdatedComponent (not SetActorLocation) to
 	// avoid triggering overlap/move events before the real CMC tick.
-	if (bIsGridSpaceAuthority && IsEmbarked() && UpdatedComponent && CharacterOwner)
+	if (IsGridAuthoritative() && HasSubmarineBinding() && UpdatedComponent && CharacterOwner)
 	{
 		if (USubInteriorFrameComponent* Frame = GetInteriorFrame())
 		{
@@ -121,13 +150,13 @@ void USubCrewMovementComponent::TickComponent(float DeltaTime, ELevelTick TickTy
 
 	TickPosture(DeltaTime);
 
-	if (IsEmbarked())
+	if (HasSubmarineBinding())
 	{
 		// ─── EXTRACT (post-CMC) ───
 		// The CMC has applied input, gravity, and collision resolution in world space.
 		// Project the new world pose back into sub-local space; that becomes the
 		// authoritative GridSpaceTransform for next frame's rebase.
-		if (bIsGridSpaceAuthority && CharacterOwner)
+		if (IsGridAuthoritative() && CharacterOwner)
 		{
 			if (USubInteriorFrameComponent* Frame = GetInteriorFrame())
 			{
@@ -193,7 +222,7 @@ void USubCrewMovementComponent::UpdateBasedMovement(float DeltaSeconds)
 {
 	// In grid-space authority mode the rebase transports the crew; CMC's
 	// base-carry must not also apply the base delta or we double-advance.
-	if (bIsGridSpaceAuthority)
+	if (IsGridAuthoritative())
 	{
 		return;
 	}
@@ -203,11 +232,51 @@ void USubCrewMovementComponent::UpdateBasedMovement(float DeltaSeconds)
 void USubCrewMovementComponent::UpdateBasedRotation(FRotator& FinalRotation, const FRotator& ReducedRotation)
 {
 	// Same rule for rotation: the rebase owns the capsule yaw relative to the sub.
-	if (bIsGridSpaceAuthority)
+	if (IsGridAuthoritative())
 	{
 		return;
 	}
 	Super::UpdateBasedRotation(FinalRotation, ReducedRotation);
+}
+
+void USubCrewMovementComponent::SmoothCorrection(const FVector& OldLocation, const FQuat& OldRotation, const FVector& NewLocation, const FQuat& NewRotation)
+{
+	// Don't seed a MeshTranslationOffset while grid-authoritative. The rebase places the
+	// actor at SubTransform × GridSpaceTransform each tick, which intentionally diverges
+	// from ReplicatedMovement.Location (= server's world-space pose). If we let CMC build
+	// an offset from that delta, SmoothClientPosition decays it toward zero each frame and
+	// the mesh oscillates against the rebase → jitter on simulated-proxy peers. No-op in
+	// grid mode prevents the offset from ever being created; mesh tracks actor exactly.
+	if (IsGridAuthoritative())
+	{
+		return;
+	}
+	Super::SmoothCorrection(OldLocation, OldRotation, NewLocation, NewRotation);
+}
+
+bool USubCrewMovementComponent::ServerCheckClientError(
+	float ClientTimeStamp,
+	float DeltaTime,
+	const FVector& Accel,
+	const FVector& ClientWorldLocation,
+	const FVector& RelativeClientLocation,
+	UPrimitiveComponent* ClientMovementBase,
+	FName ClientBaseBoneName,
+	uint8 ClientMovementMode)
+{
+	// World-space error check is meaningless when the crew is embarked: client reports
+	// SubXf_client_interp * GridSpaceTransform_client, server computes SubXf_server_sim *
+	// GridSpaceTransform_server, these ALWAYS differ by the sub interp lag. Bypassing the
+	// check trusts the client's reported pose. Safe in cooperative FP; Phase 3.2 replaces
+	// this with FSavedMove_Character + local-space validation.
+	if (IsGridAuthoritative())
+	{
+		return false;
+	}
+	return Super::ServerCheckClientError(
+		ClientTimeStamp, DeltaTime, Accel,
+		ClientWorldLocation, RelativeClientLocation,
+		ClientMovementBase, ClientBaseBoneName, ClientMovementMode);
 }
 
 ASubmarineBase* USubCrewMovementComponent::GetCurrentSubmarine() const
@@ -230,9 +299,85 @@ USubInteriorFrameComponent* USubCrewMovementComponent::GetInteriorFrame() const
 	return nullptr;
 }
 
-bool USubCrewMovementComponent::IsEmbarked() const
+bool USubCrewMovementComponent::HasSubmarineBinding() const
 {
 	return GetInteriorFrame() != nullptr;
+}
+
+void USubCrewMovementComponent::SetEmbarkState(ECrewEmbarkState NewState)
+{
+	if (EmbarkState == NewState)
+	{
+		return;
+	}
+
+	const ECrewEmbarkState OldState = EmbarkState;
+	EmbarkState = NewState;
+
+	UE_LOG(
+		LogSubCrewMovement,
+		Log,
+		TEXT("EmbarkState: %d -> %d"),
+		static_cast<int32>(OldState),
+		static_cast<int32>(NewState));
+}
+
+void USubCrewMovementComponent::SetPendingHandoff(ECrewHandoffKind Kind)
+{
+	PendingHandoff = Kind;
+}
+
+ECrewHandoffKind USubCrewMovementComponent::ConsumePendingHandoff()
+{
+	const ECrewHandoffKind Result = PendingHandoff;
+	PendingHandoff = ECrewHandoffKind::None;
+	return Result;
+}
+
+FNetworkPredictionData_Client* USubCrewMovementComponent::GetPredictionData_Client() const
+{
+	check(CharacterOwner != nullptr);
+	if (ClientPredictionData == nullptr)
+	{
+		USubCrewMovementComponent* MutableThis = const_cast<USubCrewMovementComponent*>(this);
+		MutableThis->ClientPredictionData = new FNetworkPredictionData_Client_SubCrew(*this);
+	}
+	return ClientPredictionData;
+}
+
+void USubCrewMovementComponent::MoveAutonomous(float ClientTimeStamp, float DeltaTime, uint8 CompressedFlags, const FVector& NewAccel)
+{
+	Super::MoveAutonomous(ClientTimeStamp, DeltaTime, CompressedFlags, NewAccel);
+
+	// Server-side: after CMC processes the client's move, apply the client's reported
+	// grid-space state directly (trust model for FP co-op — production would bound the
+	// per-tick delta). The replicated UPROPERTY(COND_SkipOwner) then broadcasts to peers.
+	if (CharacterOwner && CharacterOwner->GetLocalRole() == ROLE_Authority && !CharacterOwner->IsLocallyControlled())
+	{
+		if (const FCharacterNetworkMoveData* CurrentMoveData = GetCurrentNetworkMoveData())
+		{
+			const FCharacterNetworkMoveData_SubCrew* SubMoveData = static_cast<const FCharacterNetworkMoveData_SubCrew*>(CurrentMoveData);
+			GridSpaceTransform = SubMoveData->GridSpaceTransform;
+
+			const ECrewEmbarkState ReportedState = static_cast<ECrewEmbarkState>(SubMoveData->EmbarkStateByte);
+			if (ReportedState != EmbarkState)
+			{
+				SetEmbarkState(ReportedState);
+			}
+
+			// Handoff event bit: server mirrors the state flip already fired by the client.
+			// Velocity blending was applied client-side; we just ensure the server state converges.
+			if (SubMoveData->Handoff != ECrewHandoffKind::None)
+			{
+				UE_LOG(
+					LogSubCrewMovement,
+					Log,
+					TEXT("ServerMove received handoff event | Kind=%d | Crew=%s"),
+					static_cast<int32>(SubMoveData->Handoff),
+					*GetNameSafe(CharacterOwner));
+			}
+		}
+	}
 }
 
 bool USubCrewMovementComponent::IsAcceptedEmbarkedBase(const UPrimitiveComponent* CandidateBase) const
@@ -273,10 +418,10 @@ void USubCrewMovementComponent::UpdateRelativeState(float DeltaTime)
 	// derive Rel* directly from it rather than re-projecting world state.
 	// Legacy path (not authority) keeps the previous WorldToLocal derivation
 	// so off-sub moving bases continue to report a Rel pose.
-	const FVector NewRelativeLocation = bIsGridSpaceAuthority
+	const FVector NewRelativeLocation = IsGridAuthoritative()
 		? GridSpaceTransform.GetLocation()
 		: Frame->WorldToLocal(CharacterOwner->GetActorLocation());
-	const FRotator NewRelativeRotation = bIsGridSpaceAuthority
+	const FRotator NewRelativeRotation = IsGridAuthoritative()
 		? GridSpaceTransform.Rotator()
 		: Frame->WorldToLocalRotation(CharacterOwner->GetActorRotation());
 
@@ -319,12 +464,12 @@ void USubCrewMovementComponent::UpdateRelativeState(float DeltaTime)
 			RelFrameDeltaCm,
 			RelSpeedCmPerSec,
 			bJitterSpike ? TEXT(" [SPIKE]") : TEXT(""),
-			bIsGridSpaceAuthority ? TEXT("") : TEXT(" [LegacyBaseCarry]"),
+			IsGridAuthoritative() ? TEXT("") : TEXT(" [LegacyBaseCarry]"),
 			*MovementModeStr,
 			IsFalling() ? 1 : 0,
 			*GetNameSafe(Base),
 			Frame->IsFrameValid() ? 1 : 0,
-			bIsGridSpaceAuthority ? 1 : 0);
+			IsGridAuthoritative() ? 1 : 0);
 		if (bJitterSpike)
 		{
 			UE_LOG(
@@ -337,7 +482,7 @@ void USubCrewMovementComponent::UpdateRelativeState(float DeltaTime)
 				*MovementModeStr,
 				IsFalling() ? 1 : 0,
 				*GetNameSafe(Base),
-				bIsGridSpaceAuthority ? 1 : 0);
+				IsGridAuthoritative() ? 1 : 0);
 		}
 	}
 
@@ -373,9 +518,9 @@ void USubCrewMovementComponent::UpdateSupportState()
 	LastEmbarkedFloorComponent = CurrentFloor.HitResult.GetComponent();
 	bHasValidEmbarkedFloor = CurrentFloor.IsWalkableFloor();
 	bHasAcceptedEmbarkedBase = IsAcceptedEmbarkedBase(MovementBase);
-	bNeedsEmbarkedFloorRecovery = IsEmbarked() && (!bHasValidEmbarkedFloor || !bHasAcceptedEmbarkedBase || !MovementBase);
+	bNeedsEmbarkedFloorRecovery = HasSubmarineBinding() && (!bHasValidEmbarkedFloor || !bHasAcceptedEmbarkedBase || !MovementBase);
 
-	if (!IsEmbarked())
+	if (!HasSubmarineBinding())
 	{
 		SupportQuality01 = 0.f;
 	}
@@ -398,7 +543,7 @@ void USubCrewMovementComponent::AttemptEmbarkedFloorRecovery(float DeltaTime)
 	// In grid-space authority mode the rebase guarantees the player is at the
 	// expected pose each tick, so the recovery sweep (which also wipes Velocity
 	// via RefreshEmbarkedFlooring) would fight the CMC's legitimate motion.
-	if (bIsGridSpaceAuthority)
+	if (IsGridAuthoritative())
 	{
 		FloorRecoveryTimer = 0.f;
 		return;
@@ -491,7 +636,7 @@ void USubCrewMovementComponent::UpdateBraceState()
 	NearbyBraceWorldNormal = FVector::ZeroVector;
 	BraceQueryOrigin = FVector::ZeroVector;
 
-	if (!CharacterOwner || !IsEmbarked() || !GetWorld())
+	if (!CharacterOwner || !HasSubmarineBinding() || !GetWorld())
 	{
 		return;
 	}
@@ -588,59 +733,109 @@ void USubCrewMovementComponent::CheckAndLogBaseChange()
 
 void USubCrewMovementComponent::DebugDrawState()
 {
-	const USubInteriorFrameComponent* Frame = GetInteriorFrame();
-	if (!GetDefault<USub3DDebugSettings>()->bDrawCrewMovement || !Frame || !Frame->IsFrameValid() || !CharacterOwner || !GetWorld())
+	const USub3DDebugSettings* Settings = GetDefault<USub3DDebugSettings>();
+	if (!CharacterOwner || !GetWorld())
 	{
 		return;
 	}
 
-	const FTransform SubTransform = Frame->GetSubTransform();
-	const FVector FrameOrigin = SubTransform.GetLocation();
-	const FVector ExpectedWorldPosition = Frame->LocalToWorld(RelativeLocation);
-	const FVector ActualWorldPosition = CharacterOwner->GetActorLocation();
-	const FColor SupportColor = bHasAcceptedEmbarkedBase ? FColor::Green : (bHasValidEmbarkedFloor ? FColor::Yellow : FColor::Red);
+	const USubInteriorFrameComponent* Frame = GetInteriorFrame();
+	const bool bHasValidFrame = Frame && Frame->IsFrameValid();
+	const FTransform SubTransform = bHasValidFrame ? Frame->GetSubTransform() : FTransform::Identity;
 
-	DrawDebugSphere(GetWorld(), FrameOrigin, 24.f, 12, FColor::Green, false, 0.f, 0, 1.5f);
-	DrawDebugSphere(GetWorld(), ExpectedWorldPosition, 16.f, 12, FColor::Cyan, false, 0.f, 0, 1.25f);
-	DrawDebugSphere(GetWorld(), ActualWorldPosition, 16.f, 12, FColor::Yellow, false, 0.f, 0, 1.25f);
-	DrawDebugSphere(GetWorld(), ActualWorldPosition + FVector(0.f, 0.f, 18.f), 10.f, 10, SupportColor, false, 0.f, 0, 1.5f);
-	DrawDebugLine(GetWorld(), ExpectedWorldPosition, ActualWorldPosition, FColor::Red, false, 0.f, 0, 1.25f);
-	DrawDebugDirectionalArrow(
-		GetWorld(),
-		FrameOrigin,
-		FrameOrigin + (SubTransform.GetUnitAxis(EAxis::X) * 100.f),
-		20.f,
-		FColor::Blue,
-		false,
-		0.f,
-		0,
-		2.f);
-
-	if (!BraceQueryOrigin.IsNearlyZero())
+	// Sphere / line debug gizmos need a valid Frame to have a meaningful reference frame.
+	// HUD on-screen messages work regardless (useful for EVA validation).
+	if (bHasValidFrame && Settings->bDrawCrewMovement)
 	{
-		const FVector ForwardEnd = BraceQueryOrigin + (CharacterOwner->GetActorForwardVector() * BraceProbeDistanceCm);
-		const FVector RightEnd = BraceQueryOrigin + (CharacterOwner->GetActorRightVector() * BraceProbeDistanceCm);
-		const FVector LeftEnd = BraceQueryOrigin - (CharacterOwner->GetActorRightVector() * BraceProbeDistanceCm);
-		DrawDebugSphere(GetWorld(), BraceQueryOrigin, 8.f, 8, FColor::Silver, false, 0.f, 0, 1.25f);
-		DrawDebugLine(GetWorld(), BraceQueryOrigin, ForwardEnd, FColor::White, false, 0.f, 0, 1.f);
-		DrawDebugLine(GetWorld(), BraceQueryOrigin, RightEnd, FColor::White, false, 0.f, 0, 1.f);
-		DrawDebugLine(GetWorld(), BraceQueryOrigin, LeftEnd, FColor::White, false, 0.f, 0, 1.f);
-	}
+		const FVector FrameOrigin = SubTransform.GetLocation();
+		const FVector ExpectedWorldPosition = Frame->LocalToWorld(RelativeLocation);
+		const FVector ActualWorldPosition = CharacterOwner->GetActorLocation();
+		const FColor SupportColor = bHasAcceptedEmbarkedBase ? FColor::Green : (bHasValidEmbarkedFloor ? FColor::Yellow : FColor::Red);
 
-	if (bHasNearbyBraceSupport)
-	{
-		DrawDebugSphere(GetWorld(), NearbyBraceWorldLocation, 10.f, 10, FColor::Orange, false, 0.f, 0, 1.5f);
+		DrawDebugSphere(GetWorld(), FrameOrigin, 24.f, 12, FColor::Green, false, 0.f, 0, 1.5f);
+		DrawDebugSphere(GetWorld(), ExpectedWorldPosition, 16.f, 12, FColor::Cyan, false, 0.f, 0, 1.25f);
+		DrawDebugSphere(GetWorld(), ActualWorldPosition, 16.f, 12, FColor::Yellow, false, 0.f, 0, 1.25f);
+		DrawDebugSphere(GetWorld(), ActualWorldPosition + FVector(0.f, 0.f, 18.f), 10.f, 10, SupportColor, false, 0.f, 0, 1.5f);
+		DrawDebugLine(GetWorld(), ExpectedWorldPosition, ActualWorldPosition, FColor::Red, false, 0.f, 0, 1.25f);
 		DrawDebugDirectionalArrow(
 			GetWorld(),
-			NearbyBraceWorldLocation,
-			NearbyBraceWorldLocation + (NearbyBraceWorldNormal * 40.f),
-			10.f,
-			FColor::Orange,
+			FrameOrigin,
+			FrameOrigin + (SubTransform.GetUnitAxis(EAxis::X) * 100.f),
+			20.f,
+			FColor::Blue,
 			false,
 			0.f,
 			0,
-			1.5f);
-		DrawDebugLine(GetWorld(), BraceQueryOrigin, NearbyBraceWorldLocation, FColor::Orange, false, 0.f, 0, 1.5f);
+			2.f);
+
+		if (!BraceQueryOrigin.IsNearlyZero())
+		{
+			const FVector ForwardEnd = BraceQueryOrigin + (CharacterOwner->GetActorForwardVector() * BraceProbeDistanceCm);
+			const FVector RightEnd = BraceQueryOrigin + (CharacterOwner->GetActorRightVector() * BraceProbeDistanceCm);
+			const FVector LeftEnd = BraceQueryOrigin - (CharacterOwner->GetActorRightVector() * BraceProbeDistanceCm);
+			DrawDebugSphere(GetWorld(), BraceQueryOrigin, 8.f, 8, FColor::Silver, false, 0.f, 0, 1.25f);
+			DrawDebugLine(GetWorld(), BraceQueryOrigin, ForwardEnd, FColor::White, false, 0.f, 0, 1.f);
+			DrawDebugLine(GetWorld(), BraceQueryOrigin, RightEnd, FColor::White, false, 0.f, 0, 1.f);
+			DrawDebugLine(GetWorld(), BraceQueryOrigin, LeftEnd, FColor::White, false, 0.f, 0, 1.f);
+		}
+
+		if (bHasNearbyBraceSupport)
+		{
+			DrawDebugSphere(GetWorld(), NearbyBraceWorldLocation, 10.f, 10, FColor::Orange, false, 0.f, 0, 1.5f);
+			DrawDebugDirectionalArrow(
+				GetWorld(),
+				NearbyBraceWorldLocation,
+				NearbyBraceWorldLocation + (NearbyBraceWorldNormal * 40.f),
+				10.f,
+				FColor::Orange,
+				false,
+				0.f,
+				0,
+				1.5f);
+			DrawDebugLine(GetWorld(), BraceQueryOrigin, NearbyBraceWorldLocation, FColor::Orange, false, 0.f, 0, 1.5f);
+		}
+	}
+
+	// ─── On-screen validation HUD — (MovementState, EnvironmentContext) ───
+	// Runs independently of submarine binding — the HUD must stay visible during EVA so
+	// we can verify that the state machine actually transitioned to Outside after a hull
+	// boundary crossing. When there's no sub binding, Grid/Sub lines show <n/a>.
+	if (Settings->bDrawCrewGridAuthority && GEngine && CharacterOwner->IsLocallyControlled())
+	{
+		const FVector WorldPos = CharacterOwner->GetActorLocation();
+		const float WorldYaw = CharacterOwner->GetActorRotation().Yaw;
+
+		const ASubCrewCharacter* Crew = Cast<ASubCrewCharacter>(CharacterOwner);
+		const UCompartmentVolumeComponent* Comp = Crew ? Crew->CurrentCompartment.Get() : nullptr;
+
+		const FString StateStr = UEnum::GetValueAsString(EmbarkState);
+		const FString CompStr = Comp ? Comp->CompartmentId.ToString() : FString(TEXT("<ocean>"));
+		const FString ModeStr = GetMovementName();
+		const FString SubBindStr = bHasValidFrame ? FString(TEXT("bound")) : FString(TEXT("unbound"));
+
+		const float DisplayTime = 0.f;  // Refreshed every tick via stable keys.
+		GEngine->AddOnScreenDebugMessage(1001, DisplayTime, FColor::Cyan,
+			FString::Printf(TEXT("EmbarkState : %s   |   Mode : %s   |   Compartment : %s   |   Sub : %s"),
+				*StateStr, *ModeStr, *CompStr, *SubBindStr));
+
+		if (bHasValidFrame)
+		{
+			const FVector LocalPos = GridSpaceTransform.GetLocation();
+			const float LocalYaw = GridSpaceTransform.Rotator().Yaw;
+			const FVector SubPos = SubTransform.GetLocation();
+			const float SubYaw = SubTransform.Rotator().Yaw;
+			GEngine->AddOnScreenDebugMessage(1002, DisplayTime, FColor::Cyan,
+				FString::Printf(TEXT("Grid  : X=%8.1f  Y=%8.1f  Z=%8.1f  Yaw=%7.2f"), LocalPos.X, LocalPos.Y, LocalPos.Z, LocalYaw));
+			GEngine->AddOnScreenDebugMessage(1004, DisplayTime, FColor::Cyan,
+				FString::Printf(TEXT("Sub   : X=%8.1f  Y=%8.1f  Z=%8.1f  Yaw=%7.2f"), SubPos.X, SubPos.Y, SubPos.Z, SubYaw));
+		}
+		else
+		{
+			GEngine->AddOnScreenDebugMessage(1002, DisplayTime, FColor::Yellow, TEXT("Grid  : <n/a — no sub binding>"));
+			GEngine->AddOnScreenDebugMessage(1004, DisplayTime, FColor::Yellow, TEXT("Sub   : <n/a — no sub binding>"));
+		}
+		GEngine->AddOnScreenDebugMessage(1003, DisplayTime, FColor::Cyan,
+			FString::Printf(TEXT("World : X=%8.1f  Y=%8.1f  Z=%8.1f  Yaw=%7.2f"), WorldPos.X, WorldPos.Y, WorldPos.Z, WorldYaw));
 	}
 }
 
@@ -669,8 +864,9 @@ void USubCrewMovementComponent::LogPeriodicState(float DeltaTime)
 	UE_LOG(
 		LogSubCrewMovement,
 		Log,
-		TEXT("CrewState | Embarked=%d | Mode=%s | Base=%s on %s | WorldLoc=%s | RelLoc=%s | RelRot=%s | SubLoc=%s | FrameDeltaLoc=%s | FrameDeltaRot=%s | SupportFloor=%d | AcceptedBase=%d | Recover=%d | SupportQ=%.2f | Brace=%d | BraceDist=%.1f | LocalVel=%s | LocalAccel=%s | LocalAngVel=%s | LocalAngAccel=%s"),
-		IsEmbarked() ? 1 : 0,
+		TEXT("CrewState | SubBound=%d | EmbarkState=%d | Mode=%s | Base=%s on %s | WorldLoc=%s | RelLoc=%s | RelRot=%s | SubLoc=%s | FrameDeltaLoc=%s | FrameDeltaRot=%s | SupportFloor=%d | AcceptedBase=%d | Recover=%d | SupportQ=%.2f | Brace=%d | BraceDist=%.1f | LocalVel=%s | LocalAccel=%s | LocalAngVel=%s | LocalAngAccel=%s"),
+		HasSubmarineBinding() ? 1 : 0,
+		static_cast<int32>(EmbarkState),
 		*GetMovementName(),
 		*GetNameSafe(CurrentBase),
 		*GetNameSafe(CurrentBase ? CurrentBase->GetOwner() : nullptr),
@@ -978,7 +1174,7 @@ void USubCrewMovementComponent::UpdateHandIKProbes()
 bool USubCrewMovementComponent::ShouldEvaluateHandIK() const
 {
 	const ASubCrewCharacter* Crew = Cast<ASubCrewCharacter>(CharacterOwner);
-	if (!CharacterOwner || !IsEmbarked() || (Crew && Crew->bIsSwimmingByFlood))
+	if (!CharacterOwner || !HasSubmarineBinding() || (Crew && Crew->bIsSwimmingByFlood))
 	{
 		return false;
 	}
@@ -1031,4 +1227,8 @@ void USubCrewMovementComponent::GetLifetimeReplicatedProps(TArray<FLifetimePrope
 	Super::GetLifetimeReplicatedProps(OutLifetimeProps);
 	DOREPLIFETIME(USubCrewMovementComponent, PostureAlpha);
 	DOREPLIFETIME(USubCrewMovementComponent, bIsRunning);
+	// Owner computes GridSpaceTransform / EmbarkState locally via its own rebase + hull boundary;
+	// non-owning clients get the server-authoritative values for their peer-crew rendering.
+	DOREPLIFETIME_CONDITION(USubCrewMovementComponent, GridSpaceTransform, COND_SkipOwner);
+	DOREPLIFETIME_CONDITION(USubCrewMovementComponent, EmbarkState, COND_SkipOwner);
 }

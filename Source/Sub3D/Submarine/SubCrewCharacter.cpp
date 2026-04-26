@@ -1,5 +1,9 @@
 #include "SubCrewCharacter.h"
 #include "Sub3DDebugSettings.h"
+#include "CompartmentVolumeComponent.h"
+#include "CrewUnderwaterPPComponent.h"
+#include "SubCrewNetTypes.h"
+#include "SubHullBoundaryComponent.h"
 #include "Engine/DamageEvents.h"
 #include "SubmarineBase.h"
 #include "SubCrewMovementComponent.h"
@@ -109,10 +113,14 @@ ASubCrewCharacter::ASubCrewCharacter(const FObjectInitializer& ObjectInitializer
 
 	InteractionComponent = CreateDefaultSubobject<USubInteractionComponent>(TEXT("InteractionComponent"));
 
+	UnderwaterPP = CreateDefaultSubobject<UCrewUnderwaterPPComponent>(TEXT("UnderwaterPP"));
+
 	if (UCapsuleComponent* Capsule = GetCapsuleComponent())
 	{
 		Capsule->SetCollisionResponseToChannel(ECC_GameTraceChannel1, ECR_Block);
 		Capsule->SetCollisionResponseToChannel(ECC_GameTraceChannel2, ECR_Block);
+		// Env axis: capsule reports overlap on compartment / hull-boundary probes.
+		Capsule->SetCollisionResponseToChannel(ECC_CompartmentProbe, ECR_Overlap);
 	}
 
 	GetCharacterMovement()->MaxWalkSpeed = 300.f;
@@ -121,9 +129,8 @@ ASubCrewCharacter::ASubCrewCharacter(const FObjectInitializer& ObjectInitializer
 	GetCharacterMovement()->bOrientRotationToMovement = false;
 	GetCharacterMovement()->bEnablePhysicsInteraction = false;
 	// bIgnoreBaseRotation is toggled per-tick by USubCrewMovementComponent based
-	// on IsEmbarked(): true while on the sub (custom yaw compensation drives the
-	// rotation), false otherwise so stock based-rotation still works on any other
-	// moving base in the world.
+	// on grid authority / submarine binding. This keeps stock based-rotation for
+	// any unrelated moving base in the world.
 	GetCharacterMovement()->bIgnoreBaseRotation = false;
 	GetCharacterMovement()->bAlwaysCheckFloor = true;
 
@@ -158,7 +165,201 @@ void ASubCrewCharacter::BeginPlay()
 	}
 
 	UpdateLocalHeadVisibility();
-	EnsureEmbarkedSubmarineBinding(TEXT("BeginPlay"));
+
+	// Hand the designer-configured PP material to the underwater component (if one was set
+	// on the BP class default). The component itself handles creation of its PostProcessComponent.
+	if (UnderwaterPP && DefaultUnderwaterPPMaterial)
+	{
+		UnderwaterPP->UnderwaterPostProcessMaterial = DefaultUnderwaterPPMaterial;
+	}
+
+	if (UCapsuleComponent* Capsule = GetCapsuleComponent())
+	{
+		Capsule->OnComponentBeginOverlap.AddDynamic(this, &ASubCrewCharacter::OnCompartmentOverlapBegin);
+		Capsule->OnComponentEndOverlap.AddDynamic(this, &ASubCrewCharacter::OnCompartmentOverlapEnd);
+
+		// Overlap delegates fire only on transitions. At BeginPlay the capsule may already
+		// be overlapping a compartment volume (spawn inside MainDeck) — OnBeginOverlap
+		// already fired before we bound, so seed ActiveCompartmentOverlaps manually.
+		TArray<UPrimitiveComponent*> OverlappingComponents;
+		Capsule->GetOverlappingComponents(OverlappingComponents);
+		for (UPrimitiveComponent* Comp : OverlappingComponents)
+		{
+			if (UCompartmentVolumeComponent* Vol = Cast<UCompartmentVolumeComponent>(Comp))
+			{
+				ActiveCompartmentOverlaps.Add(Vol);
+			}
+		}
+		if (ActiveCompartmentOverlaps.Num() > 0)
+		{
+			RecomputeCurrentCompartment();
+		}
+	}
+}
+
+void ASubCrewCharacter::OnCompartmentOverlapBegin(
+	UPrimitiveComponent* /*OverlappedComponent*/,
+	AActor* /*OtherActor*/,
+	UPrimitiveComponent* OtherComp,
+	int32 /*OtherBodyIndex*/,
+	bool /*bFromSweep*/,
+	const FHitResult& /*SweepResult*/)
+{
+	if (UCompartmentVolumeComponent* Vol = Cast<UCompartmentVolumeComponent>(OtherComp))
+	{
+		ActiveCompartmentOverlaps.Add(Vol);
+		RecomputeCurrentCompartment();
+	}
+}
+
+void ASubCrewCharacter::OnCompartmentOverlapEnd(
+	UPrimitiveComponent* /*OverlappedComponent*/,
+	AActor* /*OtherActor*/,
+	UPrimitiveComponent* OtherComp,
+	int32 /*OtherBodyIndex*/)
+{
+	if (UCompartmentVolumeComponent* Vol = Cast<UCompartmentVolumeComponent>(OtherComp))
+	{
+		ActiveCompartmentOverlaps.Remove(Vol);
+		RecomputeCurrentCompartment();
+	}
+}
+
+void ASubCrewCharacter::RecomputeCurrentCompartment()
+{
+	const FVector CapCenter = GetActorLocation();
+	UCompartmentVolumeComponent* Best = nullptr;
+	float BestDistSq = TNumericLimits<float>::Max();
+	for (const TWeakObjectPtr<UCompartmentVolumeComponent>& W : ActiveCompartmentOverlaps)
+	{
+		UCompartmentVolumeComponent* V = W.Get();
+		if (!V)
+		{
+			continue;
+		}
+		const float DistSq = FVector::DistSquared(V->GetComponentLocation(), CapCenter);
+		if (DistSq < BestDistSq)
+		{
+			BestDistSq = DistSq;
+			Best = V;
+		}
+	}
+
+	UCompartmentVolumeComponent* Prev = CurrentCompartment.Get();
+	if (Prev != Best)
+	{
+		CurrentCompartment = Best;
+		// Keep the replicated id in sync so peer clients resolve the same compartment.
+		CurrentCompartmentId = Best ? Best->CompartmentId : NAME_None;
+		UE_LOG(
+			LogSubCrew,
+			Log,
+			TEXT("CurrentCompartment: %s -> %s"),
+			Prev ? *Prev->CompartmentId.ToString() : TEXT("<null>"),
+			Best ? *Best->CompartmentId.ToString() : TEXT("<null>"));
+	}
+}
+
+void ASubCrewCharacter::OnRep_CurrentCompartmentId()
+{
+	// Non-owning client path: resolve the compartment pointer from the replicated id
+	// by iterating the current sub's compartment volume children.
+	UCompartmentVolumeComponent* Resolved = nullptr;
+	if (CurrentCompartmentId != NAME_None && CurrentSubmarine)
+	{
+		TArray<UCompartmentVolumeComponent*> Volumes;
+		CurrentSubmarine->GetComponents<UCompartmentVolumeComponent>(Volumes);
+		for (UCompartmentVolumeComponent* Vol : Volumes)
+		{
+			if (Vol && Vol->CompartmentId == CurrentCompartmentId)
+			{
+				Resolved = Vol;
+				break;
+			}
+		}
+	}
+	CurrentCompartment = Resolved;
+}
+
+bool ASubCrewCharacter::IsInWater() const
+{
+	if (!CurrentCompartment.IsValid())
+	{
+		// Ocean = infiniment inondé.
+		return true;
+	}
+	// In-compartment : reuse the already-computed immersion (UpdateEnvironmentalEffects).
+	// Proper local-Z comparison vs compartment WaterHeightCm is a post-FP refinement.
+	return CurrentWaterImmersion01 > 0.01f;
+}
+
+bool ASubCrewCharacter::HasOxygen() const
+{
+	const UCompartmentVolumeComponent* Vol = CurrentCompartment.Get();
+	// FP stub : ocean = no oxygen, in-compartment = O2Level01 (stubbed to 1.0 until life-support sim).
+	return Vol != nullptr && Vol->O2Level01 > 0.f;
+}
+
+void ASubCrewCharacter::HandleHullCrossing(USubHullBoundaryComponent* Boundary, bool bOutgoing)
+{
+	USubCrewMovementComponent* CrewMov = GetCrewMovement();
+	ASubmarineBase* Sub = CurrentSubmarine;
+	if (!CrewMov || !Sub || !Sub->InteriorFrame)
+	{
+		return;
+	}
+
+	const FTransform SubXf = Sub->InteriorFrame->GetSubTransform();
+	const FVector V_sub_world = Sub->SubMovement ? Sub->SubMovement->Velocity : FVector::ZeroVector;
+	const FVector V_crew_world = CrewMov->Velocity;
+
+	if (bOutgoing)
+	{
+		// Embarked -> Outside: the capsule is already at the correct world pose (rebase put it there).
+		// Inject the sub's transport velocity so the crew keeps world momentum continuously.
+		CrewMov->Velocity = V_crew_world + V_sub_world;
+		CrewMov->SetEmbarkState(ECrewEmbarkState::Outside);
+		CurrentCompartment = nullptr;
+
+		// FP EVA: no ocean water-volume in the level yet, so force Flying + zero gravity. Once
+		// a proper PhysicsVolume (water=true) is added, swap this for MOVE_Swimming with buoyancy.
+		CrewMov->SetMovementMode(MOVE_Flying);
+		CrewMov->GravityScale = 0.f;
+
+		// Mark the handoff event so FSavedMove_SubCrew captures it into the next move packet;
+		// the server mirrors the state flip on receive even if its own boundary missed the crossing.
+		CrewMov->SetPendingHandoff(ECrewHandoffKind::Outgoing);
+	}
+	else
+	{
+		// Outside -> Embarked: seed GridSpaceTransform from the current world pose and subtract
+		// sub velocity so the local-frame velocity reads as "crew motion relative to sub".
+		const FVector LocalPos = SubXf.InverseTransformPosition(GetActorLocation());
+		const float LocalYaw = FRotator::NormalizeAxis(GetActorRotation().Yaw - SubXf.Rotator().Yaw);
+		CrewMov->GridSpaceTransform = FTransform(FRotator(0.f, LocalYaw, 0.f).Quaternion(), LocalPos);
+		CrewMov->LastSubWorldTransform = SubXf;
+		CrewMov->Velocity = V_crew_world - V_sub_world;
+		CrewMov->SetEmbarkState(ECrewEmbarkState::Embarked);
+		// CurrentCompartment is updated by the compartment overlap system when the capsule
+		// reaches a UCompartmentVolumeComponent. The boundary's InsideCompartmentId is a hint
+		// but not the authority.
+
+		// Restore walking + gravity so the crew lands on the sub floor.
+		CrewMov->SetMovementMode(MOVE_Walking);
+		CrewMov->GravityScale = 1.f;
+
+		// Mark the handoff event so the server converges on the Outside->Embarked state.
+		CrewMov->SetPendingHandoff(ECrewHandoffKind::Incoming);
+	}
+
+	UE_LOG(
+		LogSubCrew,
+		Log,
+		TEXT("HullCrossing | Boundary=%s | bOutgoing=%d | V_sub=%s | V_new=%s"),
+		Boundary ? *Boundary->GetName() : TEXT("<null>"),
+		bOutgoing ? 1 : 0,
+		*V_sub_world.ToCompactString(),
+		*CrewMov->Velocity.ToCompactString());
 }
 
 USubCrewMovementComponent* ASubCrewCharacter::GetCrewMovement() const
@@ -216,7 +417,6 @@ float ASubCrewCharacter::GetCurrentPostureCameraZ() const
 void ASubCrewCharacter::Tick(float DeltaSeconds)
 {
 	Super::Tick(DeltaSeconds);
-	EnsureEmbarkedSubmarineBinding(TEXT("Tick"));
 	UpdateCameraMode(DeltaSeconds);
 	UpdateEnvironmentalEffects(DeltaSeconds);
 
@@ -246,6 +446,9 @@ void ASubCrewCharacter::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& Ou
 	DOREPLIFETIME(ASubCrewCharacter, CurrentSubmarine);
 	DOREPLIFETIME(ASubCrewCharacter, bIsAtHelm);
 	DOREPLIFETIME(ASubCrewCharacter, Health);
+	// Owner's overlap handlers populate CurrentCompartmentId locally; non-owning clients get
+	// the replicated server value and resolve CurrentCompartment pointer in OnRep.
+	DOREPLIFETIME_CONDITION(ASubCrewCharacter, CurrentCompartmentId, COND_SkipOwner);
 }
 
 void ASubCrewCharacter::OnRep_CurrentSubmarine()
@@ -258,6 +461,18 @@ void ASubCrewCharacter::OnRep_CurrentSubmarine()
 			CrewMov->RefreshEmbarkedFlooring();
 		}
 	}
+	else
+	{
+		CurrentCompartment = nullptr;
+		CurrentCompartmentId = NAME_None;
+		ActiveCompartmentOverlaps.Reset();
+		ResetEnvironmentalState();
+
+		if (USubCrewMovementComponent* CrewMov = Cast<USubCrewMovementComponent>(GetCharacterMovement()))
+		{
+			CrewMov->SetEmbarkState(ECrewEmbarkState::Outside);
+		}
+	}
 }
 
 void ASubCrewCharacter::SetCurrentSubmarine(ASubmarineBase* Sub)
@@ -267,73 +482,26 @@ void ASubCrewCharacter::SetCurrentSubmarine(ASubmarineBase* Sub)
 		return;
 	}
 
+	// Forbid silent unbind. The only legitimate path that clears CurrentSubmarine is
+	// DisembarkSubmarine, which raises bAllowSubmarineUnbind via TGuardValue. Any other
+	// caller hitting nullptr here is an upstream bug (replication race, accidental BP wire,
+	// sub destruction without disembark) and the ensure surfaces it immediately.
+	ensureMsgf(Sub != nullptr || bAllowSubmarineUnbind,
+		TEXT("SetCurrentSubmarine(nullptr) called outside DisembarkSubmarine. ")
+		TEXT("Crew=%s | PrevSub=%s. Use DisembarkSubmarine for explicit unbind."),
+		*GetName(), *GetNameSafe(CurrentSubmarine));
+
 	CurrentSubmarine = Sub;
 
 	if (!CurrentSubmarine)
 	{
+		CurrentCompartment = nullptr;
+		CurrentCompartmentId = NAME_None;
+		ActiveCompartmentOverlaps.Reset();
 		ResetEnvironmentalState();
 	}
 
 	UE_LOG(LogSubCrew, Log, TEXT("SetCurrentSubmarine | Crew=%s | Sub=%s"), *GetName(), *GetNameSafe(CurrentSubmarine));
-}
-
-ASubmarineBase* ASubCrewCharacter::ResolveSubmarineFromMovementBase() const
-{
-	const UPrimitiveComponent* MovementBase = GetMovementBase();
-	const AActor* CurrentOwner = MovementBase ? MovementBase->GetOwner() : nullptr;
-	while (CurrentOwner)
-	{
-		if (ASubmarineBase* Submarine = Cast<ASubmarineBase>(const_cast<AActor*>(CurrentOwner)))
-		{
-			return Submarine;
-		}
-
-		const AActor* NextOwner = CurrentOwner->GetOwner();
-		if (!NextOwner)
-		{
-			NextOwner = CurrentOwner->GetAttachParentActor();
-		}
-
-		if (NextOwner == CurrentOwner)
-		{
-			break;
-		}
-
-		CurrentOwner = NextOwner;
-	}
-
-	return nullptr;
-}
-
-void ASubCrewCharacter::EnsureEmbarkedSubmarineBinding(const TCHAR* Context)
-{
-	if (CurrentSubmarine)
-	{
-		return;
-	}
-
-	ASubmarineBase* ResolvedSubmarine = ResolveSubmarineFromMovementBase();
-	if (!ResolvedSubmarine || !ResolvedSubmarine->IsInteriorWalkableComponent(GetMovementBase()))
-	{
-		return;
-	}
-
-	SetCurrentSubmarine(ResolvedSubmarine);
-
-	if (USubCrewMovementComponent* CrewMovement = GetCrewMovement())
-	{
-		CrewMovement->InitializeForSubmarine();
-		CrewMovement->RefreshEmbarkedFlooring();
-	}
-
-	UE_LOG(
-		LogSubCrew,
-		Log,
-		TEXT("Auto-bound submarine from movement base | Context=%s | Crew=%s | Base=%s | Sub=%s"),
-		Context,
-		*GetName(),
-		*DescribeMovementBase(this),
-		*GetNameSafe(CurrentSubmarine));
 }
 
 void ASubCrewCharacter::EnterOnFootInSubmarine(ASubmarineBase* Sub, const FTransform& SpawnXform)
@@ -357,12 +525,12 @@ void ASubCrewCharacter::EnterOnFootInSubmarine(ASubmarineBase* Sub, const FTrans
 		static_cast<int32>(GetCharacterMovement()->MovementMode),
 		*DescribeMovementBase(this));
 
-	bool bIsEmbarked = false;
+	bool bHasSubmarineBinding = false;
 	if (USubCrewMovementComponent* CrewMov = Cast<USubCrewMovementComponent>(GetCharacterMovement()))
 	{
 		CrewMov->InitializeForSubmarine();
 		CrewMov->RefreshEmbarkedFlooring();
-		bIsEmbarked = CrewMov->IsEmbarked();
+		bHasSubmarineBinding = CrewMov->HasSubmarineBinding();
 
 		// Safety: if floor not found after teleport, sweep downward to snap onto interior floor.
 		if (!CrewMov->CurrentFloor.IsWalkableFloor() && Sub)
@@ -378,7 +546,7 @@ void ASubCrewCharacter::EnterOnFootInSubmarine(ASubmarineBase* Sub, const FTrans
 				const FVector CorrectedLocation = Hit.ImpactPoint + FVector(0.f, 0.f, CapsuleHalfHeight);
 				SetActorLocation(CorrectedLocation, false, nullptr, ETeleportType::TeleportPhysics);
 				CrewMov->RefreshEmbarkedFlooring();
-				bIsEmbarked = CrewMov->IsEmbarked();
+				bHasSubmarineBinding = CrewMov->HasSubmarineBinding();
 
 				UE_LOG(
 					LogSubCrew,
@@ -410,18 +578,20 @@ void ASubCrewCharacter::EnterOnFootInSubmarine(ASubmarineBase* Sub, const FTrans
 			CrewMov->GridSpaceTransform = FTransform(
 				FRotator(0.f, LocalYaw, 0.f).Quaternion(),
 				LocalPos);
-			CrewMov->bIsGridSpaceAuthority = true;
+			CrewMov->SetEmbarkState(ECrewEmbarkState::Embarked);
 			CrewMov->LastSubWorldTransform = SubTransform;
+			bHasSubmarineBinding = CrewMov->HasSubmarineBinding();
 		}
 	}
 
 	UE_LOG(
 		LogSubCrew,
 		Log,
-		TEXT("Post-init | MovementMode=%d | Base=%s | IsEmbarked=%d"),
+		TEXT("Post-init | MovementMode=%d | Base=%s | SubBound=%d | EmbarkState=%d"),
 		static_cast<int32>(GetCharacterMovement()->MovementMode),
 		*DescribeMovementBase(this),
-		bIsEmbarked ? 1 : 0);
+		bHasSubmarineBinding ? 1 : 0,
+		GetCrewMovement() ? static_cast<int32>(GetCrewMovement()->EmbarkState) : static_cast<int32>(ECrewEmbarkState::Outside));
 
 	if (CurrentSubmarine && CurrentSubmarine->CurrentPilot == this)
 	{
@@ -436,46 +606,27 @@ void ASubCrewCharacter::BoardSubmarine(ASubmarineBase* Submarine)
 		return;
 	}
 
-	SetCurrentSubmarine(Submarine);
-	bIsAtHelm = false;
-	DetachFromActor(FDetachmentTransformRules::KeepWorldTransform);
-	GetCharacterMovement()->SetMovementMode(EMovementMode::MOVE_Walking);
-	GetCharacterMovement()->GravityScale = 1.f;
-
-	if (USubCrewMovementComponent* CrewMov = Cast<USubCrewMovementComponent>(GetCharacterMovement()))
-	{
-		CrewMov->InitializeForSubmarine();
-		CrewMov->RefreshEmbarkedFlooring();
-
-		const FTransform SubTransform = Submarine->GetActorTransform();
-		const FVector LocalPos = SubTransform.InverseTransformPosition(GetActorLocation());
-		const FRotator WorldRot = GetActorRotation();
-		const float LocalYaw = FRotator::NormalizeAxis(WorldRot.Yaw - SubTransform.Rotator().Yaw);
-		CrewMov->GridSpaceTransform = FTransform(
-			FRotator(0.f, LocalYaw, 0.f).Quaternion(),
-			LocalPos);
-		CrewMov->bIsGridSpaceAuthority = true;
-		CrewMov->LastSubWorldTransform = SubTransform;
-	}
-
 	UE_LOG(
 		LogSubCrew,
-		Log,
-		TEXT("BoardSubmarine | Sub=%s | MovementMode=%d | Base=%s"),
-		*GetNameSafe(Submarine),
-		static_cast<int32>(GetCharacterMovement()->MovementMode),
-		*DescribeMovementBase(this));
+		Warning,
+		TEXT("BoardSubmarine is legacy compatibility code. Forwarding to EnterOnFootInSubmarine."));
+	EnterOnFootInSubmarine(Submarine, FTransform(GetActorRotation(), GetActorLocation()));
 }
 
 void ASubCrewCharacter::DisembarkSubmarine()
 {
+	UE_LOG(
+		LogSubCrew,
+		Warning,
+		TEXT("DisembarkSubmarine is a legacy hard-detach path. EVA should use hull boundary crossing."));
+
 	ASubmarineBase* PreviousSubmarine = CurrentSubmarine;
 
 	// Before clearing the sub pointer, flush GridSpaceTransform into world pose
 	// and inherit sub velocity so the disembark is physically continuous.
 	if (USubCrewMovementComponent* CrewMov = Cast<USubCrewMovementComponent>(GetCharacterMovement()))
 	{
-		if (CrewMov->bIsGridSpaceAuthority && PreviousSubmarine)
+		if (CrewMov->IsGridAuthoritative() && PreviousSubmarine)
 		{
 			const FTransform SubTransform = PreviousSubmarine->GetActorTransform();
 			const FVector WorldPos = SubTransform.TransformPosition(CrewMov->GridSpaceTransform.GetLocation());
@@ -488,11 +639,22 @@ void ASubCrewCharacter::DisembarkSubmarine()
 				CrewMov->Velocity = SubMov->Velocity;
 			}
 		}
-		CrewMov->bIsGridSpaceAuthority = false;
+		CrewMov->SetEmbarkState(ECrewEmbarkState::Outside);
 	}
 
+	// Env axis: clear the compartment pointer so IsInWater()/HasOxygen() report ocean state.
+	// Overlap events will repopulate if the disembark leaves the crew inside a compartment volume.
+	CurrentCompartment = nullptr;
+	ActiveCompartmentOverlaps.Reset();
+
 	DetachFromActor(FDetachmentTransformRules::KeepWorldTransform);
-	SetCurrentSubmarine(nullptr);
+	{
+		// Authorise the nullptr unbind for this single call: DisembarkSubmarine is the
+		// only legitimate path that clears CurrentSubmarine. The ensure in
+		// SetCurrentSubmarine fires for any caller that reaches it without this guard.
+		TGuardValue<bool> AllowUnbindGuard(bAllowSubmarineUnbind, true);
+		SetCurrentSubmarine(nullptr);
+	}
 	bIsAtHelm = false;
 	GetCharacterMovement()->SetMovementMode(EMovementMode::MOVE_Walking);
 	GetCharacterMovement()->GravityScale = 1.f;

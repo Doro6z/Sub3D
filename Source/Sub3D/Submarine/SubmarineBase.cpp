@@ -3,6 +3,7 @@
 
 #include "BreachVfxManagerComponent.h"
 #include "CompartmentVolumeComponent.h"
+#include "FloodWaterPlaneComponent.h"
 #include "DoorFloodVfxComponent.h"
 #include "FloodWaterVisualsComponent.h"
 #include "GeneratedGeometry/SubmarineGeneratedGeometryComponent.h"
@@ -176,8 +177,13 @@ ASubmarineBase::ASubmarineBase()
 
 	bReplicates = true;
 	SetReplicateMovement(false);
-	SetNetUpdateFrequency(30.f);
-	SetMinNetUpdateFrequency(15.f);
+	// Match the sim rate (60Hz) so each fixed-tick produces one snapshot. With 30Hz, each
+	// snapshot covered 2 sim substeps; under flood-induced acceleration the inter-snapshot
+	// motion delta grew large enough that any cadence variance produced visible jitter on
+	// the client Hermite playback. 60Hz halves the delta and tightens the InterpDuration
+	// variance window.
+	SetNetUpdateFrequency(60.f);
+	SetMinNetUpdateFrequency(30.f);
 
 	SubmarineRoot = CreateDefaultSubobject<USceneComponent>(TEXT("SubmarineRoot"));
 	SetRootComponent(SubmarineRoot);
@@ -279,27 +285,84 @@ void ASubmarineBase::BeginPlay()
 
 		if (SubFlood)
 		{
-			if (GeneratedDefinition)
+			// Priority order:
+			//  1) Manually-placed UCompartmentVolumeComponents (Craniata BP workflow) —
+			//     they're authoritative for compartment spatial identity, crew overlap
+			//     uses their CompartmentId. Flood graph must match.
+			//  2) GeneratedDefinition (procedural generator path).
+			//  3) LayoutAsset (Proto 7A legacy).
+			TArray<UCompartmentVolumeComponent*> Volumes;
+			GetComponents<UCompartmentVolumeComponent>(Volumes);
+
+			if (Volumes.Num() > 0)
+			{
+				SubFlood->InitializeFromCompartmentVolumes(Volumes);
+			}
+			else if (GeneratedDefinition)
 			{
 				SubFlood->InitializeFromDefinition(GeneratedDefinition);
 			}
 			else if (SubHull && SubHull->LayoutAsset)
 			{
 				// LEGACY (Phase 7A, 2026-04-10) — Proto fallback path.
-				// No GeneratedDefinition is assigned so we initialize SubFlood
-				// from the LayoutAsset. This path will be removed in Phase 7B.
 				UE_LOG(LogSubLegacy, Warning,
 					TEXT("[LEGACY] ASubmarineBase::BeginPlay: initializing SubFlood from LayoutAsset '%s' on %s. ")
-					TEXT("This is a Proto03/04 fallback. Assign a GeneratedDefinition to use the generator path."),
+					TEXT("Will be removed in Phase 7B."),
 					*SubHull->LayoutAsset->GetName(),
 					*GetName());
 				SubFlood->InitializeFromLayout(SubHull->LayoutAsset);
+			}
+			else
+			{
+				UE_LOG(
+					LogSubLegacy,
+					Warning,
+					TEXT("ASubmarineBase::BeginPlay: SubFlood not initialized on %s — no volumes, Definition, or LayoutAsset."),
+					*GetName());
 			}
 		}
 
 		if (SubHull && SubFlood)
 		{
 			SubHull->OnBreachesUpdated.AddDynamic(this, &ASubmarineBase::HandleBreachesUpdatedForFlood);
+		}
+	}
+
+	// ── Flood Visuals: spawn one UFloodWaterPlaneComponent per compartment volume ─
+	// Runs on ALL net roles so each client renders water locally without needing
+	// replication of plane transforms. The material (DefaultWaterMaterial) carries
+	// all visual intelligence (Global DF clip, refraction); the component is 100%
+	// passive C++ (updates Z + visibility from its SourceVolume).
+	//
+	// This block is OUTSIDE the HasAuthority() branch on purpose — clients have
+	// the same UCompartmentVolumeComponents placed in the BP as the server.
+	{
+		TArray<UCompartmentVolumeComponent*> VisualVolumes;
+		GetComponents<UCompartmentVolumeComponent>(VisualVolumes);
+		for (UCompartmentVolumeComponent* Vol : VisualVolumes)
+		{
+			if (!Vol)
+			{
+				continue;
+			}
+
+			UFloodWaterPlaneComponent* Plane = NewObject<UFloodWaterPlaneComponent>(this);
+			if (!Plane)
+			{
+				continue;
+			}
+			Plane->SourceVolume = Vol;
+			if (DefaultWaterMaterial)
+			{
+				Plane->WaterMaterial = DefaultWaterMaterial;
+			}
+			if (DefaultWaterPlaneMesh)
+			{
+				Plane->PlaneMesh = DefaultWaterPlaneMesh;
+			}
+			Plane->PlaneWorldSizeCm = DefaultWaterPlaneWorldSizeCm;
+			Plane->SetupAttachment(Vol);
+			Plane->RegisterComponent();
 		}
 	}
 
@@ -1061,22 +1124,49 @@ float ASubmarineBase::GetCurrentDepthMeters() const
 
 FTransform ASubmarineBase::GetPrimaryCrewSpawnTransform() const
 {
-	if (IsValid(CrewSpawnSocketP1))
+	return GetCrewSpawnTransformForSlot(0);
+}
+
+FTransform ASubmarineBase::GetCrewSpawnTransformForSlot(int32 SlotIndex) const
+{
+	const FName SocketName(*FString::Printf(TEXT("CrewSocket%d"), SlotIndex + 1));
+
+	// 1) USceneComponent child by exact name (BP-authored sub-objects)
+	TArray<USceneComponent*> SceneComps;
+	GetComponents<USceneComponent>(SceneComps);
+	for (USceneComponent* Comp : SceneComps)
+	{
+		if (Comp && Comp->GetFName() == SocketName)
+		{
+			return Comp->GetComponentTransform();
+		}
+	}
+
+	// 2) Static-mesh socket of the same name on the HullMesh asset
+	if (HullMesh && HullMesh->DoesSocketExist(SocketName))
+	{
+		return HullMesh->GetSocketTransform(SocketName);
+	}
+
+	// 3) Backward-compat fallback for slot 0 — the legacy CrewSpawnSocketP1 USceneComponent
+	if (SlotIndex == 0 && IsValid(CrewSpawnSocketP1))
 	{
 		return CrewSpawnSocketP1->GetComponentTransform();
 	}
 
-	if (IsValid(HelmSocket))
+	// 4) Last-resort fallbacks
+	if (SlotIndex == 0 && IsValid(HelmSocket))
 	{
 		return HelmSocket->GetComponentTransform();
 	}
-
-	// Fallback: use first spawn point from generated definition.
-	if (GeneratedDefinition && GeneratedDefinition->SpawnPoints.Num() > 0)
+	if (GeneratedDefinition && GeneratedDefinition->SpawnPoints.IsValidIndex(SlotIndex))
 	{
-		return GeneratedDefinition->SpawnPoints[0].LocalTransform * GetActorTransform();
+		return GeneratedDefinition->SpawnPoints[SlotIndex].LocalTransform * GetActorTransform();
 	}
 
+	UE_LOG(LogTemp, Warning,
+		TEXT("[%s] No crew spawn socket found for slot %d (looking for '%s'). Falling back to actor transform — players will overlap at sub origin."),
+		*GetName(), SlotIndex, *SocketName.ToString());
 	return GetActorTransform();
 }
 

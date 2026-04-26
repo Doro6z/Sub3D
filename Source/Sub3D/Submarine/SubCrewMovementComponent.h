@@ -2,6 +2,7 @@
 
 #include "CoreMinimal.h"
 #include "GameFramework/CharacterMovementComponent.h"
+#include "SubCrewNetTypes.h"
 #include "SubCrewMovementComponent.generated.h"
 
 class UPrimitiveComponent;
@@ -14,6 +15,20 @@ enum class ECrewPostureState : uint8
 	Prone,
 	Crouched,
 	Standing
+};
+
+/**
+ * Crew locomotion axis state. Orthogonal to environment context (see ASubCrewCharacter::CurrentCompartment).
+ * Outside       = World-space, CMC native (ocean swim, world walking).
+ * Embarked      = Local grid-space rebase active (inside the submarine moving frame).
+ * Transitioning = Handoff in progress (reserved for post-FP multi-tick velocity blend; FP does instant flips).
+ */
+UENUM(BlueprintType)
+enum class ECrewEmbarkState : uint8
+{
+	Outside,
+	Embarked,
+	Transitioning
 };
 
 /**
@@ -37,13 +52,40 @@ public:
 	UPROPERTY(BlueprintReadOnly, Category = "Submarine|Crew")
 	FRotator RelativeRotation = FRotator::ZeroRotator;
 
-	/** Authoritative crew pose in the submarine's local space. Updated each tick via rebase/extract. */
-	UPROPERTY(BlueprintReadOnly, Category = "Submarine|Crew|LocalGrid")
+	/**
+	 * Authoritative crew pose in the submarine's local space. Updated each tick via rebase/extract.
+	 * Replicated with COND_SkipOwner: owning client computes locally (via its own rebase), non-owning
+	 * clients receive the server-computed value and rebase the peer crew against their local sub pose.
+	 */
+	UPROPERTY(BlueprintReadOnly, Replicated, Category = "Submarine|Crew|LocalGrid")
 	FTransform GridSpaceTransform = FTransform::Identity;
 
-	/** When true, crew transport is driven by the rebase/extract pipeline; MovementBase carry is bypassed. */
-	UPROPERTY(BlueprintReadOnly, Category = "Submarine|Crew|LocalGrid")
-	bool bIsGridSpaceAuthority = false;
+	/**
+	 * Crew locomotion axis. Replicated with COND_SkipOwner — owner predicts state transitions
+	 * locally (via hull boundary crossing detection); non-owning clients get server's value.
+	 */
+	UPROPERTY(BlueprintReadOnly, Replicated, Category = "Submarine|Crew|LocalGrid")
+	ECrewEmbarkState EmbarkState = ECrewEmbarkState::Outside;
+
+	/** True when the rebase owns the crew pose (Embarked or Transitioning). Read-only accessor for all rebase call-sites. */
+	UFUNCTION(BlueprintPure, Category = "Submarine|Crew|LocalGrid")
+	FORCEINLINE bool IsGridAuthoritative() const
+	{
+		return EmbarkState == ECrewEmbarkState::Embarked || EmbarkState == ECrewEmbarkState::Transitioning;
+	}
+
+	/** Sets the locomotion state. Single write-site so transitions can be centrally logged later. */
+	void SetEmbarkState(ECrewEmbarkState NewState);
+
+	/**
+	 * Called by ASubCrewCharacter::HandleHullCrossing to mark that a crossing event fired
+	 * during the current move. The FSavedMove_SubCrew reads this via ConsumePendingHandoff
+	 * when the saved move is captured, packing the event into the network payload.
+	 */
+	void SetPendingHandoff(ECrewHandoffKind Kind);
+
+	/** Returns and clears the pending handoff kind. Called by FSavedMove_SubCrew::SetMoveFor. */
+	ECrewHandoffKind ConsumePendingHandoff();
 
 	/** Submarine world transform cached at the end of the previous tick. Used to compute the controller yaw delta and seeded on authority transitions. */
 	FTransform LastSubWorldTransform = FTransform::Identity;
@@ -193,11 +235,52 @@ public:
 	void InitializeForSubmarine();
 	void RefreshEmbarkedFlooring();
 
-	bool IsEmbarked() const;
+	/** True while the crew still has a submarine/interior-frame context, including EVA Outside state. */
+	bool HasSubmarineBinding() const;
 
 protected:
 	virtual void UpdateBasedMovement(float DeltaSeconds) override;
 	virtual void UpdateBasedRotation(FRotator& FinalRotation, const FRotator& ReducedRotation) override;
+
+	/**
+	 * Override to suppress CMC's mesh-translation-offset creation while grid-authoritative.
+	 * SmoothCorrection() is called when the replicated pose differs from the current actor
+	 * pose; it captures the delta into MeshTranslationOffset for visual smoothing. In grid
+	 * mode the rebase intentionally places the actor at SubTransform × GridSpaceTransform
+	 * (≠ ReplicatedMovement.Location, which is the SERVER's world-space pose), so every
+	 * replication arrival would seed a non-zero offset. Without SmoothCorrection running,
+	 * Super::SmoothClientPosition stays harmless (nothing to decay) — so we don't override
+	 * SmoothClientPosition itself; otherwise any leftover offset never goes back to zero
+	 * after exiting grid mode and the peer's mesh appears glued in place.
+	 */
+	virtual void SmoothCorrection(const FVector& OldLocation, const FQuat& OldRotation, const FVector& NewLocation, const FQuat& NewRotation) override;
+
+	/** Returns our custom FNetworkPredictionData_Client_SubCrew for client-side move saving. */
+	virtual class FNetworkPredictionData_Client* GetPredictionData_Client() const override;
+
+	/**
+	 * Override to apply client-reported grid-space state after CMC's native MoveAutonomous
+	 * processing. Reads the current FCharacterNetworkMoveData_SubCrew and syncs
+	 * GridSpaceTransform + EmbarkState on the server. For FP co-op the server trusts the
+	 * client's reported grid-space pose; production validation would bound the delta.
+	 */
+	virtual void MoveAutonomous(float ClientTimeStamp, float DeltaTime, uint8 CompressedFlags, const FVector& NewAccel) override;
+
+	/**
+	 * Override world-space error check. When Embarked the server's capsule world pose differs
+	 * from the client's because both rebase against a sub pose that's interp-offset differently
+	 * (server sim vs client interp). Default CMC validation would trigger constant corrections
+	 * and rubber-band the owner. Kept as a safety net alongside the FSavedMove local-space path.
+	 */
+	virtual bool ServerCheckClientError(
+		float ClientTimeStamp,
+		float DeltaTime,
+		const FVector& Accel,
+		const FVector& ClientWorldLocation,
+		const FVector& RelativeClientLocation,
+		UPrimitiveComponent* ClientMovementBase,
+		FName ClientBaseBoneName,
+		uint8 ClientMovementMode) override;
 
 private:
 	ASubmarineBase* GetCurrentSubmarine() const;
@@ -224,4 +307,17 @@ private:
 	bool bHasPreviousRelativeLocation = false;
 	float FloorRecoveryTimer = 0.f;
 	float DebugLogTimer = 0.f;
+
+	/** Tracks submarine binding across ticks so the lazy latch only fires on the rising edge (false->true). */
+	bool bHadSubmarineBindingLastTick = false;
+
+	/**
+	 * Handoff event pending capture into the next saved move. Set by
+	 * ASubCrewCharacter::HandleHullCrossing, consumed by FSavedMove_SubCrew::SetMoveFor.
+	 * Serialized over the wire so the server can mirror the state flip.
+	 */
+	ECrewHandoffKind PendingHandoff = static_cast<ECrewHandoffKind>(0);
+
+	/** Server-side container feeding our custom FCharacterNetworkMoveData_SubCrew to CMC's move pipeline. */
+	TUniquePtr<FCharacterNetworkMoveDataContainer_SubCrew> SubCrewMoveDataContainer;
 };
