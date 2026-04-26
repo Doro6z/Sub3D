@@ -1,4 +1,4 @@
-# Targeted State-Boundaries Refactor — Design — 2026-04-20
+# [ABANDONNÉ] Targeted State-Boundaries Refactor — Design — 2026-04-20
 
 **Remplace** : [2026-04-20_crew_passenger_frame_refactor_design.md](./2026-04-20_crew_passenger_frame_refactor_design.md) (scope trop large, archivé comme référence pour un éventuel Round 2).
 

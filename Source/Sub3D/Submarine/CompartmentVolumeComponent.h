@@ -2,12 +2,25 @@
 
 #include "CoreMinimal.h"
 #include "Components/BoxComponent.h"
+#include "Engine/EngineTypes.h"
 #include "CompartmentVolumeComponent.generated.h"
+
+class AAudioVolume;
+class APostProcessVolume;
+class USubFloodComponent;
+class UStaticMesh;
+
+/** Collision channel for compartment / hull-boundary probes. Matches DefaultEngine.ini entry "CompartmentProbe". */
+#define ECC_CompartmentProbe ECC_GameTraceChannel3
 
 /**
  * Editor-placed box volume that defines a compartment region inside the submarine.
+ * Two roles:
+ *  - (legacy) Authoring hint for bake pipelines (CapacityLitersOverride, WalkableFloorZCmOverride).
+ *  - (runtime) Environmental zone probe: overlaps with the crew capsule on channel
+ *              ECC_CompartmentProbe and drives ASubCrewCharacter::CurrentCompartment.
  * Multiple volumes with the same CompartmentId are merged during bake.
- * Place these as children of the submarine root in the BP, then call BakeLayoutFromVolumes.
+ * Place these as children of the submarine root in the BP.
  */
 UCLASS(ClassGroup = (Submarine), meta = (BlueprintSpawnableComponent))
 class SUB3D_API UCompartmentVolumeComponent : public UBoxComponent
@@ -17,7 +30,7 @@ class SUB3D_API UCompartmentVolumeComponent : public UBoxComponent
 public:
 	UCompartmentVolumeComponent();
 
-	/** Compartment name. Volumes sharing the same name are merged into one compartment. */
+	/** Compartment name. Volumes sharing the same name are merged into one compartment. Also the key used by USubFloodComponent. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Compartment")
 	FName CompartmentId = NAME_None;
 
@@ -33,13 +46,77 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Compartment")
 	float WalkableFloorZCmOverride = 0.f;
 
+	/** Oxygen level 0..1. Stub for FP (always 1). Future: consumed over time, produced by life support. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Compartment|Env", meta = (ClampMin = "0.0", ClampMax = "1.0"))
+	float O2Level01 = 1.f;
+
+	/** Audio volume to activate when the crew enters this compartment. Not wired in FP. */
+	UPROPERTY(EditAnywhere, Category = "Compartment|Audio")
+	TObjectPtr<AAudioVolume> LinkedAudioVolume = nullptr;
+
+	/** Post-process volume to activate when the crew enters this compartment. Not wired in FP. */
+	UPROPERTY(EditAnywhere, Category = "Compartment|FX")
+	TObjectPtr<APostProcessVolume> LinkedPostProcessVolume = nullptr;
+
 	/** Editor wireframe color for this compartment volume. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Compartment|Visual")
 	FColor VolumeColor = FColor(50, 180, 220, 255);
 
+	/**
+	 * Per-compartment water surface mesh ("water cap"). When set, UFloodWaterPlaneComponent
+	 * uses this mesh at scale (1,1,1) instead of the generic engine plane. Authored in
+	 * Blender to match the compartment's horizontal cross-section at deck level — its
+	 * geometry IS the containment: the material no longer needs to clip spatially, only
+	 * to polish the edge where the water meets hull/bulkheads.
+	 * See: reports/guides/2026-04-24_water_cap_authoring_and_material_functions.md
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Compartment|Flood")
+	TObjectPtr<UStaticMesh> WaterPlaneMeshOverride = nullptr;
+
 	virtual void OnRegister() override;
+	virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
 
 #if WITH_EDITOR
 	virtual void PostEditChangeProperty(FPropertyChangedEvent& PropertyChangedEvent) override;
 #endif
+
+	// ── Flood data provider (Phase A 2026-04-23) ─────────────────────────────
+	// These are pure lookups into the owning submarine's USubFloodComponent. Purely
+	// passive — used by UFloodWaterPlaneComponent (visual) and ASubCrewCharacter
+	// (underwater detection). BP-friendly for art designer.
+
+	/** Absolute water height in cm from compartment floor (from SubFlood sim). 0 if no flood state. */
+	UFUNCTION(BlueprintPure, Category = "Compartment|Flood")
+	float GetWaterHeightCm() const;
+
+	/** Normalized fill 0..1 (CurrentWaterLiters / CapacityLiters). 0 if no flood state. */
+	UFUNCTION(BlueprintPure, Category = "Compartment|Flood")
+	float GetWaterLevel01() const;
+
+	/**
+	 * Local-space flood floor used by the manual volume path. When WalkableFloorZCmOverride is set,
+	 * it wins over the raw bottom of the box so the visible water starts at the authored floor.
+	 */
+	UFUNCTION(BlueprintPure, Category = "Compartment|Flood")
+	float GetFloodBottomLocalZCm() const;
+
+	/** Effective floodable height in cm for this volume, from authored floor to box top. */
+	UFUNCTION(BlueprintPure, Category = "Compartment|Flood")
+	float GetFloodMaxHeightCm() const;
+
+	/**
+	 * World-space location of the water surface for this compartment. X/Y = volume center,
+	 * Z = volume bottom + WaterHeightCm rotated by sub orientation. Used by water plane
+	 * visuals to position themselves, and by crew underwater detection.
+	 */
+	UFUNCTION(BlueprintPure, Category = "Compartment|Flood")
+	FVector GetWaterSurfaceWorldLocation() const;
+
+	/** Returns the owning submarine's USubFloodComponent, or nullptr if not resolved. Cached. */
+	UFUNCTION(BlueprintPure, Category = "Compartment|Flood")
+	USubFloodComponent* GetFlood() const;
+
+private:
+	// Transient cache to avoid iterating the owner's components each tick.
+	mutable TWeakObjectPtr<USubFloodComponent> CachedFlood;
 };

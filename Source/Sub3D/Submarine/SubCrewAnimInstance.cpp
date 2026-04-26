@@ -86,8 +86,6 @@ void USubCrewAnimInstance::NativeUpdateAnimation(float DeltaSeconds)
 		Proc_LowerarmR_Rot += ForearmRestR;
 		Proc_LowerarmL_Rot += ForearmRestL;
 	}
-
-	DrawDebugHUD();
 }
 
 
@@ -118,7 +116,10 @@ void USubCrewAnimInstance::ReadInputState()
 	USubCrewMovementComponent* CMC = CrewMovement.Get();
 
 	FVector TraversalVelocityWorld = CMC->Velocity;
-	if (CMC->IsEmbarked() && Crew->CurrentSubmarine)
+	const bool bUseSubRelativeTraversal =
+		Crew->CurrentSubmarine != nullptr
+		&& CMC->EmbarkState == ECrewEmbarkState::Embarked;
+	if (bUseSubRelativeTraversal)
 	{
 		TraversalVelocityWorld = Crew->CurrentSubmarine->GetActorTransform().TransformVectorNoScale(CMC->RelativeLinearVelocity);
 		Speed = CMC->RelativeLinearVelocity.Size2D();
@@ -381,7 +382,7 @@ void USubCrewAnimInstance::ComputeUpperBodyAim()
 	if (bIsMoving)
 	{
 		FVector TraversalVelocityWorld = CrewMovement.Get()->Velocity;
-		if (CrewMovement.Get()->IsEmbarked() && Crew->CurrentSubmarine)
+		if (Crew->CurrentSubmarine && CrewMovement.Get()->EmbarkState == ECrewEmbarkState::Embarked)
 		{
 			TraversalVelocityWorld = Crew->CurrentSubmarine->GetActorTransform().TransformVectorNoScale(CrewMovement.Get()->RelativeLinearVelocity);
 		}
@@ -551,49 +552,3 @@ void USubCrewAnimInstance::ComputeFootIK()
 	FootIK_L_Offset = CMC->FootIK_L;
 }
 
-
-// ═══════════════════════════════════════════════════════════
-// DEBUG HUD
-// ═══════════════════════════════════════════════════════════
-
-void USubCrewAnimInstance::DrawDebugHUD()
-{
-	if (!bShowDebugHUD) return;
-
-	if (GEngine)
-	{
-		const FString Msg = FString::Printf(
-			TEXT("=== CREW ANIM ===\n"
-				 "Spd:%.0f Dir:%.0f Mv:%d Phase:%.1f\n"
-				 "Posture:%.2f BodyYaw:%.1f\n"
-				 "Axes L:%d A:%d AR:%d SB:%d ST:%d\n"
-				 "Pelv  P%.1f Y%.1f R%.1f Z%.1f\n"
-				 "Sp03  P%.1f Y%.1f R%.1f\n"
-				 "ThiR  P%.1f Y%.1f R%.1f\n"
-				 "ThiL  P%.1f Y%.1f R%.1f\n"
-				 "CalR  P%.1f Y%.1f R%.1f\n"
-				 "CalL  P%.1f Y%.1f R%.1f\n"
-				 "UaR   P%.1f Y%.1f R%.1f\n"
-				 "UaL   P%.1f Y%.1f R%.1f\n"
-				 "LaR   P%.1f Y%.1f R%.1f\n"
-				 "LaL   P%.1f Y%.1f R%.1f\n"
-				 "Head  P%.1f Y%.1f R%.1f"),
-			Speed, Direction, bIsMoving ? 1 : 0, WalkPhase,
-			PostureAlpha, UpperBodyYawOffset,
-			LegSwingAxis, ArmSwingAxis, ElbowBendAxis, SpineBendAxis, SpineTwistAxis,
-			Proc_Pelvis_Rot.Pitch, Proc_Pelvis_Rot.Yaw, Proc_Pelvis_Rot.Roll, Proc_Pelvis_Offset.Z,
-			Proc_Spine03_Rot.Pitch, Proc_Spine03_Rot.Yaw, Proc_Spine03_Rot.Roll,
-			Proc_ThighR_Rot.Pitch, Proc_ThighR_Rot.Yaw, Proc_ThighR_Rot.Roll,
-			Proc_ThighL_Rot.Pitch, Proc_ThighL_Rot.Yaw, Proc_ThighL_Rot.Roll,
-			Proc_CalfR_Rot.Pitch, Proc_CalfR_Rot.Yaw, Proc_CalfR_Rot.Roll,
-			Proc_CalfL_Rot.Pitch, Proc_CalfL_Rot.Yaw, Proc_CalfL_Rot.Roll,
-			Proc_UpperarmR_Rot.Pitch, Proc_UpperarmR_Rot.Yaw, Proc_UpperarmR_Rot.Roll,
-			Proc_UpperarmL_Rot.Pitch, Proc_UpperarmL_Rot.Yaw, Proc_UpperarmL_Rot.Roll,
-			Proc_LowerarmR_Rot.Pitch, Proc_LowerarmR_Rot.Yaw, Proc_LowerarmR_Rot.Roll,
-			Proc_LowerarmL_Rot.Pitch, Proc_LowerarmL_Rot.Yaw, Proc_LowerarmL_Rot.Roll,
-			Proc_Head_Rot.Pitch, Proc_Head_Rot.Yaw, Proc_Head_Rot.Roll
-		);
-
-		GEngine->AddOnScreenDebugMessage(-1, 0.f, FColor::Green, Msg);
-	}
-}

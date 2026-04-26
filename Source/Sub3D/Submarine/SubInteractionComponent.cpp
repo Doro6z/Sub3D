@@ -7,6 +7,7 @@
 #include "GameFramework/Character.h"
 #include "InteractableComponent.h"
 #include "SubCrewCharacter.h"
+#include "SubCrewMovementComponent.h"
 #include "SubHullComponent.h"
 #include "SubmarineBase.h"
 #include "EngineUtils.h"
@@ -181,7 +182,12 @@ AActor* USubInteractionComponent::ResolvePrimaryInteractTarget(FVector* OutTrace
 	FCollisionQueryParams Params(SCENE_QUERY_STAT(SubInteractionTrace), false);
 	Params.AddIgnoredActor(Crew);
 	Params.bReturnPhysicalMaterial = false;
-	if (Crew->CurrentSubmarine)
+	const USubCrewMovementComponent* CrewMovement = Crew->GetCrewMovement();
+	const bool bIgnoreCurrentSubmarine =
+		Crew->CurrentSubmarine != nullptr
+		&& CrewMovement
+		&& CrewMovement->EmbarkState == ECrewEmbarkState::Embarked;
+	if (bIgnoreCurrentSubmarine)
 	{
 		Params.AddIgnoredActor(Crew->CurrentSubmarine);
 	}
@@ -234,7 +240,12 @@ AActor* USubInteractionComponent::ResolveNearbyInteractableFallback(const FVecto
 	for (TActorIterator<AActor> It(Crew->GetWorld()); It; ++It)
 	{
 		AActor* Candidate = *It;
-		if (!Candidate || Candidate == Crew || Candidate == Crew->CurrentSubmarine)
+		const USubCrewMovementComponent* CrewMovement = Crew->GetCrewMovement();
+		const bool bIgnoreCurrentSubmarine =
+			Crew->CurrentSubmarine != nullptr
+			&& CrewMovement
+			&& CrewMovement->EmbarkState == ECrewEmbarkState::Embarked;
+		if (!Candidate || Candidate == Crew || (bIgnoreCurrentSubmarine && Candidate == Crew->CurrentSubmarine))
 		{
 			continue;
 		}
@@ -262,7 +273,7 @@ AActor* USubInteractionComponent::ResolveNearbyInteractableFallback(const FVecto
 
 		FCollisionQueryParams VisibilityParams(SCENE_QUERY_STAT(SubInteractionFallbackTrace), false);
 		VisibilityParams.AddIgnoredActor(Crew);
-		if (Crew->CurrentSubmarine)
+		if (bIgnoreCurrentSubmarine)
 		{
 			VisibilityParams.AddIgnoredActor(Crew->CurrentSubmarine);
 		}

@@ -24,6 +24,10 @@ public:
 	UPROPERTY(Config, EditAnywhere, Category = "Crew")
 	bool bDrawCrewMovement = false;
 
+	/** On-screen HUD block: EmbarkState, CurrentCompartment, Grid/World/Sub pose. Validation harness for the crew architecture. */
+	UPROPERTY(Config, EditAnywhere, Category = "Crew")
+	bool bDrawCrewGridAuthority = false;
+
 	UPROPERTY(Config, EditAnywhere, Category = "Crew")
 	bool bLogCrewEnvironmentState = false;
 
@@ -44,6 +48,21 @@ public:
 
 	UPROPERTY(Config, EditAnywhere, Category = "Submarine|Movement")
 	bool bLogSubHullCollisions = false;
+
+	// ── Submarine | Flood ─────────────────────────────────────
+	UPROPERTY(Config, EditAnywhere, Category = "Submarine|Flood")
+	bool bLogFlood = false;
+
+	UPROPERTY(Config, EditAnywhere, Category = "Submarine|Flood", meta = (ClampMin = "0.1"))
+	float FloodLogIntervalSeconds = 1.f;
+
+	/** In-game wireframe of UCompartmentVolumeComponent boxes + CompartmentId label. */
+	UPROPERTY(Config, EditAnywhere, Category = "Submarine|Flood")
+	bool bDrawCompartmentVolumes = false;
+
+	/** In-game wireframe of water surface per compartment + label "CompartmentId H=XXXcm L=0.XX". */
+	UPROPERTY(Config, EditAnywhere, Category = "Submarine|Flood")
+	bool bDrawCompartmentWater = false;
 
 	// ── Submarine | Hull ──────────────────────────────────────
 	UPROPERTY(Config, EditAnywhere, Category = "Submarine|Hull")

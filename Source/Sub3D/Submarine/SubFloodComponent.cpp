@@ -1,6 +1,12 @@
 #include "SubFloodComponent.h"
 
+#include "CompartmentVolumeComponent.h"
+#include "Components/SceneComponent.h"
 #include "Net/UnrealNetwork.h"
+#include "Sub3DDebugSettings.h"
+#include "SubHullBoundaryComponent.h"
+#include "SubMovementComponent.h"
+#include "SubmarineBase.h"
 #include "SubmarineDefinition.h"
 #include "SubmarineLayoutAsset.h"
 
@@ -94,6 +100,81 @@ void USubFloodComponent::InitializeFromDefinition(const USubmarineDefinition* De
 	OnFloodInitialized.Broadcast();
 }
 
+void USubFloodComponent::InitializeFromCompartmentVolumes(const TArray<UCompartmentVolumeComponent*>& Volumes)
+{
+	CompartmentStates.Reset();
+	EdgeStates.Reset();
+	Breaches.Reset();
+
+	if (Volumes.Num() == 0)
+	{
+		UE_LOG(LogSubFlood, Warning, TEXT("InitializeFromCompartmentVolumes: no volumes on %s"), *GetNameSafe(GetOwner()));
+		return;
+	}
+
+	// Aggregate per CompartmentId: if the BP places multiple volumes with the same id,
+	// sum their capacity and take the max Z extent as MaxWaterHeightCm.
+	TMap<FName, FFloodCompartmentState> Aggregate;
+
+	for (const UCompartmentVolumeComponent* Vol : Volumes)
+	{
+		if (!Vol || Vol->CompartmentId.IsNone())
+		{
+			continue;
+		}
+
+		const FVector Extent = Vol->GetScaledBoxExtent();
+		const float EffectiveHeightCm = FMath::Max(MinCompartmentHeightCm, Vol->GetFloodMaxHeightCm());
+		const float VolumeCm3 = FMath::Max(1.f, 4.f * Extent.X * Extent.Y * EffectiveHeightCm);
+		const float Liters = VolumeCm3 / 1000.f;
+		const float HeightCm = EffectiveHeightCm;
+
+		FFloodCompartmentState* Existing = Aggregate.Find(Vol->CompartmentId);
+		if (Existing)
+		{
+			Existing->CapacityLiters += Liters;
+			Existing->MaxWaterHeightCm = FMath::Max(Existing->MaxWaterHeightCm, HeightCm);
+		}
+		else
+		{
+			FFloodCompartmentState State;
+			State.CompartmentId = Vol->CompartmentId;
+			State.CapacityLiters = Vol->CapacityLitersOverride > 0.f ? Vol->CapacityLitersOverride : Liters;
+			State.MaxWaterHeightCm = HeightCm;
+			State.CurrentWaterLiters = 0.f;
+			Aggregate.Add(Vol->CompartmentId, State);
+		}
+	}
+
+	CompartmentStates.Reserve(Aggregate.Num());
+	for (auto& Pair : Aggregate)
+	{
+		CompartmentStates.Add(Pair.Value);
+
+		UE_LOG(
+			LogSubFlood,
+			Log,
+			TEXT("FloodInit (volumes) | Compartment=%s | Capacity=%.0fL | MaxHeight=%.0fcm"),
+			*Pair.Value.CompartmentId.ToString(),
+			Pair.Value.CapacityLiters,
+			Pair.Value.MaxWaterHeightCm);
+	}
+
+	// No edges synthesized for FP — each compartment is isolated. Breaches drive inflow
+	// directly on the target compartment via CreateBreach.
+
+	UpdateDerivedState();
+	bClientInitialized = true;
+	OnFloodInitialized.Broadcast();
+
+	UE_LOG(
+		LogSubFlood,
+		Log,
+		TEXT("InitializeFromCompartmentVolumes completed | Owner=%s | CompartmentCount=%d"),
+		*GetNameSafe(GetOwner()),
+		CompartmentStates.Num());
+}
+
 void USubFloodComponent::InitializeFromLayout(const USubmarineLayoutAsset* Layout)
 {
 	// LEGACY (Phase 7A, 2026-04-10) — Proto init path from LayoutAsset.
@@ -181,6 +262,18 @@ void USubFloodComponent::TickComponent(float DeltaTime, ELevelTick TickType, FAc
 
 	AdvanceFlooding(DeltaTime);
 	MaybeLogWaterLevels(DeltaTime);
+
+	// Push current interior water mass to SubMovement as an input. SubMovement
+	// declares a tick prereq on us, so the fixed-tick integrator always reads
+	// this freshly-advanced value. Kept inside the authority guard — only the
+	// server drives the sim and the sub's physics.
+	if (ASubmarineBase* Sub = Cast<ASubmarineBase>(GetOwner()))
+	{
+		if (Sub->SubMovement)
+		{
+			Sub->SubMovement->SetFloodImpactKg(GetTotalWaterMassKg());
+		}
+	}
 }
 
 // --- Door state ----------------------------------------------------------
@@ -249,6 +342,50 @@ void USubFloodComponent::CreateBreach(FName CompartmentId, float InflowRateLiter
 		NewBreach.BreachLocalCenter = BreachLocalCenter;
 		Breaches.Add(NewBreach);
 	}
+
+	// Hull boundary for crew EVA handoff. Spawned on first create, params refreshed on update.
+	if (AActor* Owner = GetOwner())
+	{
+		TWeakObjectPtr<USubHullBoundaryComponent>* Tracked = BreachBoundariesByCompartment.Find(CompartmentId);
+		USubHullBoundaryComponent* Boundary = Tracked ? Tracked->Get() : nullptr;
+
+		// Approximated outward orientation: +X radial from sub root toward the breach point.
+		// Real breach geometry can override post-FP.
+		auto OrientBoundary = [&](USubHullBoundaryComponent* B)
+		{
+			B->SetRelativeLocation(BreachLocalCenter);
+			const FVector RadialDir = BreachLocalCenter.GetSafeNormal();
+			const FRotator Rot = RadialDir.IsNearlyZero() ? FRotator::ZeroRotator : RadialDir.Rotation();
+			B->SetRelativeRotation(Rot);
+		};
+
+		if (!Boundary && ClampedInflow > 0.f)
+		{
+			Boundary = NewObject<USubHullBoundaryComponent>(Owner);
+			if (Boundary)
+			{
+				Boundary->Kind = EHullBoundaryKind::Breach;
+				if (USceneComponent* Root = Owner->GetRootComponent())
+				{
+					Boundary->SetupAttachment(Root);
+				}
+				Boundary->RegisterComponent();
+				OrientBoundary(Boundary);
+				BreachBoundariesByCompartment.Add(CompartmentId, Boundary);
+
+				UE_LOG(
+					LogSubFlood,
+					Log,
+					TEXT("Breach boundary spawned | Compartment=%s | LocalCenter=%s"),
+					*CompartmentId.ToString(),
+					*BreachLocalCenter.ToCompactString());
+			}
+		}
+		else if (Boundary)
+		{
+			OrientBoundary(Boundary);
+		}
+	}
 }
 
 void USubFloodComponent::RemoveBreach(FName CompartmentId)
@@ -268,6 +405,17 @@ void USubFloodComponent::RemoveBreach(FName CompartmentId)
 	{
 		return B.CompartmentId == CompartmentId;
 	});
+
+	if (TWeakObjectPtr<USubHullBoundaryComponent>* Tracked = BreachBoundariesByCompartment.Find(CompartmentId))
+	{
+		if (USubHullBoundaryComponent* Boundary = Tracked->Get())
+		{
+			Boundary->DestroyComponent();
+		}
+		BreachBoundariesByCompartment.Remove(CompartmentId);
+
+		UE_LOG(LogSubFlood, Log, TEXT("Breach boundary removed | Compartment=%s"), *CompartmentId.ToString());
+	}
 }
 
 // --- Pump ----------------------------------------------------------------
@@ -632,14 +780,20 @@ void USubFloodComponent::UpdateDerivedState()
 
 void USubFloodComponent::MaybeLogWaterLevels(float DeltaTime)
 {
-	if (!bLogWaterLevels || CompartmentStates.Num() == 0)
+	const USub3DDebugSettings* Settings = GetDefault<USub3DDebugSettings>();
+	const bool bEffectiveLog = bLogWaterLevels || (Settings && Settings->bLogFlood);
+	const float EffectiveInterval = Settings && Settings->bLogFlood
+		? Settings->FloodLogIntervalSeconds
+		: WaterLevelLogIntervalSeconds;
+
+	if (!bEffectiveLog || CompartmentStates.Num() == 0)
 	{
 		WaterLevelLogAccumulator = 0.f;
 		return;
 	}
 
 	WaterLevelLogAccumulator += DeltaTime;
-	if (WaterLevelLogAccumulator < FMath::Max(0.1f, WaterLevelLogIntervalSeconds))
+	if (WaterLevelLogAccumulator < FMath::Max(0.1f, EffectiveInterval))
 	{
 		return;
 	}

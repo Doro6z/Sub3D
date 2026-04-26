@@ -7,6 +7,8 @@
 
 class USubmarineDefinition;
 class USubmarineLayoutAsset;
+class USubHullBoundaryComponent;
+class UCompartmentVolumeComponent;
 
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnFloodStateUpdated, const TArray<FCompartmentState>&, States);
 DECLARE_DYNAMIC_MULTICAST_DELEGATE(FOnFloodInitialized);
@@ -128,6 +130,16 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Submarine|Flood")
 	void InitializeFromLayout(const USubmarineLayoutAsset* Layout);
 
+	/**
+	 * Initialize from in-BP UCompartmentVolumeComponent children (Craniata manual path).
+	 * Builds one node per CompartmentId, capacity derived from the box extent,
+	 * max water height from Z extent. No edges synthesized — each compartment is
+	 * isolated for FP testing (breaches fill only their own compartment).
+	 * Doors/edges are deferred post-FP.
+	 */
+	UFUNCTION(BlueprintCallable, Category = "Submarine|Flood")
+	void InitializeFromCompartmentVolumes(const TArray<UCompartmentVolumeComponent*>& Volumes);
+
 	UFUNCTION(BlueprintPure, Category = "Submarine|Flood")
 	bool IsInitialized() const { return CompartmentStates.Num() > 0; }
 
@@ -239,6 +251,14 @@ private:
 
 	UPROPERTY(Replicated)
 	TArray<FCompartmentBreachState> Breaches;
+
+	/**
+	 * Server-side tracking of hull boundary components spawned for active breaches.
+	 * Each active breach owns one USubHullBoundaryComponent on the sub actor (Kind=Breach)
+	 * that drives crew handoff (Embarked <-> Outside via the breach plane).
+	 * Weak so destruction of the sub autoclears; lifecycle is CreateBreach/RemoveBreach.
+	 */
+	TMap<FName, TWeakObjectPtr<USubHullBoundaryComponent>> BreachBoundariesByCompartment;
 
 	float WaterLevelLogAccumulator = 0.f;
 

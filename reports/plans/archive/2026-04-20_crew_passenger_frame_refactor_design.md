@@ -1,4 +1,4 @@
-# Crew Passenger-Frame Refactor — Design Document — 2026-04-20
+# [ABANDONNÉ] Crew Passenger-Frame Refactor — Design Document — 2026-04-20
 
 **Status** : design, pas de code écrit. À revoir et valider avant implémentation.
 

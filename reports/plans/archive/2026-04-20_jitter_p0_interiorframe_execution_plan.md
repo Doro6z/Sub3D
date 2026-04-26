@@ -1,4 +1,4 @@
-# Jitter P0 — Execution Plan InteriorFrame → SubMov.Velocity — 2026-04-20
+# [ABANDONNÉ] Jitter P0 — Execution Plan InteriorFrame → SubMov.Velocity — 2026-04-20
 
 Plan d'exécution strictement borné pour le premier fix issu du doc backlog [2026-04-19_jitter_faults_and_solutions.md](/C:/Dev/Sub3D/reports/analysis/2026-04-19_jitter_faults_and_solutions.md).
 

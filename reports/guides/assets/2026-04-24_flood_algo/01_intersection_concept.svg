@@ -1,0 +1,95 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 460" width="900" height="460">
+  <title>Flood visual containment — intersection CV × mesh_interior</title>
+  <desc>Water is displayed only where the CompartmentVolume intersects the interior of the static hull/bulkhead/deck meshes. Side view of a compartment.</desc>
+  <defs>
+    <pattern id="waterHatch" width="6" height="6" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
+      <rect width="6" height="6" fill="#4a90e2" fill-opacity="0.25"/>
+      <line x1="0" y1="0" x2="0" y2="6" stroke="#2c7cc9" stroke-width="0.8"/>
+    </pattern>
+    <marker id="arrowRed" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#c22"/>
+    </marker>
+    <marker id="arrowGrey" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#667"/>
+    </marker>
+  </defs>
+  <style>
+    .title { font-family: Consolas, monospace; font-size: 16px; font-weight: 700; fill: #111; }
+    .sub   { font-family: Consolas, monospace; font-size: 13px; fill: #222; }
+    .label { font-family: Consolas, monospace; font-size: 12px; fill: #111; }
+    .mini  { font-family: Consolas, monospace; font-size: 11px; fill: #444; }
+    .hull  { fill: #5b6770; stroke: #1f2830; stroke-width: 2.5; }
+    .bulkhead { fill: #5b6770; stroke: #1f2830; stroke-width: 2; }
+    .deck  { fill: #7a8690; stroke: #1f2830; stroke-width: 1.5; }
+    .cv    { fill: none; stroke: #d88a2a; stroke-width: 2.5; stroke-dasharray: 7 4; }
+    .water { fill: url(#waterHatch); stroke: #2c7cc9; stroke-width: 1.5; }
+    .center-dot { fill: #c22; stroke: #701010; stroke-width: 1.5; }
+    .axis  { stroke: #888; stroke-width: 1; stroke-dasharray: 4 3; }
+  </style>
+
+  <text x="20" y="28" class="title">Water region = CompartmentVolume  ∩  Mesh interior (viewed from CV center)</text>
+  <text x="20" y="48" class="sub">Side view of the MainDeck compartment — water fills only the space enclosed by hull + bulkheads + decks, bounded by CV</text>
+
+  <!-- Hull outline (side view of rounded sub silhouette) -->
+  <path class="hull" d="M 60 110 Q 140 75 430 75 Q 720 75 800 110 Q 820 220 800 330 Q 720 365 430 365 Q 140 365 60 330 Q 40 220 60 110 Z"/>
+
+  <!-- Interior "hole" — the actual inner cavity (simplified) -->
+  <path fill="#fefefe" stroke="none" d="M 110 140 Q 170 118 430 118 Q 690 118 750 140 L 750 300 Q 690 322 430 322 Q 170 322 110 300 Z"/>
+
+  <!-- Interior walls visible (thin) -->
+  <path fill="none" stroke="#2a363f" stroke-width="1.5" d="M 110 140 Q 170 118 430 118 Q 690 118 750 140 L 750 300 Q 690 322 430 322 Q 170 322 110 300 Z"/>
+
+  <!-- Decks -->
+  <rect class="deck" x="115" y="172" width="635" height="8"/>
+  <rect class="deck" x="115" y="260" width="635" height="8"/>
+
+  <!-- Bulkheads framing the MainDeck compartment -->
+  <rect class="bulkhead" x="280" y="182" width="8" height="78"/>
+  <rect class="bulkhead" x="580" y="182" width="8" height="78"/>
+
+  <!-- CV MainDeck (dashed orange box) — can legitimately overlap hull walls and bulkheads slightly -->
+  <rect class="cv" x="260" y="165" width="350" height="110"/>
+
+  <!-- Water region = CV ∩ mesh_interior (the rectangle between the 2 bulkheads, between the 2 decks, inside the hull cavity) -->
+  <rect class="water" x="289" y="183" width="290" height="77"/>
+
+  <!-- CV center marker -->
+  <circle class="center-dot" cx="435" cy="220" r="6"/>
+  <text x="445" y="217" class="label" fill="#c22">CV center</text>
+  <text x="445" y="232" class="mini" fill="#c22">(ray origin)</text>
+
+  <!-- Sample rays from center — three pixels tested -->
+  <!-- Ray 1: hits a bulkhead before reaching P1 → P1 blocked -->
+  <line x1="435" y1="220" x2="575" y2="220" stroke="#888" stroke-width="1.5" marker-end="url(#arrowGrey)"/>
+  <circle cx="605" cy="220" r="4" fill="#888"/>
+  <text x="615" y="214" class="mini">P1 blocked (bulkhead hit)</text>
+  <line x1="580" y1="195" x2="580" y2="250" stroke="#c22" stroke-width="1" stroke-dasharray="2 2"/>
+
+  <!-- Ray 2: hits deck before reaching P2 → P2 blocked (outside hull interior, below deck) -->
+  <line x1="435" y1="220" x2="435" y2="255" stroke="#888" stroke-width="1.5" marker-end="url(#arrowGrey)"/>
+  <circle cx="435" cy="285" r="4" fill="#888"/>
+  <text x="445" y="288" class="mini">P2 blocked (deck hit)</text>
+  <line x1="405" y1="262" x2="465" y2="262" stroke="#c22" stroke-width="1" stroke-dasharray="2 2"/>
+
+  <!-- Ray 3: unobstructed — P3 inside water region -->
+  <line x1="435" y1="220" x2="355" y2="210" stroke="#2a9d3f" stroke-width="2" marker-end="url(#arrowGrey)"/>
+  <circle cx="355" cy="210" r="5" fill="#2a9d3f"/>
+  <text x="295" y="202" class="mini" fill="#2a9d3f">P3 ok → water</text>
+
+  <!-- Legend -->
+  <g transform="translate(20,390)">
+    <rect x="0" y="0" width="20" height="12" class="cv"/>
+    <text x="28" y="10" class="mini">CompartmentVolume (CV) — AABB in sub-local</text>
+    <rect x="280" y="0" width="20" height="12" fill="url(#waterHatch)"/>
+    <text x="308" y="10" class="mini">Water region = CV ∩ visible-from-center</text>
+    <rect x="590" y="0" width="20" height="12" class="hull"/>
+    <text x="618" y="10" class="mini">Static opaque meshes (hull, decks, bulkheads)</text>
+  </g>
+  <g transform="translate(20,415)">
+    <circle cx="10" cy="6" r="5" fill="#2a9d3f"/>
+    <text x="22" y="10" class="mini">Pixel visible from center (unobstructed ray) → water</text>
+    <circle cx="330" cy="6" r="4" fill="#888"/>
+    <text x="342" y="10" class="mini">Pixel blocked by a mesh before center-ray reaches it → no water</text>
+  </g>
+</svg>

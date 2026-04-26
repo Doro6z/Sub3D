@@ -1,0 +1,125 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 980 600" width="980" height="600">
+  <title>Option C v2 — Material Function architecture + MID parameter flow</title>
+  <desc>M_CompartmentWater becomes a thin combiner of 3 Material Functions. UFloodWaterPlaneComponent sets CV data on the MaterialInstanceDynamic each tick.</desc>
+  <defs>
+    <marker id="arr3" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#334"/>
+    </marker>
+    <marker id="arr3cpp" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#c6850b"/>
+    </marker>
+  </defs>
+  <style>
+    .title { font-family: Consolas, monospace; font-size: 16px; font-weight: 700; fill: #111; }
+    .sub   { font-family: Consolas, monospace; font-size: 12px; fill: #333; }
+    .mf    { fill: #e6eefa; stroke: #204e8b; stroke-width: 2; rx: 8; }
+    .cpp   { fill: #fff1d6; stroke: #c6850b; stroke-width: 2; rx: 8; }
+    .main  { fill: #fff4e0; stroke: #c8841c; stroke-width: 2; rx: 8; }
+    .root  { fill: #d7f0d7; stroke: #2a7d2a; stroke-width: 2; rx: 8; }
+    .mid   { fill: #f4e8f4; stroke: #702070; stroke-width: 2; rx: 8; }
+    .node-title { font-family: Consolas, monospace; font-size: 13px; font-weight: 700; fill: #111; }
+    .node-body  { font-family: Consolas, monospace; font-size: 11px; fill: #222; }
+    .edge { stroke: #334; stroke-width: 1.6; fill: none; }
+    .edge-cpp { stroke: #c6850b; stroke-width: 1.8; fill: none; stroke-dasharray: 5 3; }
+    .edge-label { font-family: Consolas, monospace; font-size: 10px; fill: #334; }
+    .edge-label-cpp { font-family: Consolas, monospace; font-size: 10px; fill: #8c5600; font-style: italic; }
+  </style>
+
+  <text x="20" y="26" class="title">Option C v2 — Material Function architecture + runtime MID parameter flow</text>
+  <text x="20" y="46" class="sub">C++ drives per-tick CV data into MaterialInstanceDynamic. Material consumes via MFs. Containment is computed entirely in shader.</text>
+
+  <!-- C++ side -->
+  <rect class="cpp" x="20" y="70" width="280" height="210"/>
+  <text x="32" y="92" class="node-title">UFloodWaterPlaneComponent::ApplyWaterState</text>
+  <text x="32" y="110" class="node-body">(runs per-tick on all net roles)</text>
+  <text x="32" y="132" class="node-body">CVT = SourceVolume-&gt;GetComponentTransform()</text>
+  <text x="32" y="150" class="node-body">Inv = CVT.Inverse()</text>
+  <text x="32" y="168" class="node-body"></text>
+  <text x="32" y="186" class="node-body">MID-&gt;SetVectorParam(</text>
+  <text x="42" y="204" class="node-body">  "CV_Center_WS", CVT.Loc)</text>
+  <text x="42" y="222" class="node-body">  "CV_HalfExtent", CV-&gt;GetScaledBoxExtent()</text>
+  <text x="42" y="240" class="node-body">  "CV_W2L_Row0/1/2", Inv rows</text>
+  <text x="42" y="258" class="node-body">  "WaterLevel01", Level)</text>
+
+  <!-- MID -->
+  <rect class="mid" x="350" y="70" width="220" height="210"/>
+  <text x="362" y="92" class="node-title">MID_CompartmentWater</text>
+  <text x="362" y="110" class="node-body">(per UFloodWaterPlaneComponent)</text>
+  <text x="362" y="132" class="node-body">Scalar/Vector parameters:</text>
+  <text x="362" y="150" class="node-body">  CV_Center_WS     (Vector3)</text>
+  <text x="362" y="168" class="node-body">  CV_HalfExtent    (Vector3)</text>
+  <text x="362" y="186" class="node-body">  CV_W2L_Row0      (Vector4)</text>
+  <text x="362" y="204" class="node-body">  CV_W2L_Row1      (Vector4)</text>
+  <text x="362" y="222" class="node-body">  CV_W2L_Row2      (Vector4)</text>
+  <text x="362" y="240" class="node-body">  WaterLevel01     (Scalar)</text>
+  <text x="362" y="258" class="node-body">  (+ Look params: WaveScale, ...)</text>
+
+  <!-- Arrow cpp -> mid -->
+  <path class="edge-cpp" d="M 300 175 L 350 175" marker-end="url(#arr3cpp)"/>
+  <text x="305" y="168" class="edge-label-cpp">set per tick</text>
+
+  <!-- M_CompartmentWater (thin combiner) -->
+  <rect class="main" x="620" y="70" width="280" height="210"/>
+  <text x="632" y="92" class="node-title">M_CompartmentWater (thin combiner)</text>
+  <text x="632" y="114" class="node-body">Consumes 3 Material Functions:</text>
+  <text x="632" y="138" class="node-body">• MF_CompartmentWater_Containment</text>
+  <text x="650" y="154" class="node-body">inputs: MID CV params</text>
+  <text x="650" y="170" class="node-body">output: Containment01 (float)</text>
+  <text x="632" y="190" class="node-body">• MF_CompartmentWater_EdgePolish</text>
+  <text x="650" y="206" class="node-body">output: EdgeMask01 (float)</text>
+  <text x="632" y="226" class="node-body">• MF_CompartmentWater_Look</text>
+  <text x="650" y="242" class="node-body">output: SubstrateSlabBSDF</text>
+  <text x="632" y="260" class="node-body">final Weight = Contain × Edge × WaterLevel01</text>
+
+  <!-- arrow mid -> main -->
+  <path class="edge" d="M 570 175 L 620 175" marker-end="url(#arr3)"/>
+  <text x="578" y="168" class="edge-label">params read</text>
+
+  <!-- MFs detail -->
+  <rect class="mf" x="20" y="320" width="300" height="150"/>
+  <text x="32" y="342" class="node-title">MF_CompartmentWater_Containment</text>
+  <text x="32" y="360" class="node-body">(NEW — the algorithm)</text>
+  <text x="32" y="382" class="node-body">inputs:</text>
+  <text x="42" y="398" class="node-body">  AbsWorldPos, CV_Center_WS,</text>
+  <text x="42" y="414" class="node-body">  CV_HalfExtent, CV_W2L_Row0/1/2</text>
+  <text x="32" y="434" class="node-body">body:</text>
+  <text x="42" y="450" class="node-body">  Custom HLSL node = Test 1 (AABB)</text>
+  <text x="42" y="464" class="node-body">  + Test 2 (center-visibility ray-march)</text>
+
+  <rect class="mf" x="340" y="320" width="300" height="150"/>
+  <text x="352" y="342" class="node-title">MF_CompartmentWater_EdgePolish</text>
+  <text x="352" y="360" class="node-body">(REFACTOR of existing HullMask+SoftClip)</text>
+  <text x="352" y="382" class="node-body">inputs:</text>
+  <text x="362" y="398" class="node-body">  HullMaskSoftness, EdgeSoftnessCm</text>
+  <text x="362" y="414" class="node-body">  (fix typo from EdgeSofnessCm)</text>
+  <text x="352" y="434" class="node-body">body:</text>
+  <text x="362" y="450" class="node-body">  HullMask = (SceneDepth - PixelDepth)/soft</text>
+  <text x="362" y="464" class="node-body">  × SoftClip = DistToNearestSurface/edge</text>
+
+  <rect class="mf" x="660" y="320" width="300" height="150"/>
+  <text x="672" y="342" class="node-title">MF_CompartmentWater_Look</text>
+  <text x="672" y="360" class="node-body">(REFACTOR of current slab + normals chain)</text>
+  <text x="672" y="382" class="node-body">inputs:</text>
+  <text x="682" y="398" class="node-body">  WaveScale, WaveSpeedA/B,</text>
+  <text x="682" y="414" class="node-body">  NormalIntensity, Roughness, Tint</text>
+  <text x="672" y="434" class="node-body">output:</text>
+  <text x="682" y="450" class="node-body">  SubstrateSlabBSDF (Substrate slot)</text>
+
+  <!-- Final material output -->
+  <rect class="root" x="620" y="500" width="340" height="80"/>
+  <text x="632" y="522" class="node-title">Material Root</text>
+  <text x="632" y="542" class="node-body">Front Material ← Substrate Coverage Weight</text>
+  <text x="632" y="558" class="node-body">  Weight = Contain × Edge × WaterLevel01</text>
+  <text x="632" y="574" class="node-body">  A      = Look.SubstrateSlabBSDF</text>
+
+  <!-- Arrows MFs → Root -->
+  <path class="edge" d="M 170 470 L 170 545 L 620 545" marker-end="url(#arr3)"/>
+  <text x="180" y="537" class="edge-label">× (Weight)</text>
+
+  <path class="edge" d="M 490 470 L 490 555 L 620 555" marker-end="url(#arr3)"/>
+  <text x="500" y="547" class="edge-label">× (Weight)</text>
+
+  <path class="edge" d="M 810 470 L 810 500" marker-end="url(#arr3)"/>
+  <text x="815" y="488" class="edge-label">A (slab)</text>
+</svg>

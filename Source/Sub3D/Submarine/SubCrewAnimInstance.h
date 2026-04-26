@@ -288,10 +288,6 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crew|Tuning|Swim")
 	float SwimKickDeg = 30.f;
 
-	/** Show debug HUD */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crew|Debug")
-	bool bShowDebugHUD = true;
-
 	/** Right upper arm rest pose (direct FRotator, tunable per P/Y/R component) */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crew|Tuning|Rest")
 	FRotator ArmRestR = FRotator(0.f, 0.f, -85.f);
@@ -368,7 +364,6 @@ private:
 	void ComputeUpperBodyAim();
 	void ComputeHandIK();
 	void ComputeFootIK();
-	void DrawDebugHUD();
 	static FRotator MakeAxisRotator(float Degrees, int32 Axis, bool bNegate);
 	float SwimPhase = 0.f;
 

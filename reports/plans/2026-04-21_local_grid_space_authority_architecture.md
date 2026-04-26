@@ -1,9 +1,12 @@
 # Architecture : Local Grid Space Authority pour Sub3D
 
 **Date** : 2026-04-21
-**Statut** : Validé — prêt pour implémentation
+**Statut** : Phase 1 livrée (2026-04-21). Phase 2 (réseau) **superseded** par `2026-04-22_crew_environment_axis.md` §Phase 3.
 **Contexte** : Remplacement de l'approche "world-space + MovementBase compensation" par une autorité locale du sous-marin sur le mouvement du joueur.
 **Validation** : Décisions Q1, Q2, Q3 tranchées le 2026-04-21. Corrections techniques intégrées.
+
+> [!IMPORTANT]
+> Ce plan couvre uniquement **l'axe locomotion**. Un second axe orthogonal (environnement : compartiment, EVA, velocity blending au passage de coque) est défini dans [2026-04-22_crew_environment_axis.md](2026-04-22_crew_environment_axis.md). L'implémentation réseau (FSavedMove) du plan environnement absorbe l'ancienne Phase 2 de ce plan. Ne PAS implémenter la §15 Phase 2 telle qu'écrite ici.
 
 ---
 
@@ -470,29 +473,24 @@ Ce sont des règles de level design, pas de code. Mais elles sont obligatoires p
 
 ## 15. Ordre d'Implémentation
 
-### Phase 1 — Validation locale (Solo PIE)
+### Phase 1 — Validation locale (Solo PIE) — **COMPLETED 2026-04-21**
 
 **Objectif** : Prouver que le rebase élimine le jitter en solo.
 **Réseau** : Désactivé (pas de surcharge FSavedMove).
+**Livré via commits** : `24b1cb7`, `a95ce17`, `716d1a2`.
 
-| # | Tâche | Fichiers | Critère de pass |
+| # | Tâche | Fichiers | État |
 |---|---|---|---|
-| 1.1 | Ajouter `GridSpaceTransform`, `bIsGridSpaceAuthority`, `LastSubWorldTransform` au header | `SubCrewMovementComponent.h` | Compile |
-| 1.2 | Implémenter rebase + extract dans `TickComponent` | `SubCrewMovementComponent.cpp` | Compile |
-| 1.3 | No-op `UpdateBasedMovement` / `UpdateBasedRotation` quand `bIsGridSpaceAuthority` | `SubCrewMovementComponent.cpp` | Compile |
-| 1.4 | Supprimer `ApplyYawCompensation`, simplifier `UpdateRelativeState`, supprimer tether | `SubCrewMovementComponent.cpp` | Compile |
-| 1.5 | Init `GridSpaceTransform` dans `EnterOnFootInSubmarine` | `SubCrewCharacter.cpp` | Compile |
-| 1.6 | Conversion monde dans `DisembarkSubmarine` | `SubCrewCharacter.cpp` | Compile |
-| 1.7 | Test PIE solo : marche, transitions, escalier, haute vélocité, rotation | PIE | Jitter = 0 |
+| 1.1 | Ajouter `GridSpaceTransform`, `bIsGridSpaceAuthority`, `LastSubWorldTransform` au header | `SubCrewMovementComponent.h` | ✓ |
+| 1.2 | Implémenter rebase + extract dans `TickComponent` | `SubCrewMovementComponent.cpp` | ✓ |
+| 1.3 | No-op `UpdateBasedMovement` / `UpdateBasedRotation` quand `bIsGridSpaceAuthority` | `SubCrewMovementComponent.cpp` | ✓ |
+| 1.4 | Supprimer `ApplyYawCompensation`, simplifier `UpdateRelativeState`, supprimer tether | `SubCrewMovementComponent.cpp` | ✓ |
+| 1.5 | Init `GridSpaceTransform` dans `EnterOnFootInSubmarine` | `SubCrewCharacter.cpp` | ✓ |
+| 1.6 | Conversion monde dans `DisembarkSubmarine` | `SubCrewCharacter.cpp` | ✓ |
+| 1.7 | Test PIE solo : marche, transitions, escalier, haute vélocité, rotation | PIE | ✓ (jitter résiduel escalier = dette asset formalisée dans CLAUDE.md) |
 
-### Phase 2 — Réseau (Post-validation locale)
+### Phase 2 — SUPERSEDED
 
-**Objectif** : Le rebase fonctionne en coop.
-**Prérequis** : Phase 1 validée.
+La Phase 2 telle qu'écrite initialement (surcharge `FSavedMove_Character` avec `GridSpaceTransform` seulement + `bool`) est **supprimée**. Elle est absorbée par la **Phase 3 réseau** de [2026-04-22_crew_environment_axis.md](2026-04-22_crew_environment_axis.md), qui sérialise l'état final (`ECrewEmbarkState` + `GridSpaceTransform` + handoff events).
 
-| # | Tâche | Fichiers | Critère de pass |
-|---|---|---|---|
-| 2.1 | Surcharge `FSavedMove_Character` avec `GridSpaceTransform` | `SubCrewMovementComponent.h/.cpp` | Compile |
-| 2.2 | Surcharge `ServerMove` pour validation locale | `SubCrewMovementComponent.cpp` | Compile |
-| 2.3 | Réplication `GridSpaceTransform` (`COND_SkipOwner`) | `SubCrewMovementComponent.cpp` | Compile |
-| 2.4 | Test Listen Server + second client | PIE multi | Pas de rubber-banding |
+Raison : implémenter le réseau avant le refactor enum + handoff EVA imposerait deux passes supplémentaires sur `FSavedMove_Character`. Une seule passe réseau après stabilisation solo des deux axes.

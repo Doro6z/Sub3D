@@ -91,27 +91,56 @@ Authoritative architecture: `reports/plans/2026-04-21_local_grid_space_authority
 
 - Use `UpdatedComponent->SetWorldLocationAndRotation`, never `SetActorLocation`/`SetActorTransform` for the rebase.
 - `bSweep=false` + `ETeleportType::TeleportPhysics`.
-- `bIgnoreBaseRotation = bIsGridSpaceAuthority` — disable CMC's built-in base-rotation carry.
-- `UpdateBasedMovement` and `UpdateBasedRotation` are no-ops when `bIsGridSpaceAuthority`.
+- `bIgnoreBaseRotation = IsGridAuthoritative()` — disable CMC's built-in base-rotation carry.
+- `UpdateBasedMovement` and `UpdateBasedRotation` are no-ops when `IsGridAuthoritative()`.
 - Controller yaw delta is applied in `TickComponent` (pre-CMC) from `SubRot.Yaw - LastSubWorldTransform.Rotator().Yaw`.
-- Tick prereqs: `SubMovement → InteriorFrame → CrewMovement` (set in `InitializeForSubmarine`).
+- Tick prereqs: `SubFlood → SubMovement → InteriorFrame → CrewMovement`. `SubFlood → SubMovement` is set in `USubMovementComponent::BeginPlay`; the crew-side chain is set in `InitializeForSubmarine`.
 
-**Legacy to be removed — do NOT extend:**
+## Flood → sub movement coupling
 
-- `ApplyYawCompensation()` — obsolete, rebase handles rotation.
-- Crew tether (`bEnableCrewTether`, world-snap safety net added 2026-04-21) — obsolete, rebase does not drift.
-- `UpdateBasedMovement`/`UpdateBasedRotation` as transport path — no-op'd in grid mode.
-- Treating `MovementBase` as the carry mechanism — it still exists for CMC's floor-finding, but no longer transports the crew.
+`USubFloodComponent` is the authority for interior water mass. Each server tick, after `AdvanceFlooding`, it writes `GetTotalWaterMassKg()` into `USubMovementComponent::FloodImpactKg` via `SetFloodImpactKg`. `SimulateStep` (fixed-tick 60 Hz) samples `FloodImpactKg` into `FloodedMassKg`, which is folded into `ComputeTotalMass` via `FloodedMassInfluence`.
+
+**Invariants:**
+
+- `USubMovementComponent` must not reach into `USubFloodComponent` or `USubmarineCompartmentComponent` directly. Flood is an **input**, not a pull.
+- Tick prereq `AddTickPrerequisiteComponent(SubFlood)` on `SubMovement` (set in `BeginPlay`) guarantees the fixed-tick integrator reads a freshly-advanced value each render frame.
+- No brute paths: `USubFloodComponent` does not call `SetActorLocation`/`SetMass`/`AddForce` on the sub. Buoyancy and gravity remain inside `ApplyPhysics`.
 
 **Kept as validation harness:**
 
 - `USub3DDebugSettings` (Project Settings > Game > Sub3D Debug) — all debug toggles live here.
 - `bLogCrewJitter` + related fields in Crew category — per-tick diagnostic log for verifying the new architecture holds. The SPIKE threshold (`CrewJitterWarnVelocityCmPerSec`, default 1200 cm/s) should now stay clean.
 
-**Implementation phases:**
+**Status:** Phase 1 completed (commits 24b1cb7, a95ce17, 716d1a2). Network phase absorbed into environment axis Phase 3 (see below).
 
-- **Phase 1 (COMPLETED — 24b1cb7)** — Solo PIE validation. Base architecture implemented. `LastSubWorldTransform` added to avoid yaw spikes. `bIsGridSpaceAuthority` explicitly controls `UpdateBasedMovement`.
-- **Phase 2 (TODO)** — Override `FSavedMove_Character` to carry `GridSpaceTransform` in the net payload. `ServerMove` validates in local space. Replicate `GridSpaceTransform` with `COND_SkipOwner`.
+## Crew environment axis — Compartment pointer + EVA handoff
+
+Orthogonal to the locomotion axis above. Authoritative architecture: `reports/plans/2026-04-22_crew_environment_axis.md`.
+
+**Principle** — crew state is a tuple `(MovementState, EnvironmentContext)` :
+
+- **MovementState** = `ECrewEmbarkState { Outside, Embarked, Transitioning }` on `USubCrewMovementComponent`. Replaces the former `bool bIsGridSpaceAuthority`.
+- **EnvironmentContext** = `TWeakObjectPtr<UCompartmentVolumeComponent> CurrentCompartment` on `ASubCrewCharacter`. `nullptr` = ocean.
+
+The locomotion component does NOT know compartments. The compartment volume does NOT know about rebase. `ASubCrewCharacter` is the single coupling point.
+
+**Detection** — managed overlap via dedicated collision channel `ECC_CompartmentProbe`. `UCompartmentVolumeComponent` (existing, enriched with `CompartmentId`, `O2Level01`, `LinkedAudioVolume`, `LinkedPostProcessVolume`) fires begin/end overlap with the crew capsule. Tiebreak on multi-overlap = nearest box center.
+
+**EVA handoff** — `USubHullBoundaryComponent` (new) placed at hull openings (airlock, breach). Detects capsule crossing by dot product against a sub-local plane. On crossing, `ASubCrewCharacter::HandleHullCrossing` applies velocity blending:
+
+- `Embarked → Outside`: `CrewMov->Velocity += V_sub_world`. State = Outside. CurrentCompartment = nullptr.
+- `Outside → Embarked`: seed `GridSpaceTransform` from world pose, `CrewMov->Velocity -= V_sub_world`. State = Embarked. CurrentCompartment = InsideCompartmentId.
+
+Breach path reuses the same component — `USubFloodComponent::CreateBreach` spawns a `USubHullBoundaryComponent{Kind=Breach}`.
+
+**Status:** Phases 1+2+3 completed (2026-04-22/23). Spawn slots + PlayerController init fixed (3.5).
+
+**Stubs for post-FP:**
+
+- `O2Level01 = 1.f` — real simulation post-FP.
+- `LinkedAudioVolume` / `LinkedPostProcessVolume` — refs populated, live switching post-FP.
+- `Transitioning` state — reserved in enum, instant flip for FP (no multi-tick blend yet).
+- Breach aspiration force — handoff event only, no force application.
 
 ## Custom plugins
 
@@ -146,6 +175,13 @@ Located in `Source/scripts/`:
 - Do not rename reflected types without a migration plan.
 - Add logs before rewriting systems. Make debug toggles editor-accessible.
 - Distinguish: root cause, possible contributor, out-of-scope issues.
+- **When the user flags unfixed state or known debt, do NOT ask them to confirm the broken state.** State the explicit fix: which asset to swap, which file to edit, which step to take. "Confirming broken state" turns a plan into silent debt — if the plan is to do X, say "replace Y with X" explicitly and track it as a TODO. Applies to assets, collision, maps, BP wiring, content and code alike.
+
+## Known environment debt (must be fixed, not worked around)
+
+Formalized TODOs for the First Playable test stage. These are the ONLY acceptable reasons for the described symptoms — do not invent other explanations while these are unresolved.
+
+- **Stairs → Ramps.** `SM_Stair_*` meshes inside `BP_Submarine_Craniata` (e.g. `SM_Stair_UpperToMain_UpperAccess`) still use complex collision. The step-edge discontinuity produces micro-jitter on walk transitions (Deck ↔ Stair). **Fix:** replace stair meshes with ramp meshes (single planar slope, simple collision). Until done, this jitter is an asset problem, NOT a rebase architecture regression.
 
 ## Writing quality
 

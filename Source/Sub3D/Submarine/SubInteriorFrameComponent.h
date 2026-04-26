@@ -67,4 +67,14 @@ private:
 	FVector LocalAngularAccelerationDegrees = FVector::ZeroVector;
 	float DebugLogTimer = 0.f;
 	bool bFrameValid = false;
+
+	/**
+	 * Last sim frame counter observed from USubMovementComponent. Acceleration signals
+	 * are recomputed only when this counter advances (i.e. a new sim step fired), using
+	 * the sim dt as divisor. Between sim steps, acceleration is held constant.
+	 * Prevents the 60Hz spike → 0 → spike pattern when rendering at render rate (e.g.
+	 * 144fps) on top of a 60Hz fixed-tick sim, which would otherwise poison Camera Sway
+	 * and any consumer that reads LocalLinearAcceleration / LocalAngularAccelerationDegrees.
+	 */
+	int32 LastSeenSubSimFrame = -1;
 };

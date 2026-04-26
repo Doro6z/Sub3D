@@ -75,6 +75,10 @@
 		{
 			"Name": "UnrealClaude",
 			"Enabled": true
+		},
+		{
+			"Name": "Sub3DDebugPanel",
+			"Enabled": true
 		}
 	],
 	"TargetPlatforms": [],

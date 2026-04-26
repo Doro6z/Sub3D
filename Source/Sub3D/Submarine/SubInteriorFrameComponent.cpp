@@ -70,22 +70,48 @@ void USubInteriorFrameComponent::TickComponent(float DeltaTime, ELevelTick TickT
 
 	if (DeltaTime > KINDA_SMALL_NUMBER)
 	{
-		FVector WorldLinearVelocity = FrameLocationDelta / DeltaTime;  // fallback: finite diff (legacy behavior)
+		FVector WorldLinearVelocity = FrameLocationDelta / DeltaTime;  // fallback: finite diff (no-SubMov case)
+		const USubMovementComponent* SubMov = nullptr;
 		if (const ASubmarineBase* Sub = Cast<ASubmarineBase>(Owner))
 		{
-			if (const USubMovementComponent* SubMov = Sub->SubMovement)
+			SubMov = Sub->SubMovement;
+			if (SubMov)
 			{
-				WorldLinearVelocity = SubMov->Velocity;  // sim-side, signal propre par construction
+				WorldLinearVelocity = SubMov->Velocity;  // sim-side, stepped at FixedSimulationHz
 			}
 		}
 		LocalLinearVelocity = Owner->GetActorTransform().InverseTransformVectorNoScale(WorldLinearVelocity);
-		LocalLinearAcceleration = (LocalLinearVelocity - PreviousLocalLinearVelocity) / DeltaTime;
 
 		LocalAngularVelocityDegrees = FVector(
 			FrameRotationDelta.Roll / DeltaTime,
 			FrameRotationDelta.Pitch / DeltaTime,
 			FrameRotationDelta.Yaw / DeltaTime);
-		LocalAngularAccelerationDegrees = (LocalAngularVelocityDegrees - PreviousLocalAngularVelocityDegrees) / DeltaTime;
+
+		// Acceleration signals: recompute only when the sub sim step advances. Dividing a
+		// stepped-60Hz velocity by render_dt (e.g. 1/144) produces a spike/zero pattern at
+		// sim boundaries that breaks Camera Sway and any consumer of this signal. Use the
+		// sim dt as divisor so the acceleration reflects the true per-sim-step change;
+		// hold it constant between sim steps.
+		if (SubMov)
+		{
+			const int32 CurrentSimFrame = SubMov->GetSimFrameCounter();
+			if (CurrentSimFrame != LastSeenSubSimFrame)
+			{
+				const float SimDt = SubMov->FixedSimulationHz > KINDA_SMALL_NUMBER
+					? (1.f / SubMov->FixedSimulationHz)
+					: (1.f / 60.f);
+				LocalLinearAcceleration = (LocalLinearVelocity - PreviousLocalLinearVelocity) / SimDt;
+				LocalAngularAccelerationDegrees = (LocalAngularVelocityDegrees - PreviousLocalAngularVelocityDegrees) / SimDt;
+				LastSeenSubSimFrame = CurrentSimFrame;
+			}
+			// else: hold previous LocalLinearAcceleration / LocalAngularAccelerationDegrees.
+		}
+		else
+		{
+			// Fallback (no SubMov): use finite diff at render rate.
+			LocalLinearAcceleration = (LocalLinearVelocity - PreviousLocalLinearVelocity) / DeltaTime;
+			LocalAngularAccelerationDegrees = (LocalAngularVelocityDegrees - PreviousLocalAngularVelocityDegrees) / DeltaTime;
+		}
 	}
 	else
 	{

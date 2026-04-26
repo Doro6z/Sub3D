@@ -1,0 +1,112 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 920 620" width="920" height="620">
+  <title>Flood containment algorithm — per-pixel flow</title>
+  <desc>Step-by-step per-pixel evaluation in the material Custom HLSL node.</desc>
+  <defs>
+    <marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#334"/>
+    </marker>
+    <marker id="arrYes" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#2a9d3f"/>
+    </marker>
+    <marker id="arrNo" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#c22"/>
+    </marker>
+  </defs>
+  <style>
+    .title { font-family: Consolas, monospace; font-size: 16px; font-weight: 700; fill: #111; }
+    .node-input  { fill: #f4f0e0; stroke: #705b20; stroke-width: 2; rx: 6; }
+    .node-test   { fill: #e6eefa; stroke: #204e8b; stroke-width: 2; rx: 6; }
+    .node-loop   { fill: #f4e8f4; stroke: #702070; stroke-width: 2; rx: 6; }
+    .node-out-yes{ fill: #d7f0d7; stroke: #2a7d2a; stroke-width: 2; rx: 6; }
+    .node-out-no { fill: #f8d8d8; stroke: #a02020; stroke-width: 2; rx: 6; }
+    .node-title  { font-family: Consolas, monospace; font-size: 13px; font-weight: 700; fill: #111; }
+    .node-body   { font-family: Consolas, monospace; font-size: 11.5px; fill: #222; }
+    .edge { stroke: #334; stroke-width: 1.8; fill: none; }
+    .edge-yes { stroke: #2a9d3f; stroke-width: 2; fill: none; }
+    .edge-no { stroke: #c22; stroke-width: 2; fill: none; }
+    .edge-label { font-family: Consolas, monospace; font-size: 11px; fill: #334; }
+    .edge-label-yes { font-family: Consolas, monospace; font-size: 11px; font-weight: 700; fill: #2a7d2a; }
+    .edge-label-no { font-family: Consolas, monospace; font-size: 11px; font-weight: 700; fill: #a02020; }
+  </style>
+
+  <text x="20" y="26" class="title">Algorithm — Material Custom HLSL per-pixel evaluation</text>
+
+  <!-- INPUTS -->
+  <rect class="node-input" x="40" y="60" width="280" height="150"/>
+  <text x="52" y="82" class="node-title">Inputs (per-pixel or per-MID)</text>
+  <text x="52" y="104" class="node-body">P_WS           : AbsoluteWorldPosition</text>
+  <text x="52" y="122" class="node-body">CV_Center_WS   : VectorParameter (MID)</text>
+  <text x="52" y="140" class="node-body">CV_LocalCenter : VectorParameter (MID)</text>
+  <text x="52" y="158" class="node-body">CV_HalfExtent  : VectorParameter (MID)</text>
+  <text x="52" y="176" class="node-body">SubWorldToLocal: 4×VectorParameter (MID)</text>
+  <text x="52" y="194" class="node-body">WaterLevel01   : ScalarParameter (MID)</text>
+
+  <!-- TEST 1 -->
+  <rect class="node-test" x="360" y="60" width="300" height="90"/>
+  <text x="372" y="82" class="node-title">Test 1 — InsideCV (AABB in sub-local)</text>
+  <text x="372" y="104" class="node-body">P_Local = SubWorldToLocal · P_WS</text>
+  <text x="372" y="122" class="node-body">InsideCV = all(|P_Local − LocalCenter|</text>
+  <text x="372" y="140" class="node-body">          &lt; HalfExtent)</text>
+
+  <!-- TEST 1 → OUT_NO -->
+  <path class="edge-no" d="M 510 150 L 510 180" marker-end="url(#arrNo)"/>
+  <text x="515" y="170" class="edge-label-no">if false</text>
+
+  <!-- OUT_NO 1 -->
+  <rect class="node-out-no" x="420" y="185" width="180" height="40"/>
+  <text x="432" y="210" class="node-body">return 0.0 (not in CV)</text>
+
+  <!-- TEST 1 → TEST 2 -->
+  <path class="edge-yes" d="M 660 105 L 720 105" marker-end="url(#arrYes)"/>
+  <text x="665" y="95" class="edge-label-yes">if true</text>
+
+  <!-- TEST 2 / Setup ray -->
+  <rect class="node-test" x="720" y="60" width="180" height="90"/>
+  <text x="732" y="82" class="node-title">Setup ray</text>
+  <text x="732" y="104" class="node-body">Dir = P − Center</text>
+  <text x="732" y="122" class="node-body">RayLen = length(Dir)</text>
+  <text x="732" y="140" class="node-body">Dir = Dir / RayLen</text>
+
+  <!-- SETUP → LOOP -->
+  <path class="edge" d="M 810 150 L 810 240" marker-end="url(#arr)"/>
+
+  <!-- LOOP -->
+  <rect class="node-loop" x="680" y="245" width="220" height="150"/>
+  <text x="692" y="268" class="node-title">Loop (≤ 32 iter)</text>
+  <text x="692" y="290" class="node-body">for (i = 0..31):</text>
+  <text x="700" y="308" class="node-body">  if T ≥ RayLen: break → visible</text>
+  <text x="700" y="326" class="node-body">  SampleTW = TWCenter + Dir × T</text>
+  <text x="700" y="344" class="node-body">  d = GetDistToNearestSurf(TW)</text>
+  <text x="700" y="362" class="node-body">  if d &lt; 5 cm: HIT → blocked</text>
+  <text x="700" y="380" class="node-body">  T += max(d, 4 cm)</text>
+
+  <!-- LOOP → BLOCKED -->
+  <path class="edge-no" d="M 680 340 L 580 340 L 580 410" marker-end="url(#arrNo)"/>
+  <text x="585" y="335" class="edge-label-no">on HIT</text>
+
+  <!-- BLOCKED -->
+  <rect class="node-out-no" x="480" y="415" width="200" height="40"/>
+  <text x="492" y="440" class="node-body">return 0.0 (blocked by mesh)</text>
+
+  <!-- LOOP → VISIBLE -->
+  <path class="edge-yes" d="M 780 395 L 780 470" marker-end="url(#arrYes)"/>
+  <text x="785" y="430" class="edge-label-yes">on loop exit</text>
+
+  <!-- VISIBLE → TEST 3 -->
+  <rect class="node-test" x="680" y="475" width="220" height="60"/>
+  <text x="692" y="497" class="node-title">Test 3 — Water level gate</text>
+  <text x="692" y="518" class="node-body">return WaterLevel01 &gt; ε ? 1 : 0</text>
+
+  <!-- TEST 3 → OUT YES -->
+  <path class="edge-yes" d="M 680 505 L 420 505 L 420 535" marker-end="url(#arrYes)"/>
+  <text x="430" y="498" class="edge-label-yes">if water present</text>
+
+  <!-- OUT YES -->
+  <rect class="node-out-yes" x="300" y="540" width="240" height="50"/>
+  <text x="312" y="566" class="node-body">return 1.0 → water pixel visible</text>
+  <text x="312" y="582" class="node-body">(then × EdgePolish × look)</text>
+
+  <!-- Bridge INPUTS → TEST 1 -->
+  <path class="edge" d="M 320 110 L 360 105" marker-end="url(#arr)"/>
+</svg>
