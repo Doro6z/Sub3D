@@ -56,24 +56,9 @@ public:
 	 * Authoritative crew pose in the submarine's local space. Updated each tick via rebase/extract.
 	 * Replicated with COND_SkipOwner: owning client computes locally (via its own rebase), non-owning
 	 * clients receive the server-computed value and rebase the peer crew against their local sub pose.
-	 *
-	 * SimulatedProxy peers route the rebase through GetEffectiveGridSpaceTransform() which lerps
-	 * between the previous rendered value and this latest received target — without smoothing,
-	 * peer crews step at the replication cadence (visible jitter when a peer is walking).
 	 */
-	UPROPERTY(BlueprintReadOnly, ReplicatedUsing = OnRep_GridSpaceTransform, Category = "Submarine|Crew|LocalGrid")
+	UPROPERTY(BlueprintReadOnly, Replicated, Category = "Submarine|Crew|LocalGrid")
 	FTransform GridSpaceTransform = FTransform::Identity;
-
-	UFUNCTION()
-	void OnRep_GridSpaceTransform();
-
-	/**
-	 * Returns the GridSpaceTransform value the rebase should apply this tick. On Authority and
-	 * AutonomousProxy (= owning client), returns GridSpaceTransform directly. On SimulatedProxy
-	 * (= peer crew on a remote client), returns a time-lerp between the previously rendered
-	 * value and the latest replicated target, so peer motion is continuous between updates.
-	 */
-	FTransform GetEffectiveGridSpaceTransform() const;
 
 	/**
 	 * Crew locomotion axis. Replicated with COND_SkipOwner — owner predicts state transitions
@@ -335,14 +320,4 @@ private:
 
 	/** Server-side container feeding our custom FCharacterNetworkMoveData_SubCrew to CMC's move pipeline. */
 	TUniquePtr<FCharacterNetworkMoveDataContainer_SubCrew> SubCrewMoveDataContainer;
-
-	// ── SimProxy peer GridSpaceTransform smoothing (S2) ────────────────────────────
-	// On a SimulatedProxy peer, OnRep_GridSpaceTransform fires when a new value arrives.
-	// We capture the previously-rendered transform as the new "prev" anchor, record both
-	// receive times (wall-clock), and the rebase lerps between Prev and the latest target
-	// over (TargetTime - PrevTime). Owning client / authority bypass this entirely.
-	FTransform GridSpacePrevRendered = FTransform::Identity;
-	double GridSpacePrevReceiveRealTime = 0.0;
-	double GridSpaceTargetReceiveRealTime = 0.0;
-	bool bHasReceivedGridSpaceReplication = false;
 };
