@@ -223,10 +223,33 @@ FRotator USubInteriorFrameComponent::LocalToWorldRotation(const FRotator& LocalR
 
 FTransform USubInteriorFrameComponent::GetSubTransform() const
 {
-	if (const AActor* Owner = GetOwner())
+	const AActor* Owner = GetOwner();
+	if (!Owner)
 	{
-		return Owner->GetActorTransform();
+		return FTransform::Identity;
 	}
 
-	return FTransform::Identity;
+	// On the authority path, the actor's current pose is the LERPED visual pose written
+	// by Layer 1 (SubMovementComponent::TickComponent's per-frame Lerp(PrevSim, CurrSim)).
+	// That pose varies per render frame depending on alpha — for a moving sub at variable
+	// frame rate (breach load, ladder transit), the variance shows up as jitter on
+	// everything that reads GetSubTransform() (crew rebase, water plane, debug volumes).
+	// Route to the authoritative post-sim pose instead.
+	if (Owner->HasAuthority())
+	{
+		if (const ASubmarineBase* Sub = Cast<ASubmarineBase>(Owner))
+		{
+			if (const USubMovementComponent* SubMov = Sub->SubMovement)
+			{
+				if (SubMov->HasAuthoritativeTransform())
+				{
+					return SubMov->GetAuthoritativeTransform();
+				}
+			}
+		}
+	}
+
+	// Non-authority: actor pose is the Hermite-interpolated snapshot result, which is
+	// already the intended render-time pose. Use it directly.
+	return Owner->GetActorTransform();
 }

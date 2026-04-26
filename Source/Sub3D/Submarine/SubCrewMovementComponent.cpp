@@ -113,9 +113,13 @@ void USubCrewMovementComponent::TickComponent(float DeltaTime, ELevelTick TickTy
 		if (USubInteriorFrameComponent* Frame = GetInteriorFrame())
 		{
 			const FTransform SubTransform = Frame->GetSubTransform();
+			// On SimProxy peers, GetEffectiveGridSpaceTransform returns a time-lerped value
+			// between the last two replicated GridSpaceTransform updates. Owner/Authority
+			// returns the raw GridSpaceTransform (locally computed each tick).
+			const FTransform EffectiveGS = GetEffectiveGridSpaceTransform();
 
-			const FVector RebasedWorldPos = SubTransform.TransformPosition(GridSpaceTransform.GetLocation());
-			const FRotator LocalRot = GridSpaceTransform.Rotator();
+			const FVector RebasedWorldPos = SubTransform.TransformPosition(EffectiveGS.GetLocation());
+			const FRotator LocalRot = EffectiveGS.Rotator();
 			const FRotator SubRot = SubTransform.Rotator();
 			// Yaw-only capsule rotation: the capsule must stay aligned with world gravity
 			// so CMC's collision resolution behaves. Pitch/roll of the sub are cosmetic only.
@@ -156,7 +160,9 @@ void USubCrewMovementComponent::TickComponent(float DeltaTime, ELevelTick TickTy
 		// The CMC has applied input, gravity, and collision resolution in world space.
 		// Project the new world pose back into sub-local space; that becomes the
 		// authoritative GridSpaceTransform for next frame's rebase.
-		if (IsGridAuthoritative() && CharacterOwner)
+		// Simulated Proxies must NEVER extract; they rely purely on the replicated GridSpaceTransform
+		// from the server, otherwise they create a destructive feedback loop against SimulatedTick.
+		if (IsGridAuthoritative() && CharacterOwner && CharacterOwner->GetLocalRole() != ROLE_SimulatedProxy)
 		{
 			if (USubInteriorFrameComponent* Frame = GetInteriorFrame())
 			{
@@ -302,6 +308,64 @@ USubInteriorFrameComponent* USubCrewMovementComponent::GetInteriorFrame() const
 bool USubCrewMovementComponent::HasSubmarineBinding() const
 {
 	return GetInteriorFrame() != nullptr;
+}
+
+void USubCrewMovementComponent::OnRep_GridSpaceTransform()
+{
+	// SimulatedProxy peer just received a new GridSpaceTransform value. Capture the previous
+	// rendered transform as the new "prev" anchor for the lerp, and record receive times so
+	// the rebase can compute interpolation alpha each tick.
+	const double RealNow = FPlatformTime::Seconds();
+	if (!bHasReceivedGridSpaceReplication)
+	{
+		// First snapshot: no prev to lerp from. Snap the rendered state to the received value.
+		GridSpacePrevRendered = GridSpaceTransform;
+		GridSpacePrevReceiveRealTime = RealNow;
+		GridSpaceTargetReceiveRealTime = RealNow;
+		bHasReceivedGridSpaceReplication = true;
+	}
+	else
+	{
+		// Anchor new prev at the currently-rendered (interpolated) value, not the previous
+		// target — handles the case where alpha hadn't reached 1 when the new value arrived.
+		GridSpacePrevRendered = GetEffectiveGridSpaceTransform();
+		GridSpacePrevReceiveRealTime = GridSpaceTargetReceiveRealTime;
+		GridSpaceTargetReceiveRealTime = RealNow;
+	}
+}
+
+FTransform USubCrewMovementComponent::GetEffectiveGridSpaceTransform() const
+{
+	// Owning client (AutonomousProxy) and Authority compute GridSpaceTransform locally
+	// each tick — no smoothing needed, the value is fresh.
+	if (!CharacterOwner || CharacterOwner->GetLocalRole() != ROLE_SimulatedProxy)
+	{
+		return GridSpaceTransform;
+	}
+
+	// SimulatedProxy peer: lerp between the previous rendered value and the latest received
+	// target over the inter-replication interval. Smooths stepwise replication into continuous
+	// motion when a peer is walking.
+	if (!bHasReceivedGridSpaceReplication
+		|| GridSpaceTargetReceiveRealTime <= GridSpacePrevReceiveRealTime)
+	{
+		return GridSpaceTransform;
+	}
+
+	const double RealNow = FPlatformTime::Seconds();
+	const double InterpDuration = GridSpaceTargetReceiveRealTime - GridSpacePrevReceiveRealTime;
+	const float Alpha = FMath::Clamp(
+		static_cast<float>((RealNow - GridSpaceTargetReceiveRealTime) / InterpDuration), 0.f, 1.f);
+
+	const FVector LerpedLoc = FMath::Lerp(
+		GridSpacePrevRendered.GetLocation(),
+		GridSpaceTransform.GetLocation(),
+		Alpha);
+	const FRotator LerpedRot = FMath::Lerp(
+		GridSpacePrevRendered.Rotator(),
+		GridSpaceTransform.Rotator(),
+		Alpha);
+	return FTransform(LerpedRot.Quaternion(), LerpedLoc);
 }
 
 void USubCrewMovementComponent::SetEmbarkState(ECrewEmbarkState NewState)
@@ -814,7 +878,8 @@ void USubCrewMovementComponent::DebugDrawState()
 		const FString SubBindStr = bHasValidFrame ? FString(TEXT("bound")) : FString(TEXT("unbound"));
 
 		const float DisplayTime = 0.f;  // Refreshed every tick via stable keys.
-		GEngine->AddOnScreenDebugMessage(1001, DisplayTime, FColor::Cyan,
+		const uint64 KeyBase = static_cast<uint64>(CharacterOwner->GetUniqueID()) * 1000;
+		GEngine->AddOnScreenDebugMessage(KeyBase + 1, DisplayTime, FColor::Cyan,
 			FString::Printf(TEXT("EmbarkState : %s   |   Mode : %s   |   Compartment : %s   |   Sub : %s"),
 				*StateStr, *ModeStr, *CompStr, *SubBindStr));
 
@@ -824,17 +889,17 @@ void USubCrewMovementComponent::DebugDrawState()
 			const float LocalYaw = GridSpaceTransform.Rotator().Yaw;
 			const FVector SubPos = SubTransform.GetLocation();
 			const float SubYaw = SubTransform.Rotator().Yaw;
-			GEngine->AddOnScreenDebugMessage(1002, DisplayTime, FColor::Cyan,
+			GEngine->AddOnScreenDebugMessage(KeyBase + 2, DisplayTime, FColor::Cyan,
 				FString::Printf(TEXT("Grid  : X=%8.1f  Y=%8.1f  Z=%8.1f  Yaw=%7.2f"), LocalPos.X, LocalPos.Y, LocalPos.Z, LocalYaw));
-			GEngine->AddOnScreenDebugMessage(1004, DisplayTime, FColor::Cyan,
+			GEngine->AddOnScreenDebugMessage(KeyBase + 4, DisplayTime, FColor::Cyan,
 				FString::Printf(TEXT("Sub   : X=%8.1f  Y=%8.1f  Z=%8.1f  Yaw=%7.2f"), SubPos.X, SubPos.Y, SubPos.Z, SubYaw));
 		}
 		else
 		{
-			GEngine->AddOnScreenDebugMessage(1002, DisplayTime, FColor::Yellow, TEXT("Grid  : <n/a — no sub binding>"));
-			GEngine->AddOnScreenDebugMessage(1004, DisplayTime, FColor::Yellow, TEXT("Sub   : <n/a — no sub binding>"));
+			GEngine->AddOnScreenDebugMessage(KeyBase + 2, DisplayTime, FColor::Yellow, TEXT("Grid  : <n/a — no sub binding>"));
+			GEngine->AddOnScreenDebugMessage(KeyBase + 4, DisplayTime, FColor::Yellow, TEXT("Sub   : <n/a — no sub binding>"));
 		}
-		GEngine->AddOnScreenDebugMessage(1003, DisplayTime, FColor::Cyan,
+		GEngine->AddOnScreenDebugMessage(KeyBase + 3, DisplayTime, FColor::Cyan,
 			FString::Printf(TEXT("World : X=%8.1f  Y=%8.1f  Z=%8.1f  Yaw=%7.2f"), WorldPos.X, WorldPos.Y, WorldPos.Z, WorldYaw));
 	}
 }

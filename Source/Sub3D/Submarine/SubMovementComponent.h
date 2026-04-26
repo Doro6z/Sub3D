@@ -278,6 +278,24 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Submarine|Physics")
 	bool HadBlockingHitLastStep() const { return bLastStepHadBlockingHit; }
 
+	/**
+	 * Authoritative post-sim transform — the pose at the end of the last SimulateStep,
+	 * BEFORE the per-frame visual interp (Layer 1) writes a lerped pose to the actor.
+	 * Read by USubInteriorFrameComponent::GetSubTransform() so the crew rebase and any
+	 * other consumer sees a stable per-tick value, not the alpha-dependent lerped pose.
+	 *
+	 * Authority-only: on non-authority worlds the actor pose IS the rendering target
+	 * (Hermite-interpolated snapshot), and CurrSim is not maintained — callers should
+	 * fall back to GetActorTransform() for non-authority owners.
+	 */
+	FTransform GetAuthoritativeTransform() const
+	{
+		return FTransform(CurrSimRotation, CurrSimLocation);
+	}
+
+	/** Whether the authoritative transform cache has been populated (>=1 sim step ran). */
+	bool HasAuthoritativeTransform() const { return bHasSimBuffer; }
+
 private:
 	// Input values replicated to all clients for visual feedback (rudder mesh
 	// yaw, hydroplane mesh pitch). Server-authoritative; writes come from
