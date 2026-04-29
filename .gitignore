@@ -20,6 +20,9 @@ Saved/
 *.xcscmblueprint
 Content/GeneratedRoutes/
 
+# Local diagnostic artifacts
+.tmp_frames/
+
 # Python
 __pycache__/
 *.py[cod]
