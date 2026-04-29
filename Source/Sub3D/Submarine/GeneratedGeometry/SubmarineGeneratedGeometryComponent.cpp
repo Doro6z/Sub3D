@@ -155,6 +155,10 @@ bool USubmarineGeneratedGeometryComponent::BuildExteriorHull(const USubmarineDef
 		}
 
 		CollisionPMC->SetCollisionProfileName(FName(TEXT("SubmarineHull")));
+		// Movement hull collision is for submarine-vs-world sweeps only.
+		// Crew collision is provided by interior floor/wall collision, so
+		// exterior movement slices must not block Pawn.
+		CollisionPMC->SetCollisionResponseToChannel(ECC_Pawn, ECR_Ignore);
 		CollisionPMC->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
 		CollisionPMC->SetNotifyRigidBodyCollision(true);
 		CollisionPMC->SetGenerateOverlapEvents(false);

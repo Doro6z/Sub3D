@@ -108,9 +108,21 @@ void UFloodWaterPlaneComponent::EnsurePlaneMesh()
 	}
 	else
 	{
-		// Generic engine plane (100x100 cm) — scale up to PlaneWorldSizeCm.
-		const float ScaleXY = PlaneWorldSizeCm / 100.f;
-		PlaneMeshComponent->SetWorldScale3D(FVector(ScaleXY, ScaleXY, 1.f));
+		// Generic engine plane (100x100 cm). Size to the compartment's XY footprint so the
+		// plane is spatially contained by geometry, not by shader ray-march.
+		// Falls back to PlaneWorldSizeCm only when SourceVolume is not yet assigned.
+		if (const UCompartmentVolumeComponent* Source = SourceVolume.Get())
+		{
+			const FVector Extent = Source->GetScaledBoxExtent(); // half-extents
+			const float ScaleX = (Extent.X * 2.f) / 100.f;
+			const float ScaleY = (Extent.Y * 2.f) / 100.f;
+			PlaneMeshComponent->SetWorldScale3D(FVector(ScaleX, ScaleY, 1.f));
+		}
+		else
+		{
+			const float ScaleXY = PlaneWorldSizeCm / 100.f;
+			PlaneMeshComponent->SetWorldScale3D(FVector(ScaleXY, ScaleXY, 1.f));
+		}
 	}
 
 	if (WaterMaterial)
@@ -147,9 +159,11 @@ void UFloodWaterPlaneComponent::ApplyWaterState(float NewLevel01, float NewHeigh
 	const FVector PlaneWorldLoc(VolumeXY.X, VolumeXY.Y, SurfaceWorld.Z);
 	PlaneMeshComponent->SetWorldLocation(PlaneWorldLoc);
 
-	// Keep plane horizontal in world (water surface doesn't follow sub tilt for FP). Post-FP can swap
-	// to sub-aligned rotation if we want "inertial water" (water sloshes with sub motion).
-	PlaneMeshComponent->SetWorldRotation(FRotator::ZeroRotator);
+	// Plane stays horizontal (Z=world up) but follows the compartment's yaw so the scaled
+	// XY footprint stays aligned with the sub's local XY axes as the sub turns.
+	// Pitch and roll remain zero — water surface is always inertially horizontal for FP.
+	const float SubYaw = SourceVolume->GetComponentRotation().Yaw;
+	PlaneMeshComponent->SetWorldRotation(FRotator(0.f, SubYaw, 0.f));
 
 	// ── Visibility ──────────────────────────────────────────────────────────
 	const bool bShouldBeVisible = NewLevel01 > VisibilityThreshold01;
@@ -163,12 +177,13 @@ void UFloodWaterPlaneComponent::ApplyWaterState(float NewLevel01, float NewHeigh
 	// ── Material parameters (if MID available) ──────────────────────────────
 	// Drive the per-compartment MID with everything the material needs for:
 	//  - sim-driven look  (WaterLevel01, WaterHeightCm)
-	//  - Containment shader (Option C v2 — center-visibility line-of-sight):
+	//  - AABB containment (OBB in CV local space — pure geometry, no ray-march):
 	//      CV_Center_WS       : world-space location of the CompartmentVolume center
 	//      CV_HalfExtent      : CV's scaled half-extents (sub-local axis-aligned box)
 	//      CV_W2L_Row0/1/2    : CV world-to-local transform (4x3) as 3 float4 rows
-	// Material samples AbsoluteWorldPosition per-pixel, transforms via these rows into
-	// CV-local space for the AABB gate, then casts a ray from CV_Center_WS for visibility.
+	// The plane mesh is already sized to the compartment footprint; the AABB shader check
+	// is a secondary safety clip for edge pixels and sub tilt.
+	// No Global Distance Field dependency — containment is structural, not inferred.
 	if (MaterialMID)
 	{
 		MaterialMID->SetScalarParameterValue(TEXT("WaterLevel01"), NewLevel01);
@@ -198,6 +213,7 @@ void UFloodWaterPlaneComponent::ApplyWaterState(float NewLevel01, float NewHeigh
 		MaterialMID->SetVectorParameterValue(TEXT("CV_W2L_Row0"), MakeRow(0));
 		MaterialMID->SetVectorParameterValue(TEXT("CV_W2L_Row1"), MakeRow(1));
 		MaterialMID->SetVectorParameterValue(TEXT("CV_W2L_Row2"), MakeRow(2));
+		MaterialMID->SetVectorParameterValue(TEXT("CV_W2L_Row3"), MakeRow(2)); // material param name mismatch guard
 	}
 
 	// ── Debug draw (independent of material) ────────────────────────────────

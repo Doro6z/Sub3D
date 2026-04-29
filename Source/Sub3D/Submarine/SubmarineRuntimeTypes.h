@@ -101,6 +101,28 @@ struct FSubmarineNetState
 	UPROPERTY(BlueprintReadOnly, Category = "Net")
 	FVector_NetQuantize10 AngularVelocity = FVector::ZeroVector;
 
+	// Authority-derived linear acceleration (cm/s^2, world space). Replicated so the
+	// client presentation chain can sample acceleration AT THE PLAYBACK MOMENT instead of
+	// re-deriving from finite differences on a smoothed-and-lagged transform.
+	UPROPERTY(BlueprintReadOnly, Category = "Net")
+	FVector_NetQuantize10 LinearAcceleration = FVector::ZeroVector;
+
+	// Authority-derived angular acceleration (deg/s^2, world space).
+	UPROPERTY(BlueprintReadOnly, Category = "Net")
+	FVector_NetQuantize10 AngularAccelerationDeg = FVector::ZeroVector;
+
+	// Helm input snapshots, replicated alongside pose/velocity so visual mesh consumers
+	// (rudder, dive plane, thrust) sample at the same beat as the sub body. Replaces the
+	// independent UPROPERTY(Replicated) streams previously on USubMovementComponent.
+	UPROPERTY(BlueprintReadOnly, Category = "Net")
+	float RudderInput = 0.f;
+
+	UPROPERTY(BlueprintReadOnly, Category = "Net")
+	float DivePlaneInput = 0.f;
+
+	UPROPERTY(BlueprintReadOnly, Category = "Net")
+	float ThrustInput = 0.f;
+
 	UPROPERTY(BlueprintReadOnly, Category = "Net")
 	float ForwardSpeed = 0.f;
 

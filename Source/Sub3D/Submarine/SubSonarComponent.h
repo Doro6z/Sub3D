@@ -85,9 +85,16 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Sonar|Persistence", meta = (ClampMin = "1.0"))
 	float PointRefreshRadiusCm = 140.f;
 
-	// Safety cap for replicated point count.
+	// Safety cap for replicated point count. Lowered for FP — large arrays caused
+	// freeze on first ping in Play-as-Client (full TArray re-rep on each change).
+	// Post-FP: switch to FFastArraySerializer for delta replication and raise this.
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Sonar|Persistence", meta = (ClampMin = "64"))
-	int32 MaxRetainedPoints = 2400;
+	int32 MaxRetainedPoints = 512;
+
+	// Server-side cull rate. Was running every server tick at 60Hz, dirtying the
+	// replicated SonarPoints array continuously. Throttled to avoid bandwidth waste.
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Sonar|Persistence", meta = (ClampMin = "0.05"))
+	float CullIntervalS = 0.5f;
 
 	// Hold mode: while active, pings are attempted on interval (still constrained by PingCooldownS).
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Sonar|Continuous", meta = (ClampMin = "0.05"))
@@ -100,6 +107,12 @@ public:
 
 	UPROPERTY(Replicated, BlueprintReadOnly, Category = "Sonar")
 	TArray<float> RecentPingTimestamps;
+
+	// Authoritative timestamp of the last accepted ping, replicated as a single
+	// float. Lets clients detect a new ping in O(1) without scanning SonarPoints
+	// every NativeTick. Mirrors LastPingTime on server.
+	UPROPERTY(Replicated, BlueprintReadOnly, Category = "Sonar")
+	float LastReplicatedPingTime = -1000.f;
 
 	// ── API ───────────────────────────────────────────────────────────────────
 
@@ -128,6 +141,32 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Sonar")
 	const TArray<float>& GetRecentPingTimestamps() const { return RecentPingTimestamps; }
 
+	/** Replicated authoritative timestamp of the last accepted ping. Display
+	 *  widgets should read this instead of scanning SonarPoints — O(1) check
+	 *  for "is there a new ping". */
+	UFUNCTION(BlueprintPure, Category = "Sonar")
+	float GetLastReplicatedPingTime() const { return LastReplicatedPingTime; }
+
+	/** Local-only timestamp of the most recent locally-requested cosmetic ping.
+	 *  Updated by TriggerLocalCosmeticPing(); not replicated. Display widgets
+	 *  use this to start the scan-sweep visual immediately on input press,
+	 *  without waiting for the RPC roundtrip + replication in Play-as-Client. */
+	UFUNCTION(BlueprintPure, Category = "Sonar")
+	float GetLocalCosmeticPingTime() const { return LocalCosmeticPingTime; }
+
+	/** Call from the client input handler BEFORE the server RPC. Updates the
+	 *  local cosmetic timestamp and fires OnLocalCosmeticPingRequested for BP
+	 *  feedback (sound, UI flash). Does NOT trigger the actual ping — the
+	 *  server still owns authoritative TryFirePing. */
+	UFUNCTION(BlueprintCallable, Category = "Sonar")
+	void TriggerLocalCosmeticPing();
+
+	/** BP hook fired locally when TriggerLocalCosmeticPing is called. Use to
+	 *  play immediate cosmetic feedback (scan-circle anim, sound) so input
+	 *  feels instantaneous despite the server RPC roundtrip in Play-as-Client. */
+	UFUNCTION(BlueprintImplementableEvent, Category = "Sonar")
+	void OnLocalCosmeticPingRequested();
+
 	/**
 	 * Blueprint event fired on clients when SonarPoints is updated via replication.
 	 * Override in BP to trigger a paint invalidation on the sonar display widget.
@@ -144,7 +183,7 @@ public:
 
 private:
 	void ExecutePingRaycasts();
-	void TickCullExpiredPoints();
+	void TickCullExpiredPoints(float DeltaTime);
 	void TickContinuousPing(float DeltaTime);
 	void MergePingPoints(TArray<FSonarHitPoint>&& NewPoints, float PingTime);
 
@@ -153,4 +192,11 @@ private:
 	bool bContinuousPingActive = false;
 	float ContinuousPingAccumulator = 0.f;
 	bool bLoggedReplicationPointCap = false;
+
+	// Client-only: world time of the most recent local cosmetic ping request.
+	// Set by TriggerLocalCosmeticPing on input press, before the server RPC.
+	float LocalCosmeticPingTime = -1000.f;
+
+	// Server-only: accumulator for throttled cull execution (see CullIntervalS).
+	float CullAccumulator = 0.f;
 };

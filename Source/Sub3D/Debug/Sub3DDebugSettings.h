@@ -17,6 +17,36 @@ class SUB3D_API USub3DDebugSettings : public UDeveloperSettings
 public:
 	virtual FName GetCategoryName() const override { return FName("Game"); }
 
+	// ── Master toggles ────────────────────────────────────────
+	/** Master switch for the unified motion-chain instrumentation. When ON, all
+	 *  motion-related log toggles are forced on (sub movement, sub interp pacing,
+	 *  flood, crew movement, crew jitter, crew env state, interior frame), AND the
+	 *  aggregate "Motion chain tick" line is emitted once per render frame from each
+	 *  locally-controlled crew so server/client/peer streams correlate by frame.
+	 *
+	 *  Authority-max plan: see
+	 *  reports/plans/2026-04-27_unified_motion_chain_master_refactor.md §7. */
+	UPROPERTY(Config, EditAnywhere, Category = "MotionChain")
+	bool bLogPresentationChain = false;
+
+	/** Per-tick crew motion chain TRACE: captures the crew capsule state at 4 points
+	 *  in each tick (PRE-rebase, POST-rebase, POST-CMC, POST-extract), prints the
+	 *  delta at each handoff, AND emits a separate EVENT line when MovementBase /
+	 *  MovementMode / Floor changes. Lets you see exactly what happens at the
+	 *  precise frame a stair / floor-loss / breach trigger fires.
+	 *  Volume: ~30 lines/sec when crew is locally controlled. Use for short repros. */
+	UPROPERTY(Config, EditAnywhere, Category = "MotionChain")
+	bool bLogMotionChainTrace = false;
+
+	// Read-helpers ride OR with the master toggle, so a single click in Project
+	// Settings turns the whole chain on without touching the per-component toggles.
+	bool ShouldLogSubMovement() const           { return bLogSubMovement           || bLogPresentationChain; }
+	bool ShouldLogSubInterpPacing() const       { return bLogSubInterpPacing       || bLogPresentationChain; }
+	bool ShouldLogFlood() const                 { return bLogFlood                 || bLogPresentationChain; }
+	bool ShouldLogCrewMovement() const          { return bLogCrewMovement          || bLogPresentationChain; }
+	bool ShouldLogCrewJitter() const            { return bLogCrewJitter            || bLogPresentationChain; }
+	bool ShouldLogCrewEnvironmentState() const  { return bLogCrewEnvironmentState  || bLogPresentationChain; }
+
 	// ── Crew ──────────────────────────────────────────────────
 	UPROPERTY(Config, EditAnywhere, Category = "Crew")
 	bool bLogCrewMovement = false;
@@ -43,6 +73,14 @@ public:
 	UPROPERTY(Config, EditAnywhere, Category = "Submarine|Movement")
 	bool bLogSubMovement = false;
 
+	/** Per-render-frame pose pacing log: dt, Sub.X, dx_render, alpha (non-auth) or simAcc (auth), snapshot age. */
+	UPROPERTY(Config, EditAnywhere, Category = "Submarine|Movement")
+	bool bLogSubInterpPacing = false;
+
+	/** Diagnostic kill-switch: keep the authoritative submarine actor root on the fixed-step sim pose instead of applying render interpolation to that same root. */
+	UPROPERTY(Config, EditAnywhere, Category = "Submarine|Movement")
+	bool bDisableSubRootVisualInterpolation = false;
+
 	UPROPERTY(Config, EditAnywhere, Category = "Submarine|Movement")
 	bool bLogSubCollisionSweeps = false;
 
@@ -64,6 +102,14 @@ public:
 	UPROPERTY(Config, EditAnywhere, Category = "Submarine|Flood")
 	bool bDrawCompartmentWater = false;
 
+	/** Diagnostic kill-switch: do not spawn per-compartment UFloodWaterPlaneComponent visuals. Flood sim still runs. */
+	UPROPERTY(Config, EditAnywhere, Category = "Submarine|Flood")
+	bool bDisableFloodWaterPlanes = false;
+
+	/** Diagnostic kill-switch: do not spawn USubHullBoundaryComponent for active breaches. Flood sim still runs. */
+	UPROPERTY(Config, EditAnywhere, Category = "Submarine|Flood")
+	bool bDisableBreachBoundaries = false;
+
 	// ── Submarine | Hull ──────────────────────────────────────
 	UPROPERTY(Config, EditAnywhere, Category = "Submarine|Hull")
 	bool bDrawHull = false;
@@ -76,13 +122,6 @@ public:
 
 	UPROPERTY(Config, EditAnywhere, Category = "Submarine|Hull")
 	bool bLogHullVisualBreaches = false;
-
-	// ── Submarine | Interior Frame ────────────────────────────
-	UPROPERTY(Config, EditAnywhere, Category = "Submarine|InteriorFrame")
-	bool bLogInteriorFrame = false;
-
-	UPROPERTY(Config, EditAnywhere, Category = "Submarine|InteriorFrame")
-	bool bDrawInteriorFrame = false;
 
 	// ── Helm ──────────────────────────────────────────────────
 	UPROPERTY(Config, EditAnywhere, Category = "Helm")

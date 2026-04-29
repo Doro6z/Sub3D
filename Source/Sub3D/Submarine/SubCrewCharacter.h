@@ -63,6 +63,10 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Crew")
 	USubCrewMovementComponent* GetCrewMovement() const;
 
+	/** Blueprint input wrapper. MoveAxis.X = forward/back, MoveAxis.Y = right/left. */
+	UFUNCTION(BlueprintCallable, Category = "Crew|Movement")
+	void ApplyCrewPlanarMoveInput(FVector2D MoveAxis);
+
 	UFUNCTION(BlueprintCallable, Category = "Crew|Camera")
 	void ToggleCameraMode();
 

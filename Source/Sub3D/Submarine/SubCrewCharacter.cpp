@@ -9,7 +9,6 @@
 #include "SubCrewMovementComponent.h"
 #include "SubFloodComponent.h"
 #include "SubHullComponent.h"
-#include "SubInteriorFrameComponent.h"
 #include "SubLegacyLog.h"
 #include "SubmarineLayoutAsset.h"
 #include "SubMovementComponent.h"
@@ -23,12 +22,23 @@
 #include "Engine/World.h"
 #include "GameFramework/CharacterMovementComponent.h"
 #include "GameFramework/SpringArmComponent.h"
+#include "HAL/IConsoleManager.h"
 #include "Net/UnrealNetwork.h"
 
 DEFINE_LOG_CATEGORY_STATIC(LogSubCrew, Log, All);
 
 namespace
 {
+static TAutoConsoleVariable<int32> CVarDisableCrewCameraSway(
+	TEXT("Sub3D.Crew.DisableCameraSway"),
+	0,
+	TEXT("Diagnostic: 1 disables local FPS camera sway driven by submarine acceleration/angular velocity."));
+
+bool IsCrewCameraSwayDisabled()
+{
+	return CVarDisableCrewCameraSway.GetValueOnGameThread() != 0;
+}
+
 static FString DescribeMovementBase(const ACharacter* Character)
 {
 	const UPrimitiveComponent* Base = Character ? Character->GetMovementBase() : nullptr;
@@ -304,12 +314,12 @@ void ASubCrewCharacter::HandleHullCrossing(USubHullBoundaryComponent* Boundary, 
 {
 	USubCrewMovementComponent* CrewMov = GetCrewMovement();
 	ASubmarineBase* Sub = CurrentSubmarine;
-	if (!CrewMov || !Sub || !Sub->InteriorFrame)
+	if (!CrewMov || !Sub)
 	{
 		return;
 	}
 
-	const FTransform SubXf = Sub->InteriorFrame->GetSubTransform();
+	const FTransform SubXf = Sub->GetActorTransform();
 	const FVector V_sub_world = Sub->SubMovement ? Sub->SubMovement->Velocity : FVector::ZeroVector;
 	const FVector V_crew_world = CrewMov->Velocity;
 
@@ -365,6 +375,14 @@ void ASubCrewCharacter::HandleHullCrossing(USubHullBoundaryComponent* Boundary, 
 USubCrewMovementComponent* ASubCrewCharacter::GetCrewMovement() const
 {
 	return Cast<USubCrewMovementComponent>(GetCharacterMovement());
+}
+
+void ASubCrewCharacter::ApplyCrewPlanarMoveInput(FVector2D MoveAxis)
+{
+	if (USubCrewMovementComponent* CrewMovement = GetCrewMovement())
+	{
+		CrewMovement->ApplyCrewPlanarMoveInput(MoveAxis);
+	}
 }
 
 void ASubCrewCharacter::ToggleCameraMode()
@@ -430,10 +448,13 @@ void ASubCrewCharacter::Tick(float DeltaSeconds)
 
 			// Sway from sub motion
 			FVector Sway = FVector::ZeroVector;
-			Sway.X = CMC->LocalSubLinearAcceleration.X * CameraSwayAccelScale;
-			Sway.Y = CMC->LocalSubLinearAcceleration.Y * CameraSwayAccelScale;
-			Sway.Z = CMC->LocalSubAngularVelocityDegrees.Y * CameraSwayAngularScale;
-			Sway = Sway.GetClampedToMaxSize(CameraSwayMaxCm);
+			if (!IsCrewCameraSwayDisabled())
+			{
+				Sway.X = CMC->LocalSubLinearAcceleration.X * CameraSwayAccelScale;
+				Sway.Y = CMC->LocalSubLinearAcceleration.Y * CameraSwayAccelScale;
+				Sway.Z = CMC->LocalSubAngularVelocityDegrees.Y * CameraSwayAngularScale;
+				Sway = Sway.GetClampedToMaxSize(CameraSwayMaxCm);
+			}
 
 			FPSCamera->SetRelativeLocation(FVector(Sway.X, Sway.Y, PostureZ + Sway.Z));
 		}
@@ -896,7 +917,7 @@ void ASubCrewCharacter::UpdateEnvironmentalEffects(float DeltaSeconds)
 	ApplyWaterMovementState(CurrentWaterImmersion01);
 	ApplyPressureEffects(DeltaSeconds, CurrentAmbientPressureKPa);
 
-	if (GetDefault<USub3DDebugSettings>()->bLogCrewEnvironmentState && CurrentSubmarine)
+	if (GetDefault<USub3DDebugSettings>()->ShouldLogCrewEnvironmentState() && CurrentSubmarine)
 	{
 		EnvironmentDebugLogTimer += DeltaSeconds;
 		if (EnvironmentDebugLogTimer >= FMath::Max(0.1f, EnvironmentDebugLogIntervalSeconds))

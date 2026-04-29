@@ -190,11 +190,50 @@ public:
 	UPROPERTY(BlueprintReadOnly, Category = "State")
 	float YawRateDegPerSec = 0.f;
 
+	// Authority-derived linear acceleration (cm/s^2, world space). Computed in
+	// SimulateStep as (Velocity_post - Velocity_pre) / DeltaTime. Replicated via
+	// FSubmarineNetState::LinearAcceleration. On non-authority, populated from the
+	// snapshot stream; consumers should prefer GetPresentedLinearAcceleration() (Phase B)
+	// once available.
+	UPROPERTY(BlueprintReadOnly, Category = "State")
+	FVector LinearAcceleration = FVector::ZeroVector;
+
+	// Authority-derived angular acceleration (deg/s^2, world space). Components mirror
+	// AngularVelocity layout: X=roll-rate-derivative (unused), Y=pitch-rate-derivative,
+	// Z=yaw-rate-derivative.
+	UPROPERTY(BlueprintReadOnly, Category = "State")
+	FVector AngularAccelerationDeg = FVector::ZeroVector;
+
 	// Server-authoritative sim rate. Higher = smoother visuals (smaller
 	// extrapolation gap between sim steps) at the cost of CPU. 60 keeps
 	// sub-tick visual jitter under 17 ms at any velocity.
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Net")
 	float FixedSimulationHz = 60.f;
+
+	// ── Client snapshot playback (non-authority) ──────────────────────────
+	// The client renders the sub at a fixed authority-time delay behind the newest
+	// received snapshot. Local world time only advances the authority clock estimate;
+	// segment choice and interpolation stay on the authority timeline derived from
+	// SimFrame. Authority-max plan: see
+	// reports/plans/2026-04-27_submovement_non_authority_playback_refactor_and_audit.md
+
+	// Render-delay window in authority-time seconds. Render authority time =
+	// EstimatedAuthorityNow - this delay. Must exceed typical inter-snapshot intervals
+	// so the buffer usually contains a snapshot ahead of render time. 100 ms gives
+	// about 3x headroom over a 30 Hz snapshot cadence.
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Network|Playback", meta = (ClampMin = "0.0", ClampMax = "0.5"))
+	double ClientPlaybackDelaySeconds = 0.10;
+
+	// Maximum authority-time history retained in the buffer. Older entries are dropped.
+	// Sized to cover the playback delay plus generous headroom; bounds memory.
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Network|Playback", meta = (ClampMin = "0.1"))
+	double ClientMaxBufferHistorySeconds = 0.50;
+
+	// If the real-time gap since the last received snapshot exceeds this, treat as a
+	// stall (PIE alt-tab, genuine network drop) and reset playback by clearing the
+	// buffer and snapping to the new pose.
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Network|Playback", meta = (ClampMin = "0.05"))
+	double ClientStallResetSeconds = 0.20;
 
 	// -------------------------------------------------------------------------
 	// Input — server-authoritative, replicated to clients for visual feedback.
@@ -279,16 +318,13 @@ public:
 	bool HadBlockingHitLastStep() const { return bLastStepHadBlockingHit; }
 
 private:
-	// Input values replicated to all clients for visual feedback (rudder mesh
-	// yaw, hydroplane mesh pitch). Server-authoritative; writes come from
-	// SetThrustInput / SetRudderInput / SetDivePlaneInput.
-	UPROPERTY(Replicated)
+	// Helm input fields. Server-authoritative writes via SetThrustInput / SetRudderInput
+	// / SetDivePlaneInput. NO LONGER replicated as separate UPROPERTYs — they ride in
+	// FSubmarineNetState alongside pose/velocity so visual mesh consumers sample at the
+	// same beat as the sub body. On non-authority the fields are written from the
+	// snapshot stream in HandleReplicatedNetState.
 	float ThrustInput = 0.f;
-
-	UPROPERTY(Replicated)
 	float RudderInput = 0.f;
-
-	UPROPERTY(Replicated)
 	float DivePlaneInput = 0.f;
 
 	float SpooledPower = 0.f;
@@ -300,22 +336,46 @@ private:
 	// HadBlockingHitLastStep() and by SimulateStep to damp applied yaw.
 	bool bLastStepHadBlockingHit = false;
 
-	// ── Client-side snapshot interpolation (non-authority only) ──────────────
-	// Two-snapshot ring with receive timestamps. The actor pose each render frame is
-	// Lerp(PrevSnapshot, TargetSnapshot, alpha) where alpha advances from 0 to 1 over
-	// (TargetSnapshotTime - PrevSnapshotTime). One-snapshot playback lag in exchange for
-	// continuous motion between discrete server snapshots — eliminates the per-snapshot
-	// teleport that exposes jitter to anything observing the sub in world space (EVA crew,
-	// debug volumes, peer crew SimulatedProxies).
-	FSubmarineNetState ClientPrevSnapshot;
-	FSubmarineNetState ClientTargetSnapshot;
-	double ClientPrevSnapshotTime = 0.0;
-	double ClientTargetSnapshotTime = 0.0;
-	// Wall-clock receive time (FPlatformTime::Seconds), independent of world time so it
-	// keeps advancing even when the world is throttled (alt-tab, focus loss). Used to
-	// detect "snapshot avalanche after throttle" without relying on the throttled clock.
+	// ── Client-side snapshot playback (non-authority only) ────────────────────
+	// Buffered render-delay playback per
+	// reports/plans/2026-04-27_submovement_non_authority_playback_refactor_and_audit.md.
+	// Each received snapshot is enqueued with an authority timeline derived from SimFrame,
+	// plus its world-time receive time and a real-time receive time (the latter is used
+	// only as a stall detector). EvaluateClientPlaybackPose estimates "authority now" from
+	// the latest buffered snapshot and local world-time progression, then renders at
+	// (AuthorityNow - ClientPlaybackDelaySeconds). Bracketing and Hermite interpolation run
+	// on authority time, not on raw client receive spacing.
+	struct FBufferedClientSubSnapshot
+	{
+		FSubmarineNetState State;
+		double AuthorityTimeSeconds = 0.0;
+		double WorldReceiveTime = 0.0;
+		double RealReceiveTime = 0.0;
+	};
+
+	struct FClientPlaybackSample
+	{
+		FVector Location = FVector::ZeroVector;
+		FRotator Rotation = FRotator::ZeroRotator;
+		float Alpha = 0.f;
+		float SegmentDistanceCm = 0.f;
+		double SegmentSeconds = 0.0;
+		double RenderAuthorityTimeSeconds = 0.0;
+		double NewestAuthorityTimeSeconds = 0.0;
+		bool bBufferUnderrun = false;
+	};
+
+	TArray<FBufferedClientSubSnapshot, TInlineAllocator<8>> ClientSnapshotBuffer;
 	double ClientLastReceiveRealTime = 0.0;
 	bool bHasReceivedClientSnapshot = false;
+
+	double GetClientAuthorityStepSeconds() const;
+	double GetClientAuthorityTimeSeconds(int32 SimFrame) const;
+	double EstimateClientAuthorityNowSeconds(double WorldNow) const;
+	void QueueClientSnapshot(const FSubmarineNetState& NewState, double WorldNow, double RealNow);
+	void ResetClientPlayback(const FSubmarineNetState& NewState, double WorldNow, double RealNow, const TCHAR* Reason);
+	bool EvaluateClientPlaybackPose(double WorldNow, FClientPlaybackSample& OutSample) const;
+	void ApplyClientPlaybackPose(const FVector& Location, const FRotator& Rotation);
 
 	// Sim-authoritative poses used to smooth the sub's visual render between fixed-tick
 	// sim steps. CurrSim (updated each sim step) and PrevSim (the pose one step earlier)
@@ -331,6 +391,12 @@ private:
 	FRotator PrevSimRotation = FRotator::ZeroRotator;
 	bool bHasSimBuffer = false;
 	bool bHasVisualOffset = false;
+
+	// Per-render-frame pacing diagnostic (gated by bLogSubInterpPacing). Captured at end
+	// of TickComponent so it reflects what the next subsystem (HUD, crew rebase, debug
+	// labels) will read as the sub world transform this frame.
+	FVector LastPacingEndLocation = FVector::ZeroVector;
+	bool bHasLastPacingEndLocation = false;
 
 	void UpdateBallasts(float DeltaTime);
 	void SimulateStep(float DeltaTime);

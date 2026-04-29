@@ -1,5 +1,5 @@
 #include "Diagnostics/SubRelativeFrameExpectedTransformProvider.h"
-#include "Submarine/SubInteriorFrameComponent.h"
+#include "Submarine/SubmarineBase.h"
 #include "GameFramework/Character.h"
 #include "GameFramework/CharacterMovementComponent.h"
 
@@ -7,8 +7,8 @@ bool USubRelativeFrameExpectedTransformProvider::GetExpectedTransform(const AAct
 {
 	if (!MonitoredActor) return false;
 
-	USubInteriorFrameComponent* InteriorFrame = FindActiveInteriorFrame(MonitoredActor);
-	if (!InteriorFrame || !InteriorFrame->IsFrameValid())
+	ASubmarineBase* Sub = FindActiveSubmarine(MonitoredActor);
+	if (!Sub)
 	{
 		OutTransform = MonitoredActor->GetActorTransform();
 		bHasLastKnownRelative = false;
@@ -16,13 +16,13 @@ bool USubRelativeFrameExpectedTransformProvider::GetExpectedTransform(const AAct
 	}
 
 	const ACharacter* Character = Cast<ACharacter>(MonitoredActor);
-	bool bIsWalking = Character && Character->GetCharacterMovement() && Character->GetCharacterMovement()->IsMovingOnGround();
+	const bool bIsWalking = Character && Character->GetCharacterMovement() && Character->GetCharacterMovement()->IsMovingOnGround();
 
 	if (bIsWalking)
 	{
-		FTransform ActorTransform = MonitoredActor->GetActorTransform();
-		FTransform FrameTransform = InteriorFrame->GetSubTransform();
-		
+		const FTransform ActorTransform = MonitoredActor->GetActorTransform();
+		const FTransform FrameTransform = Sub->GetActorTransform();
+
 		LastKnownRelativeTransform = ActorTransform.GetRelativeTransform(FrameTransform);
 		bHasLastKnownRelative = true;
 
@@ -31,7 +31,7 @@ bool USubRelativeFrameExpectedTransformProvider::GetExpectedTransform(const AAct
 	}
 	else if (bHasLastKnownRelative)
 	{
-		FTransform FrameTransform = InteriorFrame->GetSubTransform();
+		const FTransform FrameTransform = Sub->GetActorTransform();
 		OutTransform = LastKnownRelativeTransform * FrameTransform;
 		return true;
 	}
@@ -39,7 +39,7 @@ bool USubRelativeFrameExpectedTransformProvider::GetExpectedTransform(const AAct
 	return false;
 }
 
-USubInteriorFrameComponent* USubRelativeFrameExpectedTransformProvider::FindActiveInteriorFrame(const AActor* TargetActor) const
+ASubmarineBase* USubRelativeFrameExpectedTransformProvider::FindActiveSubmarine(const AActor* TargetActor) const
 {
 	if (const ACharacter* Character = Cast<ACharacter>(TargetActor))
 	{
@@ -47,10 +47,10 @@ USubInteriorFrameComponent* USubRelativeFrameExpectedTransformProvider::FindActi
 		{
 			if (AActor* BaseOwner = MovementBase->GetOwner())
 			{
-				return BaseOwner->FindComponentByClass<USubInteriorFrameComponent>();
+				return Cast<ASubmarineBase>(BaseOwner);
 			}
 		}
 	}
-	
+
 	return nullptr;
 }

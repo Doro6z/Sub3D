@@ -33,7 +33,6 @@
 #include "SubmarineRadarComponent.h"
 #include "SubmarineStationManagerComponent.h"
 #include "SubmarineSystemsComponent.h"
-#include "SubInteriorFrameComponent.h"
 #include "SubLegacyLog.h"
 #include "TurretActor.h"
 
@@ -41,6 +40,17 @@ DEFINE_LOG_CATEGORY(LogSubLegacy);
 
 namespace
 {
+float GetCompartmentVolumeSelectionScore(const UCompartmentVolumeComponent* Volume)
+{
+	if (!Volume)
+	{
+		return -1.f;
+	}
+
+	const FVector Extent = Volume->GetScaledBoxExtent();
+	return Extent.X * Extent.Y * Extent.Z;
+}
+
 bool IsComponentOnOrOwnedBySubmarine(const ASubmarineBase* Submarine, const UPrimitiveComponent* Component)
 {
 	if (!Submarine || !Component)
@@ -203,7 +213,6 @@ ASubmarineBase::ASubmarineBase()
 	Compartments = CreateDefaultSubobject<USubmarineCompartmentComponent>(TEXT("Compartments"));
 	StationManager = CreateDefaultSubobject<USubmarineStationManagerComponent>(TEXT("StationManager"));
 	Radar = CreateDefaultSubobject<USubmarineRadarComponent>(TEXT("Radar"));
-	InteriorFrame = CreateDefaultSubobject<USubInteriorFrameComponent>(TEXT("InteriorFrame"));
 	BreachVfxManager = CreateDefaultSubobject<UBreachVfxManagerComponent>(TEXT("BreachVfxManager"));
 	FloodWaterVisuals = CreateDefaultSubobject<UFloodWaterVisualsComponent>(TEXT("FloodWaterVisuals"));
 	HullVisualDamage = CreateDefaultSubobject<USubHullVisualDamageComponent>(TEXT("HullVisualDamage"));
@@ -337,32 +346,102 @@ void ASubmarineBase::BeginPlay()
 	// This block is OUTSIDE the HasAuthority() branch on purpose — clients have
 	// the same UCompartmentVolumeComponents placed in the BP as the server.
 	{
-		TArray<UCompartmentVolumeComponent*> VisualVolumes;
-		GetComponents<UCompartmentVolumeComponent>(VisualVolumes);
-		for (UCompartmentVolumeComponent* Vol : VisualVolumes)
+		const USub3DDebugSettings* DebugSettingsRef = GetDefault<USub3DDebugSettings>();
+		if (!(DebugSettingsRef && DebugSettingsRef->bDisableFloodWaterPlanes))
 		{
-			if (!Vol)
+			TArray<UCompartmentVolumeComponent*> VisualVolumes;
+			GetComponents<UCompartmentVolumeComponent>(VisualVolumes);
+
+			TMap<FName, UCompartmentVolumeComponent*> SelectedVolumeByCompartment;
+			TMap<FName, int32> VolumeCountByCompartment;
+
+			for (UCompartmentVolumeComponent* Vol : VisualVolumes)
 			{
-				continue;
+				if (!Vol)
+				{
+					continue;
+				}
+
+				if (Vol->CompartmentId.IsNone())
+				{
+					UE_LOG(
+						LogTemp,
+						Warning,
+						TEXT("FloodWaterPlane skipped | Sub=%s | Volume=%s has no CompartmentId"),
+						*GetName(),
+						*GetNameSafe(Vol));
+					continue;
+				}
+
+				VolumeCountByCompartment.FindOrAdd(Vol->CompartmentId)++;
+
+				UCompartmentVolumeComponent*& Selected = SelectedVolumeByCompartment.FindOrAdd(Vol->CompartmentId);
+				if (!Selected)
+				{
+					Selected = Vol;
+					continue;
+				}
+
+				const bool bSelectedHasAuthoredCap = Selected->WaterPlaneMeshOverride != nullptr;
+				const bool bCandidateHasAuthoredCap = Vol->WaterPlaneMeshOverride != nullptr;
+				if (!bSelectedHasAuthoredCap && bCandidateHasAuthoredCap)
+				{
+					Selected = Vol;
+					continue;
+				}
+
+				if (bSelectedHasAuthoredCap == bCandidateHasAuthoredCap
+					&& GetCompartmentVolumeSelectionScore(Vol) > GetCompartmentVolumeSelectionScore(Selected))
+				{
+					Selected = Vol;
+				}
 			}
 
-			UFloodWaterPlaneComponent* Plane = NewObject<UFloodWaterPlaneComponent>(this);
-			if (!Plane)
+			for (const TPair<FName, int32>& Pair : VolumeCountByCompartment)
 			{
-				continue;
+				if (Pair.Value > 1)
+				{
+					if (UCompartmentVolumeComponent* const* Chosen = SelectedVolumeByCompartment.Find(Pair.Key))
+					{
+						UE_LOG(
+							LogTemp,
+							Warning,
+							TEXT("FloodWaterPlane dedup | Sub=%s | CompartmentId=%s | VolumeCount=%d | ChosenVolume=%s. Multi-volume compartments share one visual water plane in the current runtime path."),
+							*GetName(),
+							*Pair.Key.ToString(),
+							Pair.Value,
+							*GetNameSafe(*Chosen));
+					}
+				}
 			}
-			Plane->SourceVolume = Vol;
-			if (DefaultWaterMaterial)
+
+			for (const TPair<FName, UCompartmentVolumeComponent*>& Pair : SelectedVolumeByCompartment)
 			{
-				Plane->WaterMaterial = DefaultWaterMaterial;
+				UCompartmentVolumeComponent* Vol = Pair.Value;
+				if (!Vol)
+				{
+					continue;
+				}
+
+				UFloodWaterPlaneComponent* Plane = NewObject<UFloodWaterPlaneComponent>(this);
+				if (!Plane)
+				{
+					continue;
+				}
+
+				Plane->SourceVolume = Vol;
+				if (DefaultWaterMaterial)
+				{
+					Plane->WaterMaterial = DefaultWaterMaterial;
+				}
+				if (DefaultWaterPlaneMesh)
+				{
+					Plane->PlaneMesh = DefaultWaterPlaneMesh;
+				}
+				Plane->PlaneWorldSizeCm = DefaultWaterPlaneWorldSizeCm;
+				Plane->SetupAttachment(Vol);
+				Plane->RegisterComponent();
 			}
-			if (DefaultWaterPlaneMesh)
-			{
-				Plane->PlaneMesh = DefaultWaterPlaneMesh;
-			}
-			Plane->PlaneWorldSizeCm = DefaultWaterPlaneWorldSizeCm;
-			Plane->SetupAttachment(Vol);
-			Plane->RegisterComponent();
 		}
 	}
 
@@ -554,13 +633,16 @@ void ASubmarineBase::ApplyHullCollisionDefaults()
 
 	const bool bUseMovementProxy = HasAssignedCollisionProxyMesh(MovementCollisionProxy);
 
-	HullMesh->SetCollisionEnabled(bUseMovementProxy ? ECollisionEnabled::NoCollision : ECollisionEnabled::QueryAndPhysics);
+	// Keep HullMesh query collision alive even when a movement proxy exists.
+	// MovementCollisionProxy is the submarine-vs-world sweep shape; HullMesh is
+	// still allowed to block crew pawns and camera/visibility traces.
+	HullMesh->SetCollisionEnabled(bUseMovementProxy ? ECollisionEnabled::QueryOnly : ECollisionEnabled::QueryAndPhysics);
 	HullMesh->SetCollisionProfileName(TEXT("SubmarineHull"));
 	HullMesh->SetNotifyRigidBodyCollision(!bUseMovementProxy);
 	HullMesh->SetGenerateOverlapEvents(false);
 	HullMesh->SetCanEverAffectNavigation(false);
 	HullMesh->SetMobility(EComponentMobility::Movable);
-	HullMesh->SetCollisionResponseToChannel(ECC_Pawn, bUseMovementProxy ? ECR_Ignore : ECR_Block);
+	HullMesh->SetCollisionResponseToChannel(ECC_Pawn, ECR_Block);
 
 	MovementCollisionProxy->SetCollisionProfileName(TEXT("SubmarineHull"));
 	MovementCollisionProxy->SetCollisionEnabled(bUseMovementProxy ? ECollisionEnabled::QueryAndPhysics : ECollisionEnabled::NoCollision);
@@ -1102,6 +1184,11 @@ void ASubmarineBase::RefreshRepState()
 	{
 		RepState.LinearVelocity = SubMovement->Velocity;
 		RepState.AngularVelocity = FVector(0.f, SubMovement->GetPitchRateDegPerSec(), SubMovement->GetYawRateDegPerSec());
+		RepState.LinearAcceleration = SubMovement->LinearAcceleration;
+		RepState.AngularAccelerationDeg = SubMovement->AngularAccelerationDeg;
+		RepState.RudderInput = SubMovement->GetRudderInput();
+		RepState.DivePlaneInput = SubMovement->GetDivePlaneInput();
+		RepState.ThrustInput = SubMovement->GetThrustInput();
 		RepState.ForwardSpeed = FVector::DotProduct(SubMovement->Velocity, GetActorForwardVector());
 		RepState.VerticalSpeed = SubMovement->Velocity.Z;
 		RepState.DepthMeters = SubMovement->CurrentDepth;

@@ -5,7 +5,10 @@ DEFINE_LOG_CATEGORY_STATIC(LogSonar, Log, All);
 
 namespace
 {
-constexpr int32 MaxNetworkSafeReplicatedSonarPoints = 1024;
+// Hard ceiling on the replicated SonarPoints array size. Lowered for FP — full
+// TArray re-rep on each ping was causing freeze on first ping in Play-as-Client.
+// Post-FP: switch SonarPoints to FFastArraySerializer for delta replication and raise this.
+constexpr int32 MaxNetworkSafeReplicatedSonarPoints = 512;
 }
 
 USubSonarComponent::USubSonarComponent()
@@ -19,6 +22,7 @@ void USubSonarComponent::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& O
 	Super::GetLifetimeReplicatedProps(OutLifetimeProps);
 	DOREPLIFETIME(USubSonarComponent, SonarPoints);
 	DOREPLIFETIME(USubSonarComponent, RecentPingTimestamps);
+	DOREPLIFETIME(USubSonarComponent, LastReplicatedPingTime);
 }
 
 void USubSonarComponent::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
@@ -31,7 +35,7 @@ void USubSonarComponent::TickComponent(float DeltaTime, ELevelTick TickType, FAc
 	}
 
 	TickContinuousPing(DeltaTime);
-	TickCullExpiredPoints();
+	TickCullExpiredPoints(DeltaTime);
 }
 
 bool USubSonarComponent::TryFirePing()
@@ -56,6 +60,7 @@ bool USubSonarComponent::TryFirePing()
 	}
 
 	ExecutePingRaycasts();
+	OnPingSonarPointsUpdated();
 	OnPingFired(LastPingTime, SonarPoints.Num());
 
 	UE_LOG(LogSonar, Log, TEXT("[%s] SonarPing fired | Points=%d | Time=%.2f"),
@@ -80,6 +85,15 @@ void USubSonarComponent::StopContinuousPing()
 {
 	bContinuousPingActive = false;
 	ContinuousPingAccumulator = 0.f;
+}
+
+void USubSonarComponent::TriggerLocalCosmeticPing()
+{
+	if (UWorld* World = GetWorld())
+	{
+		LocalCosmeticPingTime = World->GetTimeSeconds();
+	}
+	OnLocalCosmeticPingRequested();
 }
 
 void USubSonarComponent::ExecutePingRaycasts()
@@ -204,6 +218,7 @@ void USubSonarComponent::ExecutePingRaycasts()
 
 	MergePingPoints(MoveTemp(NewPoints), PingTime);
 	LastPingTime = PingTime;
+	LastReplicatedPingTime = PingTime;
 	RecentPingTimestamps.Add(PingTime);
 	while (RecentPingTimestamps.Num() > 6)
 	{
@@ -211,13 +226,24 @@ void USubSonarComponent::ExecutePingRaycasts()
 	}
 }
 
-void USubSonarComponent::TickCullExpiredPoints()
+void USubSonarComponent::TickCullExpiredPoints(float DeltaTime)
 {
 	UWorld* World = GetWorld();
 	if (!World || SonarPoints.Num() == 0)
 	{
 		return;
 	}
+
+	// Throttle: was running every server tick (60Hz), dirtying the replicated
+	// SonarPoints array continuously even when no one was pinging. Now runs at
+	// CullIntervalS cadence (default 0.5s) — late removal is imperceptible since
+	// expired points fade to alpha 0 in the display widget.
+	CullAccumulator += FMath::Max(DeltaTime, 0.f);
+	if (CullAccumulator < FMath::Max(CullIntervalS, 0.05f))
+	{
+		return;
+	}
+	CullAccumulator = 0.f;
 
 	const float Now = World->GetTimeSeconds();
 	const float LifetimeTotal = PointPeakDurationS + PointFadeDurationS;
@@ -260,34 +286,12 @@ void USubSonarComponent::MergePingPoints(TArray<FSonarHitPoint>&& NewPoints, flo
 		return;
 	}
 
-	const float RefreshRadiusSq = FMath::Square(FMath::Max(PointRefreshRadiusCm, 1.f));
-	int32 AddedCount = 0;
-	int32 RefreshedCount = 0;
-
 	for (FSonarHitPoint& NewPoint : NewPoints)
 	{
-		bool bOverlapsExisting = false;
-		for (int32 ExistingIdx = 0; ExistingIdx < SonarPoints.Num(); ++ExistingIdx)
-		{
-			const float DistSq = FVector::DistSquared(
-				FVector(SonarPoints[ExistingIdx].WorldLocation),
-				FVector(NewPoint.WorldLocation));
-			if (DistSq <= RefreshRadiusSq)
-			{
-				bOverlapsExisting = true;
-				break;
-			}
-		}
-
 		NewPoint.PingTimestamp = PingTime;
 		NewPoint.PreviousDistanceCm = -1.f;
 		NewPoint.PreviousPingTimestamp = -1.f;
 		SonarPoints.Add(NewPoint);
-		++AddedCount;
-		if (bOverlapsExisting)
-		{
-			++RefreshedCount;
-		}
 	}
 
 	const int32 ConfiguredMaxPoints = FMath::Max(MaxRetainedPoints, 64);
@@ -306,11 +310,7 @@ void USubSonarComponent::MergePingPoints(TArray<FSonarHitPoint>&& NewPoints, flo
 
 	if (SonarPoints.Num() > SafeMaxPoints)
 	{
-		SonarPoints.Sort([](const FSonarHitPoint& A, const FSonarHitPoint& B)
-		{
-			return A.PingTimestamp < B.PingTimestamp;
-		});
-
+		// Points are added in chronological order — oldest are always at index 0, no sort needed.
 		const int32 ToRemove = SonarPoints.Num() - SafeMaxPoints;
 		SonarPoints.RemoveAt(0, ToRemove, EAllowShrinking::No);
 	}
@@ -318,11 +318,9 @@ void USubSonarComponent::MergePingPoints(TArray<FSonarHitPoint>&& NewPoints, flo
 	UE_LOG(
 		LogSonar,
 		Verbose,
-		TEXT("[%s] SonarMerge | New=%d Added=%d Refreshed=%d Total=%d"),
+		TEXT("[%s] SonarMerge | New=%d Total=%d"),
 		*GetOwner()->GetName(),
 		NewPoints.Num(),
-		AddedCount,
-		RefreshedCount,
 		SonarPoints.Num());
 }
 

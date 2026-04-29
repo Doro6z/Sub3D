@@ -4,11 +4,12 @@
 #include "Interfaces/RuntimeSyncExpectedTransformProvider.h"
 #include "SubRelativeFrameExpectedTransformProvider.generated.h"
 
-class USubInteriorFrameComponent;
+class ASubmarineBase;
 
 /**
- * Sub3D-specific provider: computes expected transform based on the player's
- * pure relative position inside the USubInteriorFrameComponent of the submarine.
+ * Sub3D-specific provider: computes the expected transform of a monitored character
+ * based on its current MovementBase chain back to a submarine actor.
+ * Reads the sub's actor transform directly (no InteriorFrame middleman).
  */
 UCLASS(BlueprintType, Blueprintable, EditInlineNew)
 class SUB3D_API USubRelativeFrameExpectedTransformProvider : public URuntimeSyncExpectedTransformProvider
@@ -21,8 +22,8 @@ public:
 	//~ End URuntimeSyncExpectedTransformProvider Interface
 
 protected:
-	virtual USubInteriorFrameComponent* FindActiveInteriorFrame(const AActor* TargetActor) const;
-	
+	virtual ASubmarineBase* FindActiveSubmarine(const AActor* TargetActor) const;
+
 	mutable FTransform LastKnownRelativeTransform;
 	mutable bool bHasLastKnownRelative = false;
 };

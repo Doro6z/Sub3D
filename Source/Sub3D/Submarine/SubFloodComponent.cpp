@@ -346,6 +346,20 @@ void USubFloodComponent::CreateBreach(FName CompartmentId, float InflowRateLiter
 	// Hull boundary for crew EVA handoff. Spawned on first create, params refreshed on update.
 	if (AActor* Owner = GetOwner())
 	{
+		const USub3DDebugSettings* DebugSettingsRef = GetDefault<USub3DDebugSettings>();
+		if (DebugSettingsRef && DebugSettingsRef->bDisableBreachBoundaries)
+		{
+			if (TWeakObjectPtr<USubHullBoundaryComponent>* Tracked = BreachBoundariesByCompartment.Find(CompartmentId))
+			{
+				if (USubHullBoundaryComponent* Boundary = Tracked->Get())
+				{
+					Boundary->DestroyComponent();
+				}
+				BreachBoundariesByCompartment.Remove(CompartmentId);
+			}
+			return;
+		}
+
 		TWeakObjectPtr<USubHullBoundaryComponent>* Tracked = BreachBoundariesByCompartment.Find(CompartmentId);
 		USubHullBoundaryComponent* Boundary = Tracked ? Tracked->Get() : nullptr;
 
@@ -781,8 +795,8 @@ void USubFloodComponent::UpdateDerivedState()
 void USubFloodComponent::MaybeLogWaterLevels(float DeltaTime)
 {
 	const USub3DDebugSettings* Settings = GetDefault<USub3DDebugSettings>();
-	const bool bEffectiveLog = bLogWaterLevels || (Settings && Settings->bLogFlood);
-	const float EffectiveInterval = Settings && Settings->bLogFlood
+	const bool bEffectiveLog = bLogWaterLevels || (Settings && Settings->ShouldLogFlood());
+	const float EffectiveInterval = Settings && Settings->ShouldLogFlood()
 		? Settings->FloodLogIntervalSeconds
 		: WaterLevelLogIntervalSeconds;
 

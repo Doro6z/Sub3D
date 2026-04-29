@@ -16,7 +16,6 @@ class USubmarineSystemsComponent;
 class USubmarineCompartmentComponent;
 class USubmarineStationManagerComponent;
 class USubmarineRadarComponent;
-class USubInteriorFrameComponent;
 class UBreachVfxManagerComponent;
 class UCompartmentVolumeComponent;
 class UDoorFloodVfxComponent;
@@ -82,9 +81,6 @@ public:
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
 	USubmarineRadarComponent* Radar;
-
-	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
-	USubInteriorFrameComponent* InteriorFrame;
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
 	UBreachVfxManagerComponent* BreachVfxManager;
@@ -203,7 +199,8 @@ public:
 
 	// ── Flood Visuals (Water Planes) ─────────────────────────────────────
 	// Defaults applied to every UFloodWaterPlaneComponent spawned at bootstrap
-	// (one per UCompartmentVolumeComponent placed in the BP). Art designer sets
+	// (one per logical CompartmentId selected from the placed volume components).
+	// Art designer sets
 	// these on the BP class; each plane inherits unless overridden.
 
 	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "Submarine|FloodVisuals")

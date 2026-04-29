@@ -107,7 +107,20 @@
       "Bash(python download_textures.py)",
       "Bash(taskkill //IM UnrealEditor.exe //F)",
       "Bash(\"C:/Program Files/Epic Games/UE_5.7/Engine/Build/BatchFiles/Build.bat\" Sub3DEditor Win64 Development \"C:/Dev/Sub3D/Sub3D.uproject\")",
-      "Bash(start \"\" \"C:/Dev/Sub3D/LaunchEditor.bat\")"
+      "Bash(start \"\" \"C:/Dev/Sub3D/LaunchEditor.bat\")",
+      "Bash(dir /AL \"c:\\\\Dev\\\\Sub3D\\\\Plugins\")",
+      "Bash(curl -s --max-time 3 http://localhost:3000/mcp/status)",
+      "Bash(curl -s -X POST http://localhost:3000/mcp/tool/material -H 'Content-Type: application/json' -d '{\"operation\":\"get_material_info\",\"asset_path\":\"/Game/Sub3D/Material/M_CompartmentWater\"}')",
+      "Bash(curl -s -X POST http://localhost:3000/mcp/tool/asset_dependencies -H 'Content-Type: application/json' -d '{\"asset_path\":\"/Game/Sub3D/Material/M_CompartmentWater\"}')",
+      "Bash(curl -s -X POST http://localhost:3000/mcp/tool/asset -H 'Content-Type: application/json' -d '{\"operation\":\"get_properties\",\"asset_path\":\"/Game/Sub3D/Material/M_CompartmentWater\"}')",
+      "Bash(curl -s -X POST http://localhost:3000/mcp/tool/asset_dependencies -H 'Content-Type: application/json' -d '{\"asset_path\":\"/Game/Sub3D/Material/Functions/__TRACKED_VAR__\"}')",
+      "Bash(curl -s -X POST http://localhost:3000/mcp/tool/asset -H 'Content-Type: application/json' -d '{\"operation\":\"get_asset_info\",\"asset_path\":\"/Game/Sub3D/Material/M_CompartmentWater\"}')",
+      "Bash(curl -s -X POST http://localhost:3000/mcp/tool/asset_referencers -H 'Content-Type: application/json' -d '{\"asset_path\":\"/Game/Sub3D/Material/M_CompartmentWater\"}')",
+      "Bash(curl -s -X POST http://localhost:3000/mcp/tool/execute_script -H 'Content-Type: application/json' -d '{ *)",
+      "Bash(curl -s -X POST http://localhost:3000/mcp/tool/task_result -H 'Content-Type: application/json' -d '{\"task_id\":\"64B63C6A478134B249BBADB22D157F84\"}')",
+      "Bash(curl -s http://localhost:3000/mcp/tools)",
+      "Bash(python -c \"import sys,json; tools=json.load\\(sys.stdin\\); [print\\(t['name'],'->',t.get\\('schema','no schema'\\)\\) for t in tools.get\\('tools',[]\\)]\")",
+      "Bash(curl -s http://localhost:3000/mcp/tool/execute_script)"
     ],
     "additionalDirectories": [
       "c:\\Users\\coren\\AppData\\Roaming\\Antigravity\\User",

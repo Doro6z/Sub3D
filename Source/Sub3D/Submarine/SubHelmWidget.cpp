@@ -227,6 +227,14 @@ void USubHelmWidget::RouteSonarPing()
 	ResolveRuntimeRefs();
 	if (OwnerController.IsValid())
 	{
+		// Local cosmetic prediction: kick off the scan-circle visual + sound on
+		// the client BEFORE the server RPC, so input feels instantaneous despite
+		// the RPC roundtrip + replication delay in Play-as-Client. Authoritative
+		// raycast still runs server-side; points arrive ~50ms later via OnRep.
+		if (BoundSonar.IsValid())
+		{
+			BoundSonar->TriggerLocalCosmeticPing();
+		}
 		OwnerController->ServerRouteSonarPing();
 		return;
 	}
@@ -239,6 +247,12 @@ void USubHelmWidget::RouteSonarPingHeldStart()
 	ResolveRuntimeRefs();
 	if (OwnerController.IsValid())
 	{
+		// First ping of a held burst is fired immediately on the server side
+		// (StartContinuousPing → TryFirePing). Mirror the cosmetic kick-off here.
+		if (BoundSonar.IsValid())
+		{
+			BoundSonar->TriggerLocalCosmeticPing();
+		}
 		OwnerController->ServerSetSonarPingHeld(true);
 		return;
 	}

@@ -15,11 +15,13 @@ void USubSonarDisplayWidget::NativeTick(const FGeometry& MyGeometry, float InDel
 
 	if (CachedSonar.IsValid())
 	{
-		float LatestTimestamp = 0.f;
-		for (const FSonarHitPoint& P : CachedSonar->SonarPoints)
-		{
-			LatestTimestamp = FMath::Max(LatestTimestamp, P.PingTimestamp);
-		}
+		// O(1) detection: max of replicated authoritative timestamp and local
+		// cosmetic trigger. Replaces an O(N) scan over SonarPoints which froze the
+		// widget on the first ping in Play-as-Client (large array landing in one
+		// tick).
+		const float LatestTimestamp = FMath::Max(
+			CachedSonar->GetLastReplicatedPingTime(),
+			CachedSonar->GetLocalCosmeticPingTime());
 
 		if (LatestTimestamp > LastKnownPingTime + KINDA_SMALL_NUMBER)
 		{
@@ -586,15 +588,24 @@ bool USubSonarDisplayWidget::HasActivePoints() const
 		return false;
 	}
 
-	const float Now = GetWorld()->GetTimeSeconds();
-	for (const FSonarHitPoint& Point : CachedSonar->SonarPoints)
+	// O(1) approximation: a point can be active for at most
+	// (PointPeakDuration + PointFadeDuration + MaxTravelTime) after its ping. Replaces
+	// an O(N) scan over SonarPoints. May briefly say "true" after the last point
+	// fully fades (paint culls per-point anyway), but never says "false" while a
+	// point is still visible.
+	const float LatestPingTime = FMath::Max(
+		CachedSonar->GetLastReplicatedPingTime(),
+		CachedSonar->GetLocalCosmeticPingTime());
+	if (LatestPingTime < 0.f)
 	{
-		if (ComputePointAlpha(Point, Now) > 0.f)
-		{
-			return true;
-		}
+		return false;
 	}
-	return false;
+
+	const float SafeSpeed = FMath::Max(CachedSonar->PropagationSpeedCmS, 1.f);
+	const float MaxTravelTime = CachedSonar->PingMaxRangeCm / SafeSpeed;
+	const float MaxLifetime = CachedSonar->PointPeakDurationS + CachedSonar->PointFadeDurationS + MaxTravelTime;
+
+	return (GetWorld()->GetTimeSeconds() - LatestPingTime) < MaxLifetime;
 }
 
 USubSonarSystemComponent* USubSonarDisplayWidget::GetBoundSonarSystem() const

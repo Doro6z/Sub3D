@@ -2,6 +2,7 @@
 
 #include "CoreMinimal.h"
 #include "Animation/AnimInstance.h"
+#include "CrewLocomotionTypes.h"
 #include "SubCrewAnimInstance.generated.h"
 
 class ASubCrewCharacter;
@@ -66,6 +67,24 @@ public:
 
 	UPROPERTY(BlueprintReadOnly, Category = "Crew|Input")
 	float SupportQuality = 0.f;
+
+	UPROPERTY(BlueprintReadOnly, Category = "Crew|Input")
+	float LocalTurnRateDegPerSec = 0.f;
+
+	UPROPERTY(BlueprintReadOnly, Category = "Crew|Locomotion")
+	FCrewAnimLocomotionState LocomotionState;
+
+	UPROPERTY(BlueprintReadOnly, Category = "Crew|Locomotion")
+	FCrewMoveIntent MoveIntent;
+
+	UPROPERTY(BlueprintReadOnly, Category = "Crew|Locomotion")
+	FCrewLocomotionFrame LocomotionFrame;
+
+	UPROPERTY(BlueprintReadOnly, Category = "Crew|Locomotion")
+	ECrewLocomotionStance Stance = ECrewLocomotionStance::Standing;
+
+	UPROPERTY(BlueprintReadOnly, Category = "Crew|Locomotion")
+	ECrewLocomotionGait Gait = ECrewLocomotionGait::Idle;
 
 	// ══════════════════════════════════════════════════════════
 	// PROCEDURAL BONE ROTATIONS (output, apply via Modify Bone)
@@ -266,6 +285,12 @@ public:
 	UPROPERTY(BlueprintReadOnly, Category = "Crew|IK")
 	float HandIK_R_Weight = 0.f;
 
+	UPROPERTY(BlueprintReadOnly, Category = "Crew|IK")
+	FCrewHandIKState HandIK_L_State;
+
+	UPROPERTY(BlueprintReadOnly, Category = "Crew|IK")
+	FCrewHandIKState HandIK_R_State;
+
 	// ── FOOT IK ──
 
 	UPROPERTY(BlueprintReadOnly, Category = "Crew|IK")
@@ -273,6 +298,12 @@ public:
 
 	UPROPERTY(BlueprintReadOnly, Category = "Crew|IK")
 	FVector FootIK_L_Offset = FVector::ZeroVector;
+
+	UPROPERTY(BlueprintReadOnly, Category = "Crew|IK")
+	FCrewFootIKState FootIK_R_State;
+
+	UPROPERTY(BlueprintReadOnly, Category = "Crew|IK")
+	FCrewFootIKState FootIK_L_State;
 
 	// ── SWIM PARAMS ──
 

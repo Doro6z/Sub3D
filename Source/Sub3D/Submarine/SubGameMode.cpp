@@ -299,7 +299,7 @@ void ASubGameMode::BeginDeparture()
 
 	if (ActiveSubmarine
 		&& ActiveSubmarine->SubMovement
-		&& (GetDefault<USub3DDebugSettings>()->bLogSubCollisionSweeps || GetDefault<USub3DDebugSettings>()->bLogSubMovement))
+		&& (GetDefault<USub3DDebugSettings>()->bLogSubCollisionSweeps || GetDefault<USub3DDebugSettings>()->ShouldLogSubMovement()))
 	{
 		LogDepartureCollisionSnapshot(ActiveSubmarine);
 	}

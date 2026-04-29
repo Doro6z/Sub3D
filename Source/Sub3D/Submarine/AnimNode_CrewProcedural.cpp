@@ -1,6 +1,5 @@
 #include "AnimNode_CrewProcedural.h"
 #include "SubCrewAnimInstance.h"
-#include "Animation/AnimInstanceProxy.h"
 
 namespace
 {
@@ -32,6 +31,11 @@ namespace
 	};
 }
 
+FAnimNode_CrewProcedural::FAnimNode_CrewProcedural()
+{
+	ResetPoseSnapshot();
+}
+
 void FAnimNode_CrewProcedural::Initialize_AnyThread(const FAnimationInitializeContext& Context)
 {
 	FAnimNode_Base::Initialize_AnyThread(Context);
@@ -51,8 +55,58 @@ void FAnimNode_CrewProcedural::Update_AnyThread(const FAnimationUpdateContext& C
 	BasePose.Update(Context);
 }
 
+void FAnimNode_CrewProcedural::PreUpdate(const UAnimInstance* InAnimInstance)
+{
+	const USubCrewAnimInstance* AnimInst = Cast<USubCrewAnimInstance>(InAnimInstance);
+	if (!AnimInst)
+	{
+		ResetPoseSnapshot();
+		return;
+	}
+
+	CopyPoseSnapshot(*AnimInst);
+}
+
+void FAnimNode_CrewProcedural::ResetPoseSnapshot()
+{
+	for (FRotator& Rotation : SnapshotRotations)
+	{
+		Rotation = FRotator::ZeroRotator;
+	}
+
+	SnapshotPelvisOffset = FVector::ZeroVector;
+	bHasPoseSnapshot = false;
+}
+
+void FAnimNode_CrewProcedural::CopyPoseSnapshot(const USubCrewAnimInstance& AnimInstance)
+{
+	SnapshotRotations[0] = AnimInstance.Proc_Pelvis_Rot;
+	SnapshotRotations[1] = AnimInstance.Proc_Spine01_Rot;
+	SnapshotRotations[2] = AnimInstance.Proc_Spine02_Rot;
+	SnapshotRotations[3] = AnimInstance.Proc_Spine03_Rot;
+	SnapshotRotations[4] = AnimInstance.Proc_Spine04_Rot;
+	SnapshotRotations[5] = AnimInstance.Proc_Spine05_Rot;
+	SnapshotRotations[6] = AnimInstance.Proc_Neck01_Rot;
+	SnapshotRotations[7] = AnimInstance.Proc_Head_Rot;
+	SnapshotRotations[8] = AnimInstance.Proc_ThighR_Rot;
+	SnapshotRotations[9] = AnimInstance.Proc_ThighL_Rot;
+	SnapshotRotations[10] = AnimInstance.Proc_CalfR_Rot;
+	SnapshotRotations[11] = AnimInstance.Proc_CalfL_Rot;
+	SnapshotRotations[12] = AnimInstance.Proc_FootR_Rot;
+	SnapshotRotations[13] = AnimInstance.Proc_FootL_Rot;
+	SnapshotRotations[14] = AnimInstance.Proc_UpperarmR_Rot;
+	SnapshotRotations[15] = AnimInstance.Proc_UpperarmL_Rot;
+	SnapshotRotations[16] = AnimInstance.Proc_LowerarmR_Rot;
+	SnapshotRotations[17] = AnimInstance.Proc_LowerarmL_Rot;
+
+	SnapshotPelvisOffset = AnimInstance.Proc_Pelvis_Offset;
+	bHasPoseSnapshot = true;
+}
+
 void FAnimNode_CrewProcedural::ResolveBones(const FBoneContainer& RequiredBones)
 {
+	static_assert(UE_ARRAY_COUNT(GBoneDefs) == ProceduralBoneCount, "Crew procedural bone table must match the pose snapshot.");
+
 	ResolvedBones.Reset();
 
 	for (int32 i = 0; i < UE_ARRAY_COUNT(GBoneDefs); ++i)
@@ -86,35 +140,10 @@ void FAnimNode_CrewProcedural::Evaluate_AnyThread(FPoseContext& Output)
 		return;
 	}
 
-	const USubCrewAnimInstance* AnimInst = Cast<USubCrewAnimInstance>(
-		Output.AnimInstanceProxy->GetAnimInstanceObject());
-	if (!AnimInst)
+	if (!bHasPoseSnapshot)
 	{
 		return;
 	}
-
-	const FRotator Rotations[] = {
-		AnimInst->Proc_Pelvis_Rot,
-		AnimInst->Proc_Spine01_Rot,
-		AnimInst->Proc_Spine02_Rot,
-		AnimInst->Proc_Spine03_Rot,
-		AnimInst->Proc_Spine04_Rot,
-		AnimInst->Proc_Spine05_Rot,
-		AnimInst->Proc_Neck01_Rot,
-		AnimInst->Proc_Head_Rot,
-		AnimInst->Proc_ThighR_Rot,
-		AnimInst->Proc_ThighL_Rot,
-		AnimInst->Proc_CalfR_Rot,
-		AnimInst->Proc_CalfL_Rot,
-		AnimInst->Proc_FootR_Rot,
-		AnimInst->Proc_FootL_Rot,
-		AnimInst->Proc_UpperarmR_Rot,
-		AnimInst->Proc_UpperarmL_Rot,
-		AnimInst->Proc_LowerarmR_Rot,
-		AnimInst->Proc_LowerarmL_Rot,
-	};
-
-	const FVector PelvisOffset = AnimInst->Proc_Pelvis_Offset;
 
 	for (const FBoneEntry& Entry : ResolvedBones)
 	{
@@ -125,15 +154,15 @@ void FAnimNode_CrewProcedural::Evaluate_AnyThread(FPoseContext& Output)
 
 		FTransform& BoneXform = Output.Pose[Entry.CompactIndex];
 
-		const FRotator& AddRot = Rotations[Entry.RotIndex];
+		const FRotator& AddRot = SnapshotRotations[Entry.RotIndex];
 		if (!AddRot.IsNearlyZero(0.01f))
 		{
 			BoneXform.SetRotation(AddRot.Quaternion() * BoneXform.GetRotation());
 		}
 
-		if (Entry.bHasTranslation && !PelvisOffset.IsNearlyZero(0.01f))
+		if (Entry.bHasTranslation && !SnapshotPelvisOffset.IsNearlyZero(0.01f))
 		{
-			BoneXform.AddToTranslation(PelvisOffset);
+			BoneXform.AddToTranslation(SnapshotPelvisOffset);
 		}
 	}
 }
@@ -141,7 +170,7 @@ void FAnimNode_CrewProcedural::Evaluate_AnyThread(FPoseContext& Output)
 void FAnimNode_CrewProcedural::GatherDebugData(FNodeDebugData& DebugData)
 {
 	FString DebugLine = DebugData.GetNodeName(this);
-	DebugLine += FString::Printf(TEXT(" (%d bones)"), ResolvedBones.Num());
+	DebugLine += FString::Printf(TEXT(" (%d bones, Snapshot=%d)"), ResolvedBones.Num(), bHasPoseSnapshot ? 1 : 0);
 	DebugData.AddDebugItem(DebugLine);
 	BasePose.GatherDebugData(DebugData);
 }

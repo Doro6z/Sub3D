@@ -21,6 +21,15 @@ C:/Dev/sub3d/LaunchEditor.bat
 
 The solution file `Sub3D.sln` is gitignored — regenerate it from the .uproject if needed.
 
+### Automation tests cadence
+
+Tests live in `Source/Sub3DTests/` (module `Sub3DTests`). Run them:
+- Before any commit touching `Source/Sub3D/Submarine/` core (movement, flood, sonar, replication contracts).
+- After moving or renaming replicated UPROPERTYs (`FSubmarineNetState`, `USubmarineDefinition`, etc.).
+- After any change to crew rebase, environment axis, or hull boundary handoff.
+
+Add a new test alongside any new authoritative contract or replicated state. The runner is fast (~30 s with `-NullRHI`); use it as a pre-commit sanity check.
+
 ## Module architecture
 
 Seven C++ modules, layered by responsibility:
@@ -39,9 +48,16 @@ Sub3DTests (Editor)        — Automation test framework.
 
 When adding module dependencies, always update the corresponding `.Build.cs` file.
 
-## Generation pipeline (core architecture)
+## Generation pipeline (PAUSED for First Playable)
 
-This is the central system. All submarine geometry and gameplay layout flows through it:
+**Status (decision 2026-04-18, see memory `project_pipelines_status_2026_04_18.md`):**
+
+- Production submarine for First Playable is `BP_Submarine_Craniata` — handmade, Blender-script + manual BP wiring. **Anything new targets Craniata.**
+- The runtime generator pipeline below is in **pause** during FP. Code remains in tree but no active feature targets it.
+- Bake pipeline (`Sub3DBake/`) is also in pause (legacy Proto03/04).
+- Bugs in Generator or Bake during FP go to `reports/backlog/post_fp_debt.md`, not to fix.
+
+Generator pipeline (kept as architectural reference, not active):
 
 ```
 USubmarineGeneratorSpec          — Editor-authored data asset (input)
@@ -73,7 +89,7 @@ USubmarineDefinition             — RUNTIME SOURCE OF TRUTH (output)
 - **Submarine = authoritative moving frame.** Crew = traversal on that frame. Do not collapse movement, replication, and presentation layers.
 - **Server authority** — Submarine movement, flood state, door state are authoritative on server.
 - **No Chaos physics** — Movement is math-based via USubMovementComponent.
-- **No runtime auto-spawn for UI** — Prefer editor-assigned widgets, explicit names, stable layout rules, and predictable asset wiring.
+- **No runtime auto-spawn for UMG widgets** — HUDs, helm panels and station UIs are editor-assigned with explicit names and stable layout rules. Component-level runtime spawning (flood water planes per compartment, doors from Definition, hull boundary components at breaches) is fine — that is gameplay state materialization, not UI.
 
 ## Crew embarked movement — Local Grid Space Authority
 
@@ -94,7 +110,7 @@ Authoritative architecture: `reports/plans/2026-04-21_local_grid_space_authority
 - `bIgnoreBaseRotation = IsGridAuthoritative()` — disable CMC's built-in base-rotation carry.
 - `UpdateBasedMovement` and `UpdateBasedRotation` are no-ops when `IsGridAuthoritative()`.
 - Controller yaw delta is applied in `TickComponent` (pre-CMC) from `SubRot.Yaw - LastSubWorldTransform.Rotator().Yaw`.
-- Tick prereqs: `SubFlood → SubMovement → InteriorFrame → CrewMovement`. `SubFlood → SubMovement` is set in `USubMovementComponent::BeginPlay`; the crew-side chain is set in `InitializeForSubmarine`.
+- Tick prereqs: `SubFlood → SubMovement → CrewMovement`. `SubFlood → SubMovement` is set in `USubMovementComponent::BeginPlay`; the crew-side chain is set in `InitializeForSubmarine`. (`USubInteriorFrameComponent` was deleted in Phase C of the unified motion-chain refactor — no middleman between SubMovement and CrewMovement.)
 
 ## Flood → sub movement coupling
 
@@ -146,7 +162,29 @@ Breach path reuses the same component — `USubFloodComponent::CreateBreach` spa
 
 - **LevelSwitcher** — Editor-only level switching widget.
 - **RuntimeSyncDiagnostics** — Runtime diagnostics for replication debugging.
-- **UnrealClaude** — Claude AI integration for Unreal Editor.
+- **UnrealClaude** — Claude AI MCP bridge to the Unreal Editor (see "MCP tooling" section).
+- **Sub3DDebugPanel** — Editor-only Slate dockable panel exposing all `USub3DDebugSettings` toggles in one place.
+
+## MCP tooling (UnrealClaude)
+
+The UnrealClaude plugin exposes MCP tools that let you query the **live editor state** instead of inferring from files. Prefer them over file reads when the editor is running and the answer depends on runtime state.
+
+| Tool | Use when |
+|---|---|
+| `mcp__unrealclaude__unreal_status` | Need to know if the editor is responsive and which level is loaded. First call before any other MCP query. |
+| `mcp__unrealclaude__unreal_get_output_log` | Diagnose a runtime bug — read the live log instead of guessing from code. |
+| `mcp__unrealclaude__unreal_blueprint_query` | Inspect a BP graph (variables, functions, pins) without opening the editor. |
+| `mcp__unrealclaude__unreal_asset_search` | Find assets by name pattern across the content tree. |
+| `mcp__unrealclaude__unreal_asset_referencers` / `unreal_asset_dependencies` | Decide if it is safe to delete or rename an asset. |
+| `mcp__unrealclaude__unreal_get_level_actors` | List actors in the current level — useful when a BP is misplaced or missing. |
+| `mcp__unrealclaude__unreal_capture_viewport` | Capture a viewport screenshot for visual confirmation. |
+| `mcp__unrealclaude__unreal_set_property` | Edit a UPROPERTY on an actor instance live. Use sparingly — the change does not persist unless saved. |
+| `mcp__unrealclaude__unreal_spawn_actor` / `unreal_move_actor` / `unreal_delete_actors` | Live edits during a debug session. |
+
+**When NOT to use MCP tools:**
+- For source code reads (use `Read`, `Grep`, `Glob` — faster, no editor dependency).
+- When the editor is closed (the tools will hang or fail).
+- For any change you intend to persist — those go through assets/code, not MCP.
 
 ## Naming conventions (enforced by .editorconfig)
 
@@ -181,7 +219,26 @@ Located in `Source/scripts/`:
 
 Formalized TODOs for the First Playable test stage. These are the ONLY acceptable reasons for the described symptoms — do not invent other explanations while these are unresolved.
 
-- **Stairs → Ramps.** `SM_Stair_*` meshes inside `BP_Submarine_Craniata` (e.g. `SM_Stair_UpperToMain_UpperAccess`) still use complex collision. The step-edge discontinuity produces micro-jitter on walk transitions (Deck ↔ Stair). **Fix:** replace stair meshes with ramp meshes (single planar slope, simple collision). Until done, this jitter is an asset problem, NOT a rebase architecture regression.
+(no open environment debt — stair complex-collision was replaced with simple box ramp collision; stair traversal is no longer an asset issue.)
+
+## Required project config
+
+These engine settings are load-bearing for FP and must remain set:
+
+| Setting | Value | Why |
+|---|---|---|
+| `Engine.UseFixedFrameRate` | **True** | Eliminates 2-week motion-chain jitter at trigger events. PIE without it batches 1-3 sim steps per snapshot, causing visible stutter (memory `project_motion_chain_jitter_root_cause_2026_04_27.md`). Runtime guardrail in `SubMovementComponent.cpp:118` warns at BeginPlay if False. |
+| `Engine.FixedFrameRate` | 60.0 | Matches `USubMovementComponent::FixedSimulationHz`. |
+
+`USub3DDebugSettings` (Project Settings > Game > Sub3D Debug) holds all debug toggles. `bLogPresentationChain` is the master switch for motion-chain instrumentation.
+
+## Workflow & state hygiene
+
+- **Commit cadence**: a finished milestone = a commit, in the same day. Do not let the working tree accumulate beyond ~15 modified files. Split commits along features (Phase A, Phase C, Ladder, …), not files.
+- **Push to origin every day** the branch has new commits. Local stash is **not a backup** — verified the hard way 2026-04-28 (locks during stash + accidental drop almost cost a day's untracked work).
+- **Stash discipline**: close the Unreal Editor before `git stash push -u` (open .uasset locks cause partial stashes that leave the working tree in an ambiguous state). If a stash entry drops accidentally, the commit hash stays in the object database for ~90 days; recovery: `git archive <stash-hash>^3 | tar -x` extracts the untracked-files parent without touching the index.
+- **Stable tags**: when the user names a commit "Stable" in its message, tag it: `git tag stable-2026-04-18 917489b`. Makes rollback trivial.
+- **Pre-commit sanity**: build + automation tests before committing changes to `Source/Sub3D/Submarine/`. Cheap insurance against UHT manifest staleness on newly added headers.
 
 ## Writing quality
 

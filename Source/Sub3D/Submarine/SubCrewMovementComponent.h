@@ -2,12 +2,13 @@
 
 #include "CoreMinimal.h"
 #include "GameFramework/CharacterMovementComponent.h"
+#include "CrewLocomotionTypes.h"
 #include "SubCrewNetTypes.h"
 #include "SubCrewMovementComponent.generated.h"
 
 class UPrimitiveComponent;
-class USubInteriorFrameComponent;
 class ASubmarineBase;
+class ULadderClimbComponent;
 
 UENUM(BlueprintType)
 enum class ECrewPostureState : uint8
@@ -57,8 +58,24 @@ public:
 	 * Replicated with COND_SkipOwner: owning client computes locally (via its own rebase), non-owning
 	 * clients receive the server-computed value and rebase the peer crew against their local sub pose.
 	 */
-	UPROPERTY(BlueprintReadOnly, Replicated, Category = "Submarine|Crew|LocalGrid")
+	UPROPERTY(BlueprintReadOnly, ReplicatedUsing = OnRep_GridSpaceTransform, Category = "Submarine|Crew|LocalGrid")
 	FTransform GridSpaceTransform = FTransform::Identity;
+
+	/** Current yaw owned by the local grid frame while embarked. Baked into GridSpaceTransform for replication. */
+	UPROPERTY(BlueprintReadOnly, Category = "Submarine|Crew|LocalGrid")
+	float GridFacingYawDeg = 0.f;
+
+	/** Target local-grid yaw used by the turn-rate clamp. */
+	UPROPERTY(BlueprintReadOnly, Category = "Submarine|Crew|LocalGrid")
+	float DesiredGridFacingYawDeg = 0.f;
+
+	/** Current local-grid yaw rate, used by animation/debug. */
+	UPROPERTY(BlueprintReadOnly, Category = "Submarine|Crew|LocalGrid")
+	float GridFacingYawRateDegPerSec = 0.f;
+
+	/** Maximum local-grid turn rate for embarked crew yaw. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Submarine|Crew|LocalGrid", meta = (ClampMin = "1.0"))
+	float GridFacingTurnRateDegPerSec = 720.f;
 
 	/**
 	 * Crew locomotion axis. Replicated with COND_SkipOwner — owner predicts state transitions
@@ -86,6 +103,24 @@ public:
 
 	/** Returns and clears the pending handoff kind. Called by FSavedMove_SubCrew::SetMoveFor. */
 	ECrewHandoffKind ConsumePendingHandoff();
+
+	// ── Ladder climb (post-helm system) ────────────────────────
+	/** Active ladder while climbing. Null when not climbing. Replicated for peer rendering. */
+	UPROPERTY(BlueprintReadOnly, Replicated, Category = "Submarine|Crew|Ladder")
+	TObjectPtr<ULadderClimbComponent> CurrentLadder = nullptr;
+
+	/** Climb traversal progress along the ladder, 0 = start, 1 = end. Replicated COND_SkipOwner. */
+	UPROPERTY(BlueprintReadOnly, ReplicatedUsing = OnRep_LadderClimbProgress, Category = "Submarine|Crew|Ladder")
+	float LadderClimbProgress01 = 0.f;
+
+	UFUNCTION(BlueprintPure, Category = "Submarine|Crew|Ladder")
+	bool IsClimbingLadder() const { return CurrentLadder != nullptr; }
+
+	/** Begin a climb on the given ladder. Server-only entry point; triggers replication so peers render. */
+	void BeginLadderClimb(ULadderClimbComponent* Ladder, float StartProgress01);
+
+	/** End the active climb. Optional StepOff parameter chooses which end to step off (0 = bottom, 1 = top). */
+	void EndLadderClimb(float StepOffProgress01);
 
 	/** Submarine world transform cached at the end of the previous tick. Used to compute the controller yaw delta and seeded on authority transitions. */
 	FTransform LastSubWorldTransform = FTransform::Identity;
@@ -189,9 +224,28 @@ public:
 	UPROPERTY(BlueprintReadOnly, Replicated, Category = "Submarine|Crew|Movement")
 	bool bIsRunning = false;
 
+	UPROPERTY(BlueprintReadOnly, Category = "Submarine|Crew|Movement")
+	FCrewMoveIntent LastMoveIntent;
+
+	UPROPERTY(BlueprintReadOnly, Category = "Submarine|Crew|Movement")
+	FCrewLocomotionFrame LastLocomotionFrame;
+
 	/** Run speed multiplier applied to MaxWalkSpeed */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Submarine|Crew|Movement", meta = (ClampMin = "1.0", ClampMax = "3.0"))
 	float RunSpeedMultiplier = 1.8f;
+
+	/**
+	 * Sole locomotion input entry point for crew walking/swimming.
+	 * MoveAxis.X = forward/back, MoveAxis.Y = right/left.
+	 */
+	UFUNCTION(BlueprintCallable, Category = "Submarine|Crew|Movement")
+	void ApplyCrewPlanarMoveInput(FVector2D MoveAxis);
+
+	UFUNCTION(BlueprintPure, Category = "Submarine|Crew|Movement")
+	FCrewMoveIntent GetLastMoveIntent() const { return LastMoveIntent; }
+
+	UFUNCTION(BlueprintPure, Category = "Submarine|Crew|Movement")
+	FCrewLocomotionFrame GetLastLocomotionFrame() const { return LastLocomotionFrame; }
 
 	/** Request sprint start. Called from input (Shift pressed). */
 	UFUNCTION(BlueprintCallable, Category = "Submarine|Crew|Movement")
@@ -231,6 +285,30 @@ public:
 
 	UPROPERTY(BlueprintReadOnly, Category = "Submarine|Crew|FootIK")
 	FVector FootIK_L = FVector::ZeroVector;
+
+	UPROPERTY(BlueprintReadOnly, Category = "Submarine|Crew|FootIK")
+	FCrewFootIKState FootIK_R_State;
+
+	UPROPERTY(BlueprintReadOnly, Category = "Submarine|Crew|FootIK")
+	FCrewFootIKState FootIK_L_State;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Submarine|Crew|FootIK")
+	FName RightFootIKSocketName = TEXT("foot_r");
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Submarine|Crew|FootIK")
+	FName LeftFootIKSocketName = TEXT("foot_l");
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Submarine|Crew|FootIK", meta = (ClampMin = "0.0"))
+	float FootIKTraceUpCm = 18.f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Submarine|Crew|FootIK", meta = (ClampMin = "1.0"))
+	float FootIKTraceDownCm = 55.f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Submarine|Crew|FootIK", meta = (ClampMin = "0.0"))
+	float FootIKMaxOffsetCm = 35.f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Submarine|Crew|FootIK", meta = (ClampMin = "0.1"))
+	float FootIKInterpSpeed = 14.f;
 
 	void InitializeForSubmarine();
 	void RefreshEmbarkedFlooring();
@@ -283,9 +361,18 @@ protected:
 		uint8 ClientMovementMode) override;
 
 private:
+	UFUNCTION()
+	void OnRep_GridSpaceTransform();
+
+	UFUNCTION()
+	void OnRep_LadderClimbProgress();
+
+	void TickLadderClimb(float DeltaTime);
+
 	ASubmarineBase* GetCurrentSubmarine() const;
-	USubInteriorFrameComponent* GetInteriorFrame() const;
 	bool IsAcceptedEmbarkedBase(const UPrimitiveComponent* CandidateBase) const;
+	void UpdateGridFacingYaw(float DeltaTime, const FTransform& SubTransform);
+	void ResetGridFacingYaw();
 	void UpdateInertialState();
 	void UpdateRelativeState(float DeltaTime);
 	void UpdateSupportState();
@@ -297,12 +384,54 @@ private:
 	void DebugDrawState();
 	void LogPeriodicState(float DeltaTime);
 
+	// Master "Motion chain tick" aggregate emitter. One log line per render frame per
+	// machine, gated on bLogPresentationChain + locally-controlled. Correlates the sub
+	// pose/velocity/inputs with the crew rebase pose/embark state at the same render
+	// time, so multi-stream investigation reduces to a single grep.
+	void LogMotionChainTick(float DeltaTime) const;
+
+	// Per-tick TRACE snapshot of the entire motion chain. Captured at 4 points across
+	// the tick so handoff deltas (rebase teleport, CMC simulate, grid extract) become
+	// inspectable line-by-line. Gated on bLogMotionChainTrace.
+	struct FMotionChainSnapshot
+	{
+		FVector SubLoc = FVector::ZeroVector;
+		FRotator SubRot = FRotator::ZeroRotator;
+		FVector SubVel = FVector::ZeroVector;
+		FVector CrewWorld = FVector::ZeroVector;
+		FRotator CrewWorldRot = FRotator::ZeroRotator;
+		FVector CMCVelocity = FVector::ZeroVector;
+		FVector GridLocal = FVector::ZeroVector;
+		float GridYaw = 0.f;
+		uint8 MovementMode = 0;
+		bool bFalling = false;
+		FName BaseName = NAME_None;
+		FName BaseOwnerName = NAME_None;
+		FVector FloorImpact = FVector::ZeroVector;
+		float FloorDist = 0.f;
+		bool bWalkable = false;
+	};
+	mutable FMotionChainSnapshot TracePrevPostExtract;
+	mutable bool bHasTracePrev = false;
+
+	void CaptureTraceSnapshot(FMotionChainSnapshot& Out) const;
+	void EmitMotionChainTrace(const FMotionChainSnapshot& PreReb,
+		const FMotionChainSnapshot& PostReb,
+		const FMotionChainSnapshot& PostCMC,
+		const FMotionChainSnapshot& PostExtract,
+		float DeltaTime) const;
+
 	void TickPosture(float DeltaTime);
 	void SetRunningState(bool bNewRunning);
+	FCrewMoveIntent BuildMoveIntent(FVector2D MoveAxis) const;
+	void UpdateLocomotionFrame();
 	void UpdateHandIKProbes();
 	void UpdateFootIKTraces();
 
 	TWeakObjectPtr<UPrimitiveComponent> LastKnownBase;
+	FTransform LastReceivedReplicatedGridSpaceTransform = FTransform::Identity;
+	double LastReceivedGridSpaceTransformRealTime = 0.0;
+	bool bHasReceivedReplicatedGridSpaceTransform = false;
 	FVector PreviousRelativeLocation = FVector::ZeroVector;
 	bool bHasPreviousRelativeLocation = false;
 	float FloorRecoveryTimer = 0.f;
@@ -310,6 +439,12 @@ private:
 
 	/** Tracks submarine binding across ticks so the lazy latch only fires on the rising edge (false->true). */
 	bool bHadSubmarineBindingLastTick = false;
+
+	/** True after GridFacingYawDeg has been seeded from GridSpaceTransform or replication. */
+	bool bHasGridFacingYaw = false;
+
+	/** Set by ApplyCrewPlanarMoveInput so LastMoveIntent can be cleared when input stops. */
+	bool bReceivedMoveInputThisFrame = false;
 
 	/**
 	 * Handoff event pending capture into the next saved move. Set by

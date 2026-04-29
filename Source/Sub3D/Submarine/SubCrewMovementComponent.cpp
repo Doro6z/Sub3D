@@ -2,25 +2,40 @@
 #include "Sub3DDebugSettings.h"
 
 #include "CompartmentVolumeComponent.h"
+#include "LadderClimbComponent.h"
 #include "SubCrewCharacter.h"
 #include "SubCrewNetTypes.h"
-#include "SubInteriorFrameComponent.h"
 #include "SubmarineBase.h"
 #include "SubMovementComponent.h"
 #include "Components/CapsuleComponent.h"
 #include "Components/PrimitiveComponent.h"
+#include "Components/SkeletalMeshComponent.h"
 #include "Camera/CameraComponent.h"
 #include "DrawDebugHelpers.h"
 #include "Engine/Engine.h"
 #include "Engine/World.h"
 #include "GameFramework/Character.h"
 #include "GameFramework/Controller.h"
+#include "HAL/IConsoleManager.h"
+#include "HAL/PlatformTime.h"
 #include "Net/UnrealNetwork.h"
 
 DEFINE_LOG_CATEGORY_STATIC(LogSubCrewMovement, Log, All);
 
 namespace
 {
+static TAutoConsoleVariable<int32> CVarCrewMotionChainTrace(
+	TEXT("Sub3D.Crew.MotionChainTrace"),
+	0,
+	TEXT("Diagnostic: 1 logs per-tick crew motion-chain snapshots at pre-rebase, post-rebase, post-CMC, and post-extract."));
+
+bool IsCrewMotionChainTraceEnabled()
+{
+	const USub3DDebugSettings* Settings = GetDefault<USub3DDebugSettings>();
+	return CVarCrewMotionChainTrace.GetValueOnGameThread() != 0
+		|| (Settings && Settings->bLogMotionChainTrace);
+}
+
 bool IsComponentOnSubmarine(const ASubmarineBase* Submarine, const UPrimitiveComponent* Component)
 {
 	if (!Submarine || !Component)
@@ -33,6 +48,71 @@ bool IsComponentOnSubmarine(const ASubmarineBase* Submarine, const UPrimitiveCom
 		|| (ComponentOwner && ComponentOwner->GetOwner() == Submarine)
 		|| (ComponentOwner && ComponentOwner->GetAttachParentActor() == Submarine)
 		|| (ComponentOwner && ComponentOwner->IsAttachedTo(Submarine));
+}
+
+float StepAngleConstant(float CurrentDeg, float TargetDeg, float MaxStepDeg)
+{
+	const float DeltaDeg = FMath::FindDeltaAngleDegrees(CurrentDeg, TargetDeg);
+	const float StepDeg = FMath::Clamp(DeltaDeg, -MaxStepDeg, MaxStepDeg);
+	return FRotator::NormalizeAxis(CurrentDeg + StepDeg);
+}
+
+FVector2D ClampMoveAxis(FVector2D MoveAxis)
+{
+	MoveAxis.X = FMath::Clamp(MoveAxis.X, -1.f, 1.f);
+	MoveAxis.Y = FMath::Clamp(MoveAxis.Y, -1.f, 1.f);
+
+	if (MoveAxis.SizeSquared() > 1.f)
+	{
+		MoveAxis.Normalize();
+	}
+
+	return MoveAxis;
+}
+
+ECrewLocomotionStance ResolveLocomotionStance(float PostureAlpha, bool bIsSwimming)
+{
+	if (bIsSwimming)
+	{
+		return ECrewLocomotionStance::Swimming;
+	}
+
+	if (PostureAlpha <= 0.25f)
+	{
+		return ECrewLocomotionStance::Prone;
+	}
+
+	if (PostureAlpha < 0.75f)
+	{
+		return ECrewLocomotionStance::Crouched;
+	}
+
+	return ECrewLocomotionStance::Standing;
+}
+
+ECrewLocomotionGait ResolveLocomotionGait(ECrewLocomotionStance Stance, bool bIsMoving, bool bIsRunning)
+{
+	if (Stance == ECrewLocomotionStance::Swimming)
+	{
+		return ECrewLocomotionGait::Swim;
+	}
+
+	if (!bIsMoving)
+	{
+		return ECrewLocomotionGait::Idle;
+	}
+
+	if (Stance == ECrewLocomotionStance::Prone)
+	{
+		return ECrewLocomotionGait::ProneCrawl;
+	}
+
+	if (Stance == ECrewLocomotionStance::Crouched)
+	{
+		return ECrewLocomotionGait::CrouchWalk;
+	}
+
+	return bIsRunning ? ECrewLocomotionGait::Sprint : ECrewLocomotionGait::Walk;
 }
 }
 
@@ -63,6 +143,12 @@ USubCrewMovementComponent::USubCrewMovementComponent()
 
 void USubCrewMovementComponent::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
 {
+	if (!bReceivedMoveInputThisFrame)
+	{
+		LastMoveIntent = BuildMoveIntent(FVector2D::ZeroVector);
+	}
+	bReceivedMoveInputThisFrame = false;
+
 	// Lazy authority latch — RISING-EDGE ONLY.
 	// Fires only when submarine binding transitions false->true (spawn into sub, replication).
 	// After that, EmbarkState is explicit (SetEmbarkState via EnterOnFoot, Board, Disembark,
@@ -73,13 +159,17 @@ void USubCrewMovementComponent::TickComponent(float DeltaTime, ELevelTick TickTy
 
 	if (bJustGainedSubBinding && !IsGridAuthoritative() && CharacterOwner)
 	{
-		if (USubInteriorFrameComponent* Frame = GetInteriorFrame())
+		if (const ASubmarineBase* Sub = GetCurrentSubmarine())
 		{
-			const FTransform SubTransform = Frame->GetSubTransform();
+			const FTransform SubTransform = Sub->GetActorTransform();
 			const FVector LocalPos = SubTransform.InverseTransformPosition(CharacterOwner->GetActorLocation());
 			const FRotator WorldRot = CharacterOwner->GetActorRotation();
 			const float LocalYaw = FRotator::NormalizeAxis(WorldRot.Yaw - SubTransform.Rotator().Yaw);
 			GridSpaceTransform = FTransform(FRotator(0.f, LocalYaw, 0.f).Quaternion(), LocalPos);
+			GridFacingYawDeg = LocalYaw;
+			DesiredGridFacingYawDeg = LocalYaw;
+			GridFacingYawRateDegPerSec = 0.f;
+			bHasGridFacingYaw = true;
 			LastSubWorldTransform = SubTransform;
 			SetEmbarkState(ECrewEmbarkState::Embarked);
 
@@ -87,7 +177,7 @@ void USubCrewMovementComponent::TickComponent(float DeltaTime, ELevelTick TickTy
 				LogSubCrewMovement,
 				Log,
 				TEXT("GridAuthority ON (lazy edge) | Sub=%s | LocalPos=%s | LocalYaw=%.2f"),
-				*GetNameSafe(Frame->GetOwner()),
+				*GetNameSafe(Sub),
 				*LocalPos.ToCompactString(),
 				LocalYaw);
 		}
@@ -96,6 +186,7 @@ void USubCrewMovementComponent::TickComponent(float DeltaTime, ELevelTick TickTy
 	{
 		// Defensive: lost the sub pointer while still flagged grid-authoritative. Reset to Outside.
 		SetEmbarkState(ECrewEmbarkState::Outside);
+		ResetGridFacingYaw();
 		UE_LOG(LogSubCrewMovement, Log, TEXT("GridAuthority OFF (sub lost) | submarine context ended"));
 	}
 
@@ -103,6 +194,33 @@ void USubCrewMovementComponent::TickComponent(float DeltaTime, ELevelTick TickTy
 
 	// Grid-space authority owns yaw while embarked; CMC's base-rotation carry is bypassed.
 	bIgnoreBaseRotation = IsGridAuthoritative();
+	if (CharacterOwner)
+	{
+		// While grid-authoritative, actor yaw is SubYaw + GridYaw. The local camera
+		// still follows ControlRotation through FPSCamera/TPSCameraBoom, but the
+		// Character must not copy ControlRotation back onto ActorYaw between rebases.
+		CharacterOwner->bUseControllerRotationYaw = !IsGridAuthoritative();
+	}
+
+	// ─── TRACE capture: PRE-REBASE ───
+	const bool bTraceMotionChain = IsCrewMotionChainTraceEnabled()
+		&& CharacterOwner && CharacterOwner->IsLocallyControlled();
+	FMotionChainSnapshot TracePreReb;
+	FMotionChainSnapshot TracePostReb;
+	FMotionChainSnapshot TracePostCMC;
+	FMotionChainSnapshot TracePostExtract;
+	if (bTraceMotionChain)
+	{
+		CaptureTraceSnapshot(TracePreReb);
+	}
+
+	// ─── LADDER CLIMB (pre-rebase) ───
+	// Drives GridSpaceTransform along the active ladder line; the rebase below then
+	// sets the capsule to the resulting sub-relative pose. Skipped when not climbing.
+	if (CurrentLadder && CharacterOwner && CharacterOwner->IsLocallyControlled())
+	{
+		TickLadderClimb(DeltaTime);
+	}
 
 	// ─── REBASE (pre-CMC) ───
 	// Teleport the capsule to the expected world pose so CMC sees a static world
@@ -110,9 +228,10 @@ void USubCrewMovementComponent::TickComponent(float DeltaTime, ELevelTick TickTy
 	// avoid triggering overlap/move events before the real CMC tick.
 	if (IsGridAuthoritative() && HasSubmarineBinding() && UpdatedComponent && CharacterOwner)
 	{
-		if (USubInteriorFrameComponent* Frame = GetInteriorFrame())
+		if (const ASubmarineBase* Sub = GetCurrentSubmarine())
 		{
-			const FTransform SubTransform = Frame->GetSubTransform();
+			const FTransform SubTransform = Sub->GetActorTransform();
+			UpdateGridFacingYaw(DeltaTime, SubTransform);
 
 			const FVector RebasedWorldPos = SubTransform.TransformPosition(GridSpaceTransform.GetLocation());
 			const FRotator LocalRot = GridSpaceTransform.Rotator();
@@ -124,6 +243,16 @@ void USubCrewMovementComponent::TickComponent(float DeltaTime, ELevelTick TickTy
 			UpdatedComponent->SetWorldLocationAndRotation(
 				RebasedWorldPos, RebasedWorldRot.Quaternion(),
 				/*bSweep*/ false, nullptr, ETeleportType::TeleportPhysics);
+
+			// This rebase is our authoritative moving-frame transport, not an
+			// external displacement that CMC should diagnose on the next
+			// PerformMovement call. Without this, CMC sees the sub-carried
+			// position delta as bTeleportedSinceLastUpdate every frame while the
+			// submarine moves. That forces floor validation/adjustment on moving
+			// stair geometry and can create persistent correction jitter.
+			LastUpdateLocation = UpdatedComponent->GetComponentLocation();
+			LastUpdateRotation = UpdatedComponent->GetComponentQuat();
+			bTeleportedSinceLastUpdate = false;
 
 			// Carry the controller yaw by the sub's yaw delta so the locally-controlled
 			// view stays anchored relative to the sub.
@@ -146,7 +275,17 @@ void USubCrewMovementComponent::TickComponent(float DeltaTime, ELevelTick TickTy
 		}
 	}
 
+	if (bTraceMotionChain)
+	{
+		CaptureTraceSnapshot(TracePostReb);
+	}
+
 	Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
+
+	if (bTraceMotionChain)
+	{
+		CaptureTraceSnapshot(TracePostCMC);
+	}
 
 	TickPosture(DeltaTime);
 
@@ -158,13 +297,13 @@ void USubCrewMovementComponent::TickComponent(float DeltaTime, ELevelTick TickTy
 		// authoritative GridSpaceTransform for next frame's rebase.
 		if (IsGridAuthoritative() && CharacterOwner)
 		{
-			if (USubInteriorFrameComponent* Frame = GetInteriorFrame())
+			if (const ASubmarineBase* Sub = GetCurrentSubmarine())
 			{
-				const FTransform SubTransform = Frame->GetSubTransform();
+				const FTransform SubTransform = Sub->GetActorTransform();
 				const FVector NewLocalPos = SubTransform.InverseTransformPosition(CharacterOwner->GetActorLocation());
-				const FRotator WorldRot = CharacterOwner->GetActorRotation();
-				const FRotator SubRot = SubTransform.Rotator();
-				const float LocalYaw = FRotator::NormalizeAxis(WorldRot.Yaw - SubRot.Yaw);
+				const float LocalYaw = bHasGridFacingYaw
+					? GridFacingYawDeg
+					: GridSpaceTransform.Rotator().Yaw;
 				GridSpaceTransform = FTransform(FRotator(0.f, LocalYaw, 0.f).Quaternion(), NewLocalPos);
 			}
 		}
@@ -172,6 +311,7 @@ void USubCrewMovementComponent::TickComponent(float DeltaTime, ELevelTick TickTy
 		UpdateRelativeState(DeltaTime);
 		UpdateInertialState();
 		UpdateSupportState();
+		UpdateLocomotionFrame();
 		AttemptEmbarkedFloorRecovery(DeltaTime);
 		UpdateBraceState();
 		UpdateHandIKProbes();
@@ -179,6 +319,14 @@ void USubCrewMovementComponent::TickComponent(float DeltaTime, ELevelTick TickTy
 		CheckAndLogBaseChange();
 		LogPeriodicState(DeltaTime);
 		DebugDrawState();
+
+		if (bTraceMotionChain)
+		{
+			CaptureTraceSnapshot(TracePostExtract);
+			EmitMotionChainTrace(TracePreReb, TracePostReb, TracePostCMC, TracePostExtract, DeltaTime);
+			TracePrevPostExtract = TracePostExtract;
+			bHasTracePrev = true;
+		}
 	}
 	else
 	{
@@ -215,7 +363,171 @@ void USubCrewMovementComponent::TickComponent(float DeltaTime, ELevelTick TickTy
 		DebugLogTimer = 0.f;
 		LastSubWorldTransform = FTransform::Identity;
 		GridSpaceTransform = FTransform::Identity;
+		ResetGridFacingYaw();
 	}
+
+	UpdateLocomotionFrame();
+	LogMotionChainTick(DeltaTime);
+}
+
+void USubCrewMovementComponent::LogMotionChainTick(float DeltaTime) const
+{
+	const USub3DDebugSettings* Settings = GetDefault<USub3DDebugSettings>();
+	if (!Settings || !Settings->bLogPresentationChain || !CharacterOwner)
+	{
+		return;
+	}
+	// One emit per render frame per machine — gate on locally-controlled so neither
+	// peer SimProxies nor server-Authority duplicates fire the line.
+	if (!CharacterOwner->IsLocallyControlled())
+	{
+		return;
+	}
+
+	const ENetRole LocalRole = CharacterOwner->GetLocalRole();
+	const FVector CrewWorld = CharacterOwner->GetActorLocation();
+	const FRotator CrewWorldRot = CharacterOwner->GetActorRotation();
+	const FVector GridLocal = GridSpaceTransform.GetLocation();
+	const float GridYaw = GridSpaceTransform.Rotator().Yaw;
+	const FString ModeStr = GetMovementName();
+	const UPrimitiveComponent* Base = CharacterOwner->GetMovementBase();
+	const ASubmarineBase* Sub = GetCurrentSubmarine();
+	const USubMovementComponent* SubMov = Sub ? Sub->SubMovement : nullptr;
+
+	const FVector SubWorld = Sub ? Sub->GetActorLocation() : FVector::ZeroVector;
+	const FVector SubVel = SubMov ? SubMov->Velocity : FVector::ZeroVector;
+	const FVector SubAcc = SubMov ? SubMov->LinearAcceleration : FVector::ZeroVector;
+	const float SubRudder = SubMov ? SubMov->GetRudderInput() : 0.f;
+	const float SubDive = SubMov ? SubMov->GetDivePlaneInput() : 0.f;
+	const float SubThrust = SubMov ? SubMov->GetThrustInput() : 0.f;
+	const int32 SubSimFrame = SubMov ? SubMov->GetSimFrameCounter() : 0;
+
+	UE_LOG(
+		LogSubCrewMovement,
+		Log,
+		TEXT("Motion chain tick | Role=%d dt=%.4f | Sub.W=%s SimFrame=%d Vel=%s Acc=%s Rud=%.2f Dive=%.2f Thr=%.2f | Crew.W=%s Yaw=%.1f Grid.L=%s GridYaw=%.1f | Embark=%d Mode=%s Falling=%d Base=%s | RelVel=%s SupportQ=%.2f"),
+		static_cast<int32>(LocalRole),
+		DeltaTime,
+		*SubWorld.ToCompactString(),
+		SubSimFrame,
+		*SubVel.ToCompactString(),
+		*SubAcc.ToCompactString(),
+		SubRudder, SubDive, SubThrust,
+		*CrewWorld.ToCompactString(),
+		CrewWorldRot.Yaw,
+		*GridLocal.ToCompactString(),
+		GridYaw,
+		static_cast<int32>(EmbarkState),
+		*ModeStr,
+		IsFalling() ? 1 : 0,
+		*GetNameSafe(Base),
+		*RelativeLinearVelocity.ToCompactString(),
+		SupportQuality01);
+}
+
+void USubCrewMovementComponent::CaptureTraceSnapshot(FMotionChainSnapshot& Out) const
+{
+	if (!CharacterOwner)
+	{
+		return;
+	}
+	const ASubmarineBase* Sub = GetCurrentSubmarine();
+	const USubMovementComponent* SubMov = Sub ? Sub->SubMovement : nullptr;
+
+	Out.SubLoc = Sub ? Sub->GetActorLocation() : FVector::ZeroVector;
+	Out.SubRot = Sub ? Sub->GetActorRotation() : FRotator::ZeroRotator;
+	Out.SubVel = SubMov ? SubMov->Velocity : FVector::ZeroVector;
+	Out.CrewWorld = CharacterOwner->GetActorLocation();
+	Out.CrewWorldRot = CharacterOwner->GetActorRotation();
+	Out.CMCVelocity = Velocity;
+	Out.GridLocal = GridSpaceTransform.GetLocation();
+	Out.GridYaw = GridSpaceTransform.Rotator().Yaw;
+	Out.MovementMode = static_cast<uint8>(MovementMode);
+	Out.bFalling = IsFalling();
+	const UPrimitiveComponent* Base = CharacterOwner->GetMovementBase();
+	Out.BaseName = Base ? Base->GetFName() : NAME_None;
+	Out.BaseOwnerName = (Base && Base->GetOwner()) ? Base->GetOwner()->GetFName() : NAME_None;
+	Out.FloorImpact = CurrentFloor.HitResult.ImpactPoint;
+	Out.FloorDist = CurrentFloor.FloorDist;
+	Out.bWalkable = CurrentFloor.IsWalkableFloor();
+}
+
+void USubCrewMovementComponent::EmitMotionChainTrace(
+	const FMotionChainSnapshot& PreReb,
+	const FMotionChainSnapshot& PostReb,
+	const FMotionChainSnapshot& PostCMC,
+	const FMotionChainSnapshot& PostExtract,
+	float DeltaTime) const
+{
+	// Compute deltas at each handoff.
+	const FVector SubD = PostExtract.SubLoc - PreReb.SubLoc;
+	const float SubDYaw = FRotator::NormalizeAxis(PostExtract.SubRot.Yaw - PreReb.SubRot.Yaw);
+
+	const FVector RebaseD = PostReb.CrewWorld - PreReb.CrewWorld;
+	const float RebaseDYaw = FRotator::NormalizeAxis(PostReb.CrewWorldRot.Yaw - PreReb.CrewWorldRot.Yaw);
+
+	const FVector CMCD = PostCMC.CrewWorld - PostReb.CrewWorld;
+	const float CMCDYaw = FRotator::NormalizeAxis(PostCMC.CrewWorldRot.Yaw - PostReb.CrewWorldRot.Yaw);
+
+	const FVector GridD = PostExtract.GridLocal - PreReb.GridLocal;
+	const float GridDYaw = FRotator::NormalizeAxis(PostExtract.GridYaw - PreReb.GridYaw);
+
+	const FVector CMCVelD = PostCMC.CMCVelocity - PreReb.CMCVelocity;
+	const FVector FloorD = PostExtract.FloorImpact - PreReb.FloorImpact;
+
+	// Detect transactional events by comparing PRE and POST-CMC.
+	TStringBuilder<256> Events;
+	if (PreReb.MovementMode != PostCMC.MovementMode)
+	{
+		Events.Appendf(TEXT("[ModeChange %u→%u] "), PreReb.MovementMode, PostCMC.MovementMode);
+	}
+	if (PreReb.bFalling != PostCMC.bFalling)
+	{
+		Events.Appendf(TEXT("[FallingFlip %d→%d] "), PreReb.bFalling ? 1 : 0, PostCMC.bFalling ? 1 : 0);
+	}
+	if (PreReb.BaseName != PostCMC.BaseName)
+	{
+		Events.Appendf(TEXT("[BaseChange %s→%s] "), *PreReb.BaseName.ToString(), *PostCMC.BaseName.ToString());
+	}
+	if (PreReb.bWalkable != PostCMC.bWalkable)
+	{
+		Events.Appendf(TEXT("[WalkableFlip %d→%d] "), PreReb.bWalkable ? 1 : 0, PostCMC.bWalkable ? 1 : 0);
+	}
+	const float FloorJump = static_cast<float>(FloorD.Size());
+	if (FloorJump > 5.f)
+	{
+		Events.Appendf(TEXT("[FloorJump %.2fcm] "), FloorJump);
+	}
+	const FString EventsText = Events.Len() > 0 ? FString(Events.ToString()) : FString(TEXT("(none)"));
+
+	UE_LOG(
+		LogSubCrewMovement,
+		Log,
+		TEXT("TRACE | dt=%.4f Mode=%u Falling=%d Base=%s\n")
+		TEXT("  Sub: Loc=%s Yaw=%.2f Vel=%s | Δ over tick=%s ΔYaw=%.3f\n")
+		TEXT("  PreReb:  Crew=%s Yaw=%.2f CMC.Vel=%s GridLocal=%s GridYaw=%.2f\n")
+		TEXT("  PostReb: Crew=%s Yaw=%.2f | Rebase Δ=%s ΔYaw=%.3f (expected ≈ SubΔ since GridUnchanged)\n")
+		TEXT("  PostCMC: Crew=%s Yaw=%.2f CMC.Vel=%s | CMC sim Δ=%s ΔYaw=%.3f CMC.VelΔ=%s\n")
+		TEXT("  PostExt: GridLocal=%s GridYaw=%.2f | Grid extract Δ=%s ΔYaw=%.3f\n")
+		TEXT("  Floor: Impact=%s Dist=%.2f Walkable=%d FloorΔ=%.2fcm\n")
+		TEXT("  EVENTS: %s"),
+		DeltaTime, static_cast<uint32>(PostExtract.MovementMode), PostExtract.bFalling ? 1 : 0,
+		*PostExtract.BaseName.ToString(),
+		*PreReb.SubLoc.ToCompactString(), PreReb.SubRot.Yaw, *PreReb.SubVel.ToCompactString(),
+		*SubD.ToCompactString(), SubDYaw,
+		*PreReb.CrewWorld.ToCompactString(), PreReb.CrewWorldRot.Yaw,
+		*PreReb.CMCVelocity.ToCompactString(),
+		*PreReb.GridLocal.ToCompactString(), PreReb.GridYaw,
+		*PostReb.CrewWorld.ToCompactString(), PostReb.CrewWorldRot.Yaw,
+		*RebaseD.ToCompactString(), RebaseDYaw,
+		*PostCMC.CrewWorld.ToCompactString(), PostCMC.CrewWorldRot.Yaw,
+		*PostCMC.CMCVelocity.ToCompactString(),
+		*CMCD.ToCompactString(), CMCDYaw, *CMCVelD.ToCompactString(),
+		*PostExtract.GridLocal.ToCompactString(), PostExtract.GridYaw,
+		*GridD.ToCompactString(), GridDYaw,
+		*PostExtract.FloorImpact.ToCompactString(), PostExtract.FloorDist, PostExtract.bWalkable ? 1 : 0,
+		FloorJump,
+		*EventsText);
 }
 
 void USubCrewMovementComponent::UpdateBasedMovement(float DeltaSeconds)
@@ -289,19 +601,9 @@ ASubmarineBase* USubCrewMovementComponent::GetCurrentSubmarine() const
 	return nullptr;
 }
 
-USubInteriorFrameComponent* USubCrewMovementComponent::GetInteriorFrame() const
-{
-	if (ASubmarineBase* Sub = GetCurrentSubmarine())
-	{
-		return Sub->InteriorFrame;
-	}
-
-	return nullptr;
-}
-
 bool USubCrewMovementComponent::HasSubmarineBinding() const
 {
-	return GetInteriorFrame() != nullptr;
+	return GetCurrentSubmarine() != nullptr;
 }
 
 void USubCrewMovementComponent::SetEmbarkState(ECrewEmbarkState NewState)
@@ -313,6 +615,10 @@ void USubCrewMovementComponent::SetEmbarkState(ECrewEmbarkState NewState)
 
 	const ECrewEmbarkState OldState = EmbarkState;
 	EmbarkState = NewState;
+	if (NewState == ECrewEmbarkState::Outside)
+	{
+		ResetGridFacingYaw();
+	}
 
 	UE_LOG(
 		LogSubCrewMovement,
@@ -320,6 +626,186 @@ void USubCrewMovementComponent::SetEmbarkState(ECrewEmbarkState NewState)
 		TEXT("EmbarkState: %d -> %d"),
 		static_cast<int32>(OldState),
 		static_cast<int32>(NewState));
+}
+
+void USubCrewMovementComponent::ResetGridFacingYaw()
+{
+	GridFacingYawDeg = 0.f;
+	DesiredGridFacingYawDeg = 0.f;
+	GridFacingYawRateDegPerSec = 0.f;
+	bHasGridFacingYaw = false;
+}
+
+FCrewMoveIntent USubCrewMovementComponent::BuildMoveIntent(FVector2D MoveAxis) const
+{
+	FCrewMoveIntent Intent;
+	Intent.MoveAxis = ClampMoveAxis(MoveAxis);
+	Intent.MoveInputStrength = FMath::Clamp(Intent.MoveAxis.Size(), 0.f, 1.f);
+	Intent.bHasMoveInput = Intent.MoveInputStrength > KINDA_SMALL_NUMBER;
+
+	float ControlYawDeg = CharacterOwner ? CharacterOwner->GetActorRotation().Yaw : 0.f;
+	if (CharacterOwner)
+	{
+		if (const AController* Controller = CharacterOwner->GetController())
+		{
+			ControlYawDeg = Controller->GetControlRotation().Yaw;
+		}
+	}
+
+	Intent.ControlYawDeg = FRotator::NormalizeAxis(ControlYawDeg);
+	const FRotator ControlYawRot(0.f, Intent.ControlYawDeg, 0.f);
+	const FVector Forward = ControlYawRot.Vector();
+	const FVector Right = FRotationMatrix(ControlYawRot).GetScaledAxis(EAxis::Y);
+
+	if (Intent.bHasMoveInput)
+	{
+		Intent.WorldMoveDirection = (Forward * Intent.MoveAxis.X + Right * Intent.MoveAxis.Y).GetSafeNormal2D();
+	}
+
+	if (Intent.WorldMoveDirection.IsNearlyZero())
+	{
+		Intent.WorldMoveDirection = FVector::ZeroVector;
+		Intent.MoveWorldYawDeg = Intent.ControlYawDeg;
+	}
+	else
+	{
+		Intent.MoveWorldYawDeg = Intent.WorldMoveDirection.ToOrientationRotator().Yaw;
+	}
+	Intent.DesiredWorldYawDeg = Intent.ControlYawDeg;
+
+	if (const ASubmarineBase* Sub = GetCurrentSubmarine())
+	{
+		const float SubYawDeg = Sub->GetActorRotation().Yaw;
+		const FRotator SubYawRot(0.f, SubYawDeg, 0.f);
+		Intent.LocalMoveDirection = SubYawRot.UnrotateVector(Intent.WorldMoveDirection).GetSafeNormal2D();
+		Intent.DesiredGridYawDeg = FRotator::NormalizeAxis(Intent.DesiredWorldYawDeg - SubYawDeg);
+	}
+	else
+	{
+		Intent.LocalMoveDirection = Intent.WorldMoveDirection;
+		Intent.DesiredGridYawDeg = Intent.DesiredWorldYawDeg;
+	}
+
+	return Intent;
+}
+
+void USubCrewMovementComponent::ApplyCrewPlanarMoveInput(FVector2D MoveAxis)
+{
+	LastMoveIntent = BuildMoveIntent(MoveAxis);
+	bReceivedMoveInputThisFrame = true;
+
+	if (!CharacterOwner || !LastMoveIntent.bHasMoveInput)
+	{
+		return;
+	}
+
+	AddInputVector(LastMoveIntent.WorldMoveDirection * LastMoveIntent.MoveInputStrength, false);
+}
+
+void USubCrewMovementComponent::UpdateLocomotionFrame()
+{
+	FCrewLocomotionFrame Frame;
+	const ASubCrewCharacter* Crew = Cast<ASubCrewCharacter>(CharacterOwner);
+	const ASubmarineBase* Sub = GetCurrentSubmarine();
+	const bool bSwimming = Crew && Crew->bIsSwimmingByFlood;
+	const bool bGrid = IsGridAuthoritative() && Sub != nullptr;
+
+	Frame.bIsGridAuthoritative = bGrid;
+	Frame.bIsSwimming = bSwimming;
+	Frame.bIsRunning = bIsRunning;
+	Frame.PostureAlpha = PostureAlpha;
+	Frame.SupportQuality01 = SupportQuality01;
+	Frame.LocalTurnRateDegPerSec = bGrid ? GridFacingYawRateDegPerSec : 0.f;
+
+	if (CharacterOwner)
+	{
+		Frame.BodyWorldYawDeg = CharacterOwner->GetActorRotation().Yaw;
+	}
+
+	if (Sub)
+	{
+		Frame.BodyLocalYawDeg = FRotator::NormalizeAxis(Frame.BodyWorldYawDeg - Sub->GetActorRotation().Yaw);
+	}
+	else
+	{
+		Frame.BodyLocalYawDeg = Frame.BodyWorldYawDeg;
+	}
+
+	if (bGrid)
+	{
+		Frame.LocalVelocity = RelativeLinearVelocity;
+		Frame.WorldVelocity = Sub->GetActorTransform().TransformVectorNoScale(RelativeLinearVelocity);
+		Frame.Speed2D = Frame.LocalVelocity.Size2D();
+	}
+	else
+	{
+		Frame.WorldVelocity = Velocity;
+		Frame.Speed2D = Frame.WorldVelocity.Size2D();
+		if (Sub)
+		{
+			const FRotator SubYawRot(0.f, Sub->GetActorRotation().Yaw, 0.f);
+			Frame.LocalVelocity = SubYawRot.UnrotateVector(Frame.WorldVelocity);
+		}
+		else
+		{
+			Frame.LocalVelocity = Frame.WorldVelocity;
+		}
+	}
+
+	Frame.bIsMoving = Frame.Speed2D > 10.f;
+	Frame.Stance = ResolveLocomotionStance(PostureAlpha, bSwimming);
+	Frame.Gait = ResolveLocomotionGait(Frame.Stance, Frame.bIsMoving, bIsRunning);
+
+	if (Frame.bIsMoving)
+	{
+		const float VelocityYawDeg = bGrid
+			? Frame.LocalVelocity.ToOrientationRotator().Yaw
+			: Frame.WorldVelocity.ToOrientationRotator().Yaw;
+		const float BodyYawDeg = bGrid ? Frame.BodyLocalYawDeg : Frame.BodyWorldYawDeg;
+		Frame.DirectionDeg = FMath::FindDeltaAngleDegrees(BodyYawDeg, VelocityYawDeg);
+	}
+
+	LastLocomotionFrame = Frame;
+}
+
+void USubCrewMovementComponent::UpdateGridFacingYaw(float DeltaTime, const FTransform& /*SubTransform*/)
+{
+	const float CurrentGridYaw = FRotator::NormalizeAxis(GridSpaceTransform.Rotator().Yaw);
+	if (!bHasGridFacingYaw)
+	{
+		GridFacingYawDeg = CurrentGridYaw;
+		DesiredGridFacingYawDeg = CurrentGridYaw;
+		GridFacingYawRateDegPerSec = 0.f;
+		bHasGridFacingYaw = true;
+	}
+
+	DesiredGridFacingYawDeg = GridFacingYawDeg;
+	if (CharacterOwner && CharacterOwner->IsLocallyControlled())
+	{
+		DesiredGridFacingYawDeg = LastMoveIntent.DesiredGridYawDeg;
+	}
+	else
+	{
+		// Non-owners consume the replicated GridSpaceTransform yaw directly.
+		DesiredGridFacingYawDeg = CurrentGridYaw;
+	}
+
+	const float PreviousYaw = GridFacingYawDeg;
+	if (DeltaTime > KINDA_SMALL_NUMBER)
+	{
+		const float MaxStepDeg = FMath::Max(1.f, GridFacingTurnRateDegPerSec) * DeltaTime;
+		GridFacingYawDeg = StepAngleConstant(PreviousYaw, DesiredGridFacingYawDeg, MaxStepDeg);
+		GridFacingYawRateDegPerSec = FMath::FindDeltaAngleDegrees(PreviousYaw, GridFacingYawDeg) / DeltaTime;
+	}
+	else
+	{
+		GridFacingYawDeg = FRotator::NormalizeAxis(DesiredGridFacingYawDeg);
+		GridFacingYawRateDegPerSec = 0.f;
+	}
+
+	GridSpaceTransform = FTransform(
+		FRotator(0.f, GridFacingYawDeg, 0.f).Quaternion(),
+		GridSpaceTransform.GetLocation());
 }
 
 void USubCrewMovementComponent::SetPendingHandoff(ECrewHandoffKind Kind)
@@ -358,8 +844,19 @@ void USubCrewMovementComponent::MoveAutonomous(float ClientTimeStamp, float Delt
 		{
 			const FCharacterNetworkMoveData_SubCrew* SubMoveData = static_cast<const FCharacterNetworkMoveData_SubCrew*>(CurrentMoveData);
 			GridSpaceTransform = SubMoveData->GridSpaceTransform;
-
 			const ECrewEmbarkState ReportedState = static_cast<ECrewEmbarkState>(SubMoveData->EmbarkStateByte);
+			if (ReportedState == ECrewEmbarkState::Embarked || ReportedState == ECrewEmbarkState::Transitioning)
+			{
+				GridFacingYawDeg = FRotator::NormalizeAxis(GridSpaceTransform.Rotator().Yaw);
+				DesiredGridFacingYawDeg = GridFacingYawDeg;
+				GridFacingYawRateDegPerSec = 0.f;
+				bHasGridFacingYaw = true;
+			}
+			else
+			{
+				ResetGridFacingYaw();
+			}
+
 			if (ReportedState != EmbarkState)
 			{
 				SetEmbarkState(ReportedState);
@@ -388,8 +885,8 @@ bool USubCrewMovementComponent::IsAcceptedEmbarkedBase(const UPrimitiveComponent
 
 void USubCrewMovementComponent::UpdateInertialState()
 {
-	const USubInteriorFrameComponent* Frame = GetInteriorFrame();
-	if (!Frame || !Frame->IsFrameValid())
+	const ASubmarineBase* Sub = GetCurrentSubmarine();
+	if (!Sub)
 	{
 		LocalSubLinearVelocity = FVector::ZeroVector;
 		LocalSubLinearAcceleration = FVector::ZeroVector;
@@ -398,16 +895,22 @@ void USubCrewMovementComponent::UpdateInertialState()
 		return;
 	}
 
-	LocalSubLinearVelocity = Frame->GetLocalLinearVelocity();
-	LocalSubLinearAcceleration = Frame->GetLocalLinearAcceleration();
-	LocalSubAngularVelocityDegrees = Frame->GetLocalAngularVelocityDegrees();
-	LocalSubAngularAccelerationDegrees = Frame->GetLocalAngularAccelerationDegrees();
+	const FTransform SubXf_Inertia = Sub->GetActorTransform();
+	const USubMovementComponent* SubMov_Inertia = Sub->SubMovement;
+	const FVector WorldLinVel = SubMov_Inertia ? SubMov_Inertia->Velocity : FVector::ZeroVector;
+	const FVector WorldLinAcc = SubMov_Inertia ? SubMov_Inertia->LinearAcceleration : FVector::ZeroVector;
+	const FVector WorldAngVelDeg = SubMov_Inertia ? FVector(0.f, SubMov_Inertia->GetPitchRateDegPerSec(), SubMov_Inertia->GetYawRateDegPerSec()) : FVector::ZeroVector;
+	const FVector WorldAngAccDeg = SubMov_Inertia ? SubMov_Inertia->AngularAccelerationDeg : FVector::ZeroVector;
+	LocalSubLinearVelocity = SubXf_Inertia.InverseTransformVectorNoScale(WorldLinVel);
+	LocalSubLinearAcceleration = SubXf_Inertia.InverseTransformVectorNoScale(WorldLinAcc);
+	LocalSubAngularVelocityDegrees = SubXf_Inertia.InverseTransformVectorNoScale(WorldAngVelDeg);
+	LocalSubAngularAccelerationDegrees = SubXf_Inertia.InverseTransformVectorNoScale(WorldAngAccDeg);
 }
 
 void USubCrewMovementComponent::UpdateRelativeState(float DeltaTime)
 {
-	const USubInteriorFrameComponent* Frame = GetInteriorFrame();
-	if (!Frame || !CharacterOwner)
+	const ASubmarineBase* Sub = GetCurrentSubmarine();
+	if (!Sub || !CharacterOwner)
 	{
 		RelativeLinearVelocity = FVector::ZeroVector;
 		bHasPreviousRelativeLocation = false;
@@ -420,10 +923,10 @@ void USubCrewMovementComponent::UpdateRelativeState(float DeltaTime)
 	// so off-sub moving bases continue to report a Rel pose.
 	const FVector NewRelativeLocation = IsGridAuthoritative()
 		? GridSpaceTransform.GetLocation()
-		: Frame->WorldToLocal(CharacterOwner->GetActorLocation());
+		: Sub->GetActorTransform().InverseTransformPosition(CharacterOwner->GetActorLocation());
 	const FRotator NewRelativeRotation = IsGridAuthoritative()
 		? GridSpaceTransform.Rotator()
-		: Frame->WorldToLocalRotation(CharacterOwner->GetActorRotation());
+		: (Sub->GetActorQuat().Inverse() * CharacterOwner->GetActorQuat()).Rotator();
 
 	const float RelFrameDeltaCm = bHasPreviousRelativeLocation
 		? static_cast<float>((NewRelativeLocation - PreviousRelativeLocation).Size())
@@ -442,12 +945,12 @@ void USubCrewMovementComponent::UpdateRelativeState(float DeltaTime)
 	RelativeRotation = NewRelativeRotation;
 
 	const USub3DDebugSettings* DebugSettingsRef = GetDefault<USub3DDebugSettings>();
-	if (DebugSettingsRef->bLogCrewJitter)
+	if (DebugSettingsRef->ShouldLogCrewJitter())
 	{
 		const UPrimitiveComponent* Base = CharacterOwner->GetMovementBase();
 		const ENetRole LocalRole = CharacterOwner->GetLocalRole();
 		const FString MovementModeStr = GetMovementName();
-		const FVector SubWorldLoc = Frame->GetOwner() ? Frame->GetOwner()->GetActorLocation() : FVector::ZeroVector;
+		const FVector SubWorldLoc = Sub ? Sub->GetActorLocation() : FVector::ZeroVector;
 		const float RelSpeedCmPerSec = (bHasPreviousRelativeLocation && DeltaTime > KINDA_SMALL_NUMBER)
 			? RelFrameDeltaCm / DeltaTime
 			: 0.f;
@@ -468,7 +971,7 @@ void USubCrewMovementComponent::UpdateRelativeState(float DeltaTime)
 			*MovementModeStr,
 			IsFalling() ? 1 : 0,
 			*GetNameSafe(Base),
-			Frame->IsFrameValid() ? 1 : 0,
+			Sub ? 1 : 0,
 			IsGridAuthoritative() ? 1 : 0);
 		if (bJitterSpike)
 		{
@@ -489,7 +992,7 @@ void USubCrewMovementComponent::UpdateRelativeState(float DeltaTime)
 	PreviousRelativeLocation = RelativeLocation;
 	bHasPreviousRelativeLocation = true;
 
-	if (DebugSettingsRef->bLogCrewMovement)
+	if (DebugSettingsRef->ShouldLogCrewMovement())
 	{
 		UE_LOG(
 			LogSubCrewMovement,
@@ -500,6 +1003,162 @@ void USubCrewMovementComponent::UpdateRelativeState(float DeltaTime)
 			*RelativeLinearVelocity.ToCompactString(),
 			*RelativeRotation.ToCompactString());
 	}
+}
+
+void USubCrewMovementComponent::BeginLadderClimb(ULadderClimbComponent* Ladder, float StartProgress01)
+{
+	if (!Ladder || !CharacterOwner) { return; }
+
+	// Authority-only entry point. The replicated CurrentLadder + LadderClimbProgress01 push
+	// the state to peer SimProxies; the owning client also runs locally via the same call
+	// path when it predicts the interact RPC has been accepted.
+	const bool bAuthority = CharacterOwner->HasAuthority();
+	if (!bAuthority) { return; }
+
+	CurrentLadder = Ladder;
+	LadderClimbProgress01 = FMath::Clamp(StartProgress01, 0.f, 1.f);
+
+	// Snap GridSpaceTransform to the ladder pose so the rebase below matches the climb start.
+	GridSpaceTransform = Ladder->ComputeClimbLocalPose(LadderClimbProgress01);
+
+	// While climbing, freeze CMC simulation. We drive the pose directly via the rebase.
+	SetMovementMode(MOVE_None);
+
+	UE_LOG(LogSubCrewMovement, Log, TEXT("BeginLadderClimb | Ladder=%s | StartProgress=%.2f"),
+		*GetNameSafe(Ladder), LadderClimbProgress01);
+}
+
+void USubCrewMovementComponent::EndLadderClimb(float StepOffProgress01)
+{
+	if (!CurrentLadder || !CharacterOwner) { return; }
+
+	const bool bAuthority = CharacterOwner->HasAuthority();
+	if (!bAuthority) { return; }
+
+	ULadderClimbComponent* LeavingLadder = CurrentLadder;
+	const float ClampedProgress = FMath::Clamp(StepOffProgress01, 0.f, 1.f);
+
+	// Compute step-off local pose: continue past the ladder end by StepOffOffsetCm along the
+	// climb direction (so the crew lands on the deck adjacent to the ladder rather than
+	// floating at the very top/bottom).
+	FTransform StepOffLocal = LeavingLadder->ComputeClimbLocalPose(ClampedProgress);
+	const FVector ExitDir = (ClampedProgress >= 0.5f)
+		?  LeavingLadder->GetClimbDirectionLocal()
+		: -LeavingLadder->GetClimbDirectionLocal();
+	StepOffLocal.AddToTranslation(ExitDir * LeavingLadder->StepOffOffsetCm);
+
+	GridSpaceTransform = StepOffLocal;
+	CurrentLadder = nullptr;
+	LadderClimbProgress01 = 0.f;
+
+	// Restore walking on the deck.
+	SetMovementMode(MOVE_Walking);
+
+	LeavingLadder->NotifyClimbFinished(Cast<ASubCrewCharacter>(CharacterOwner));
+
+	UE_LOG(LogSubCrewMovement, Log, TEXT("EndLadderClimb | StepOffProgress=%.2f"), ClampedProgress);
+}
+
+void USubCrewMovementComponent::TickLadderClimb(float DeltaTime)
+{
+	if (!CurrentLadder || !CharacterOwner) { return; }
+
+	// Forward input axis (W=+1, S=-1) drives climb progress. We read the CMC Acceleration —
+	// CharacterMovement projects pending input onto Acceleration each tick. Project onto the
+	// pawn's forward direction to extract a scalar.
+	float InputForwardAxis = 0.f;
+	if (CharacterOwner->IsLocallyControlled())
+	{
+		const FVector InputVec = ConsumeInputVector();  // already in world space
+		const FVector ForwardWorld = CharacterOwner->GetActorForwardVector();
+		InputForwardAxis = static_cast<float>(FVector::DotProduct(InputVec, ForwardWorld));
+		InputForwardAxis = FMath::Clamp(InputForwardAxis, -1.f, 1.f);
+	}
+
+	const float Speed = FMath::Max(0.05f, CurrentLadder->ClimbSpeedPerSec);
+	LadderClimbProgress01 = FMath::Clamp(LadderClimbProgress01 + InputForwardAxis * Speed * DeltaTime, 0.f, 1.f);
+
+	// Override the GridSpaceTransform so the rebase below places the capsule exactly on
+	// the ladder line at this progress.
+	GridSpaceTransform = CurrentLadder->ComputeClimbLocalPose(LadderClimbProgress01);
+
+	// Reaching either end exits automatically. Server-side decision only — owning client
+	// predicts via the same condition next tick after RPC roundtrip; for now, only emit
+	// the EndLadderClimb on authority.
+	if (CharacterOwner->HasAuthority())
+	{
+		if (LadderClimbProgress01 >= 0.999f)
+		{
+			EndLadderClimb(1.f);
+		}
+		else if (LadderClimbProgress01 <= 0.001f && InputForwardAxis < 0.f)
+		{
+			EndLadderClimb(0.f);
+		}
+	}
+}
+
+void USubCrewMovementComponent::OnRep_LadderClimbProgress()
+{
+	// Peer SimProxy: nothing to do beyond the property update — the rebase in TickComponent
+	// will pick up GridSpaceTransform (which the owner+authority drive) on next tick.
+}
+
+void USubCrewMovementComponent::OnRep_GridSpaceTransform()
+{
+	const FTransform PreviousTransform = LastReceivedReplicatedGridSpaceTransform;
+	const bool bHadPreviousPacket = bHasReceivedReplicatedGridSpaceTransform;
+	const double PacketReceiveRealTime = FPlatformTime::Seconds();
+	const double PacketGapRealSeconds = bHadPreviousPacket
+		? (PacketReceiveRealTime - LastReceivedGridSpaceTransformRealTime)
+		: 0.0;
+
+	LastReceivedReplicatedGridSpaceTransform = GridSpaceTransform;
+	LastReceivedGridSpaceTransformRealTime = PacketReceiveRealTime;
+	bHasReceivedReplicatedGridSpaceTransform = true;
+
+	const float ReplicatedGridYaw = FRotator::NormalizeAxis(GridSpaceTransform.Rotator().Yaw);
+	GridFacingYawDeg = ReplicatedGridYaw;
+	DesiredGridFacingYawDeg = ReplicatedGridYaw;
+	GridFacingYawRateDegPerSec = (bHadPreviousPacket && PacketGapRealSeconds > KINDA_SMALL_NUMBER)
+		? FMath::FindDeltaAngleDegrees(PreviousTransform.Rotator().Yaw, ReplicatedGridYaw) / static_cast<float>(PacketGapRealSeconds)
+		: 0.f;
+	bHasGridFacingYaw = true;
+
+	const USub3DDebugSettings* DebugSettingsRef = GetDefault<USub3DDebugSettings>();
+	if (!DebugSettingsRef || !DebugSettingsRef->ShouldLogCrewJitter())
+	{
+		return;
+	}
+
+	const ASubmarineBase* Sub = GetCurrentSubmarine();
+	const FVector NewLocalPos = GridSpaceTransform.GetLocation();
+	const FVector PreviousLocalPos = PreviousTransform.GetLocation();
+	const FVector LocalDelta = bHadPreviousPacket ? (NewLocalPos - PreviousLocalPos) : FVector::ZeroVector;
+	const float LocalDeltaCm = LocalDelta.Size();
+	const float LocalYawDeltaDeg = bHadPreviousPacket
+		? FMath::FindDeltaAngleDegrees(PreviousTransform.Rotator().Yaw, GridSpaceTransform.Rotator().Yaw)
+		: 0.f;
+	const FVector RebasedWorldLoc = Sub ? Sub->GetActorTransform().TransformPosition(NewLocalPos) : FVector::ZeroVector;
+	const FVector SubWorldLoc = Sub ? Sub->GetActorLocation() : FVector::ZeroVector;
+	const UPrimitiveComponent* Base = CharacterOwner ? CharacterOwner->GetMovementBase() : nullptr;
+
+	UE_LOG(
+		LogSubCrewMovement,
+		Log,
+		TEXT("Grid packet | Role=%d | First=%d | GapReal=%.3fs | Local=%s | LocalDelta=%s | LocalDeltaCm=%.2f | YawDelta=%.1f | RebasedWorld=%s | Sub=%s | Mode=%s | Base=%s | GridAuth=%d"),
+		CharacterOwner ? static_cast<int32>(CharacterOwner->GetLocalRole()) : -1,
+		bHadPreviousPacket ? 0 : 1,
+		static_cast<float>(PacketGapRealSeconds),
+		*NewLocalPos.ToCompactString(),
+		*LocalDelta.ToCompactString(),
+		LocalDeltaCm,
+		LocalYawDeltaDeg,
+		*RebasedWorldLoc.ToCompactString(),
+		*SubWorldLoc.ToCompactString(),
+		*GetMovementName(),
+		*GetNameSafe(Base),
+		IsGridAuthoritative() ? 1 : 0);
 }
 
 void USubCrewMovementComponent::UpdateSupportState()
@@ -517,6 +1176,10 @@ void USubCrewMovementComponent::UpdateSupportState()
 	const UPrimitiveComponent* MovementBase = CharacterOwner->GetMovementBase();
 	LastEmbarkedFloorComponent = CurrentFloor.HitResult.GetComponent();
 	bHasValidEmbarkedFloor = CurrentFloor.IsWalkableFloor();
+
+	// Grid authority disables movement-base transport and rotation carry, but walking still
+	// needs CMC floor support. MovementBase therefore remains meaningful as "which surface is
+	// currently supporting the capsule", not as a transport parent that carries the crew.
 	bHasAcceptedEmbarkedBase = IsAcceptedEmbarkedBase(MovementBase);
 	bNeedsEmbarkedFloorRecovery = HasSubmarineBinding() && (!bHasValidEmbarkedFloor || !bHasAcceptedEmbarkedBase || !MovementBase);
 
@@ -564,7 +1227,7 @@ void USubCrewMovementComponent::AttemptEmbarkedFloorRecovery(float DeltaTime)
 	FloorRecoveryTimer = 0.f;
 	RefreshEmbarkedFlooring();
 
-	if (GetDefault<USub3DDebugSettings>()->bLogCrewMovement)
+	if (GetDefault<USub3DDebugSettings>()->ShouldLogCrewMovement())
 	{
 		UE_LOG(
 			LogSubCrewMovement,
@@ -695,37 +1358,62 @@ void USubCrewMovementComponent::CheckAndLogBaseChange()
 		return;
 	}
 
+	const USub3DDebugSettings* DebugSettingsRef = GetDefault<USub3DDebugSettings>();
+	const bool bShouldLogBaseTransitions = DebugSettingsRef
+		&& (DebugSettingsRef->ShouldLogCrewMovement() || DebugSettingsRef->ShouldLogCrewJitter());
+	if (!bShouldLogBaseTransitions)
+	{
+		LastKnownBase = CurrentBase;
+		return;
+	}
+
+	const ASubmarineBase* Sub = GetCurrentSubmarine();
+	const FVector SubWorldLoc = Sub ? Sub->GetActorLocation() : FVector::ZeroVector;
+	const FString BaseContext = FString::Printf(
+		TEXT(" | Mode=%s | Falling=%d | FloorWalkable=%d | FloorDist=%.2f | Rel=%s | World=%s | Sub=%s | GridAuth=%d"),
+		*GetMovementName(),
+		IsFalling() ? 1 : 0,
+		CurrentFloor.IsWalkableFloor() ? 1 : 0,
+		CurrentFloor.FloorDist,
+		*RelativeLocation.ToCompactString(),
+		*CharacterOwner->GetActorLocation().ToCompactString(),
+		*SubWorldLoc.ToCompactString(),
+		IsGridAuthoritative() ? 1 : 0);
+
 	const int32 bAcceptedBase = IsAcceptedEmbarkedBase(CurrentBase) ? 1 : 0;
 	if (!PreviousBase && CurrentBase)
 	{
 		UE_LOG(
 			LogSubCrewMovement,
 			Log,
-			TEXT("Base acquired: %s on %s | Accepted=%d"),
+			TEXT("Base acquired: %s on %s | Accepted=%d%s"),
 			*GetNameSafe(CurrentBase),
 			*GetNameSafe(CurrentBase->GetOwner()),
-			bAcceptedBase);
+			bAcceptedBase,
+			*BaseContext);
 	}
 	else if (PreviousBase && !CurrentBase)
 	{
 		UE_LOG(
 			LogSubCrewMovement,
 			Warning,
-			TEXT("Base lost! Was: %s on %s"),
+			TEXT("Base lost! Was: %s on %s%s"),
 			*GetNameSafe(PreviousBase),
-			*GetNameSafe(PreviousBase->GetOwner()));
+			*GetNameSafe(PreviousBase->GetOwner()),
+			*BaseContext);
 	}
 	else if (PreviousBase && CurrentBase)
 	{
 		UE_LOG(
 			LogSubCrewMovement,
 			Log,
-			TEXT("Base changed: %s on %s -> %s on %s | Accepted=%d"),
+			TEXT("Base changed: %s on %s -> %s on %s | Accepted=%d%s"),
 			*GetNameSafe(PreviousBase),
 			*GetNameSafe(PreviousBase->GetOwner()),
 			*GetNameSafe(CurrentBase),
 			*GetNameSafe(CurrentBase->GetOwner()),
-			bAcceptedBase);
+			bAcceptedBase,
+			*BaseContext);
 	}
 
 	LastKnownBase = CurrentBase;
@@ -739,16 +1427,16 @@ void USubCrewMovementComponent::DebugDrawState()
 		return;
 	}
 
-	const USubInteriorFrameComponent* Frame = GetInteriorFrame();
-	const bool bHasValidFrame = Frame && Frame->IsFrameValid();
-	const FTransform SubTransform = bHasValidFrame ? Frame->GetSubTransform() : FTransform::Identity;
+	const ASubmarineBase* Sub = GetCurrentSubmarine();
+	const bool bHasValidFrame = Sub != nullptr;
+	const FTransform SubTransform = bHasValidFrame ? Sub->GetActorTransform() : FTransform::Identity;
 
-	// Sphere / line debug gizmos need a valid Frame to have a meaningful reference frame.
+	// Sphere / line debug gizmos need a valid submarine reference frame.
 	// HUD on-screen messages work regardless (useful for EVA validation).
 	if (bHasValidFrame && Settings->bDrawCrewMovement)
 	{
 		const FVector FrameOrigin = SubTransform.GetLocation();
-		const FVector ExpectedWorldPosition = Frame->LocalToWorld(RelativeLocation);
+		const FVector ExpectedWorldPosition = Sub->GetActorTransform().TransformPosition(RelativeLocation);
 		const FVector ActualWorldPosition = CharacterOwner->GetActorLocation();
 		const FColor SupportColor = bHasAcceptedEmbarkedBase ? FColor::Green : (bHasValidEmbarkedFloor ? FColor::Yellow : FColor::Red);
 
@@ -825,7 +1513,8 @@ void USubCrewMovementComponent::DebugDrawState()
 			const FVector SubPos = SubTransform.GetLocation();
 			const float SubYaw = SubTransform.Rotator().Yaw;
 			GEngine->AddOnScreenDebugMessage(1002, DisplayTime, FColor::Cyan,
-				FString::Printf(TEXT("Grid  : X=%8.1f  Y=%8.1f  Z=%8.1f  Yaw=%7.2f"), LocalPos.X, LocalPos.Y, LocalPos.Z, LocalYaw));
+				FString::Printf(TEXT("Grid  : X=%8.1f  Y=%8.1f  Z=%8.1f  Yaw=%7.2f  Desired=%7.2f  Rate=%7.1f"),
+					LocalPos.X, LocalPos.Y, LocalPos.Z, LocalYaw, DesiredGridFacingYawDeg, GridFacingYawRateDegPerSec));
 			GEngine->AddOnScreenDebugMessage(1004, DisplayTime, FColor::Cyan,
 				FString::Printf(TEXT("Sub   : X=%8.1f  Y=%8.1f  Z=%8.1f  Yaw=%7.2f"), SubPos.X, SubPos.Y, SubPos.Z, SubYaw));
 		}
@@ -841,7 +1530,7 @@ void USubCrewMovementComponent::DebugDrawState()
 
 void USubCrewMovementComponent::LogPeriodicState(float DeltaTime)
 {
-	if (!GetDefault<USub3DDebugSettings>()->bLogCrewMovement || !CharacterOwner)
+	if (!GetDefault<USub3DDebugSettings>()->ShouldLogCrewMovement() || !CharacterOwner)
 	{
 		DebugLogTimer = 0.f;
 		return;
@@ -855,11 +1544,11 @@ void USubCrewMovementComponent::LogPeriodicState(float DeltaTime)
 
 	DebugLogTimer = 0.f;
 
-	const USubInteriorFrameComponent* Frame = GetInteriorFrame();
+	const ASubmarineBase* Sub = GetCurrentSubmarine();
 	const UPrimitiveComponent* CurrentBase = CharacterOwner->GetMovementBase();
-	const FTransform SubTransform = Frame ? Frame->GetSubTransform() : FTransform::Identity;
-	const FVector FrameDeltaLocation = Frame ? Frame->GetFrameLocationDelta() : FVector::ZeroVector;
-	const FRotator FrameDeltaRotation = Frame ? Frame->GetFrameRotationDelta() : FRotator::ZeroRotator;
+	const FTransform SubTransform = Sub ? Sub->GetActorTransform() : FTransform::Identity;
+	const FVector FrameDeltaLocation = FVector::ZeroVector;
+	const FRotator FrameDeltaRotation = FRotator::ZeroRotator;
 
 	UE_LOG(
 		LogSubCrewMovement,
@@ -890,9 +1579,9 @@ void USubCrewMovementComponent::LogPeriodicState(float DeltaTime)
 
 void USubCrewMovementComponent::InitializeForSubmarine()
 {
-	USubInteriorFrameComponent* Frame = GetInteriorFrame();
+	const ASubmarineBase* Sub = GetCurrentSubmarine();
 	const ASubCrewCharacter* Crew = Cast<ASubCrewCharacter>(CharacterOwner);
-	const bool bFrameValid = Frame && Frame->IsFrameValid() && CharacterOwner;
+	const bool bFrameValid = Sub && CharacterOwner;
 
 	if (bFrameValid)
 	{
@@ -900,12 +1589,10 @@ void USubCrewMovementComponent::InitializeForSubmarine()
 		UpdateInertialState();
 	}
 
-	// Tick ordering fix: ensure this CMC ticks AFTER the submarine has moved AND after the frame delta is computed.
-	// Without this, UpdateBasedMovement sees zero base delta because the sub
+	// Tick ordering fix: ensure this CMC ticks AFTER the submarine has moved.
+	// Without this, the rebase reads a stale Sub->GetActorTransform() because the sub
 	// hasn't simulated yet this frame, causing one-frame-lag jitter.
-	// We also depend on the InteriorFrame to ensure yaw compensation uses fresh deltas.
 	bool bSubTickSet = false;
-	bool bFrameTickSet = false;
 
 	if (Crew && Crew->CurrentSubmarine)
 	{
@@ -913,12 +1600,6 @@ void USubCrewMovementComponent::InitializeForSubmarine()
 		{
 			AddTickPrerequisiteComponent(SubMov);
 			bSubTickSet = true;
-		}
-
-		if (USubInteriorFrameComponent* FrameComp = Crew->CurrentSubmarine->InteriorFrame)
-		{
-			AddTickPrerequisiteComponent(FrameComp);
-			bFrameTickSet = true;
 		}
 	}
 
@@ -942,13 +1623,12 @@ void USubCrewMovementComponent::InitializeForSubmarine()
 	UE_LOG(
 		LogSubCrewMovement,
 		Log,
-		TEXT("InitializeForSubmarine | Sub=%s | CharacterLoc=%s | RelLoc=%s | FrameValid=%d | SubPrereq=%d | FramePrereq=%d"),
+		TEXT("InitializeForSubmarine | Sub=%s | CharacterLoc=%s | RelLoc=%s | SubBound=%d | SubPrereq=%d"),
 		*GetNameSafe(Crew ? Crew->CurrentSubmarine : nullptr),
 		CharacterOwner ? *CharacterOwner->GetActorLocation().ToCompactString() : TEXT("None"),
 		*RelativeLocation.ToCompactString(),
 		bFrameValid ? 1 : 0,
-		bSubTickSet ? 1 : 0,
-		bFrameTickSet ? 1 : 0);
+		bSubTickSet ? 1 : 0);
 }
 
 void USubCrewMovementComponent::RefreshEmbarkedFlooring()
@@ -1191,34 +1871,81 @@ void USubCrewMovementComponent::UpdateFootIKTraces()
 	FootIK_L = FVector::ZeroVector;
 
 	const ASubCrewCharacter* Crew = Cast<ASubCrewCharacter>(CharacterOwner);
-	if (!CharacterOwner || !CharacterOwner->GetCapsuleComponent() || (Crew && Crew->bIsSwimmingByFlood))
+	UWorld* World = GetWorld();
+	if (!CharacterOwner || !CharacterOwner->GetCapsuleComponent() || !World || (Crew && Crew->bIsSwimmingByFlood))
 	{
+		FootIK_R_State = FCrewFootIKState();
+		FootIK_L_State = FCrewFootIKState();
 		return;
 	}
 
 	const FVector ActorLoc = CharacterOwner->GetActorLocation();
+	const FVector ActorRight = CharacterOwner->GetActorRightVector();
 	const float HalfHeight = CharacterOwner->GetCapsuleComponent()->GetScaledCapsuleHalfHeight();
+	const ASubmarineBase* Submarine = GetCurrentSubmarine();
+	const bool bRequireInteriorFloor = IsGridAuthoritative() && Submarine != nullptr;
+	const float DeltaSeconds = World->GetDeltaSeconds();
 
-	// Trace down from each foot position
-	const FVector RFootBase = ActorLoc + FVector(0, 8, -HalfHeight);
-	const FVector LFootBase = ActorLoc + FVector(0, -8, -HalfHeight);
-	const float TraceDepth = 30.f;
-
-	FCollisionQueryParams Params;
-	Params.AddIgnoredActor(CharacterOwner);
-
-	FHitResult HitR, HitL;
-	const UWorld* World = GetWorld();
-
-	if (World->LineTraceSingleByChannel(HitR, RFootBase + FVector(0,0,10), RFootBase - FVector(0,0,TraceDepth), ECC_GameTraceChannel2, Params))
+	const USkeletalMeshComponent* Mesh = CharacterOwner->GetMesh();
+	const auto ResolveFootOrigin = [&](FName SocketName, float SideSign)
 	{
-		FootIK_R.Z = HitR.ImpactPoint.Z - (ActorLoc.Z - HalfHeight);
-	}
+		if (Mesh && Mesh->DoesSocketExist(SocketName))
+		{
+			return Mesh->GetSocketLocation(SocketName);
+		}
 
-	if (World->LineTraceSingleByChannel(HitL, LFootBase + FVector(0,0,10), LFootBase - FVector(0,0,TraceDepth), ECC_GameTraceChannel2, Params))
+		return ActorLoc + (ActorRight * SideSign * 8.f) - FVector(0.f, 0.f, HalfHeight);
+	};
+
+	const auto SolveFoot = [&](const FVector& FootOrigin, FCrewFootIKState& State, FVector& LegacyOffset)
 	{
-		FootIK_L.Z = HitL.ImpactPoint.Z - (ActorLoc.Z - HalfHeight);
-	}
+		FCrewFootIKState TargetState;
+		const FVector TraceStart = FootOrigin + FVector(0.f, 0.f, FootIKTraceUpCm);
+		const FVector TraceEnd = FootOrigin - FVector(0.f, 0.f, FootIKTraceDownCm);
+
+		FCollisionQueryParams Params(SCENE_QUERY_STAT(CrewFootIK), false, CharacterOwner);
+		TArray<FHitResult> Hits;
+		if (World->LineTraceMultiByChannel(Hits, TraceStart, TraceEnd, ECC_GameTraceChannel2, Params))
+		{
+			for (const FHitResult& Hit : Hits)
+			{
+				if (!Hit.bBlockingHit)
+				{
+					continue;
+				}
+
+				if (bRequireInteriorFloor && !Submarine->IsInteriorWalkableComponent(Hit.GetComponent()))
+				{
+					continue;
+				}
+
+				TargetState.bHasHit = true;
+				TargetState.TargetWorldLocation = Hit.ImpactPoint;
+				TargetState.TargetWorldNormal = Hit.ImpactNormal;
+				TargetState.Offset.Z = FMath::Clamp(Hit.ImpactPoint.Z - FootOrigin.Z, -FootIKMaxOffsetCm, FootIKMaxOffsetCm);
+				break;
+			}
+		}
+
+		const float TargetWeight = TargetState.bHasHit ? 1.f : 0.f;
+		State.Weight = FMath::FInterpTo(State.Weight, TargetWeight, DeltaSeconds, FootIKInterpSpeed);
+		State.Offset = FMath::VInterpTo(State.Offset, TargetState.Offset, DeltaSeconds, FootIKInterpSpeed);
+		State.TargetWorldLocation = TargetState.bHasHit ? TargetState.TargetWorldLocation : State.TargetWorldLocation;
+		State.TargetWorldNormal = TargetState.bHasHit ? TargetState.TargetWorldNormal : State.TargetWorldNormal;
+		State.bHasHit = TargetState.bHasHit || State.Weight > 0.01f;
+		State.bIsPlanted = TargetState.bHasHit && LastLocomotionFrame.Speed2D <= 20.f;
+		State.PlantAlpha = FMath::FInterpTo(State.PlantAlpha, State.bIsPlanted ? 1.f : 0.f, DeltaSeconds, FootIKInterpSpeed);
+
+		if (State.Weight <= 0.01f)
+		{
+			State = FCrewFootIKState();
+		}
+
+		LegacyOffset = State.Offset * State.Weight;
+	};
+
+	SolveFoot(ResolveFootOrigin(RightFootIKSocketName, 1.f), FootIK_R_State, FootIK_R);
+	SolveFoot(ResolveFootOrigin(LeftFootIKSocketName, -1.f), FootIK_L_State, FootIK_L);
 }
 
 
@@ -1231,4 +1958,7 @@ void USubCrewMovementComponent::GetLifetimeReplicatedProps(TArray<FLifetimePrope
 	// non-owning clients get the server-authoritative values for their peer-crew rendering.
 	DOREPLIFETIME_CONDITION(USubCrewMovementComponent, GridSpaceTransform, COND_SkipOwner);
 	DOREPLIFETIME_CONDITION(USubCrewMovementComponent, EmbarkState, COND_SkipOwner);
+	// Ladder climb state: owner predicts locally, peer SimProxy gets the replicated values.
+	DOREPLIFETIME(USubCrewMovementComponent, CurrentLadder);
+	DOREPLIFETIME_CONDITION(USubCrewMovementComponent, LadderClimbProgress01, COND_SkipOwner);
 }

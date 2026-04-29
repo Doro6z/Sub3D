@@ -8,6 +8,7 @@
 #include "Engine/StaticMesh.h"
 #include "GameFramework/Actor.h"
 #include "Generator/SubmarineDefinition.h"
+#include "HAL/IConsoleManager.h"
 #include "Net/UnrealNetwork.h"
 #include "SubFloodComponent.h"
 #include "SubmarineBase.h"
@@ -19,6 +20,44 @@ static constexpr float G_SI = 9.81f;
 
 namespace
 {
+static TAutoConsoleVariable<int32> CVarDisableSubRootInterpolation(
+	TEXT("Sub3D.SubMovement.DisableRootInterpolation"),
+	0,
+	TEXT("Diagnostic: 1 keeps the authoritative submarine actor root on the fixed-step sim pose instead of applying render interpolation to the root."));
+
+bool IsSubRootInterpolationDisabled()
+{
+	const USub3DDebugSettings* Settings = GetDefault<USub3DDebugSettings>();
+	return CVarDisableSubRootInterpolation.GetValueOnGameThread() != 0
+		|| (Settings && Settings->bDisableSubRootVisualInterpolation);
+}
+
+bool IsActorInternalToSubmarine(const AActor* SubmarineActor, const AActor* CandidateActor)
+{
+	return SubmarineActor
+		&& CandidateActor
+		&& (CandidateActor == SubmarineActor
+			|| CandidateActor->GetOwner() == SubmarineActor
+			|| CandidateActor->GetAttachParentActor() == SubmarineActor
+			|| CandidateActor->IsAttachedTo(SubmarineActor));
+}
+
+bool IsSweepHitInternalToSubmarine(const AActor* SubmarineActor, const FHitResult& Hit)
+{
+	if (!SubmarineActor)
+	{
+		return false;
+	}
+
+	if (IsActorInternalToSubmarine(SubmarineActor, Hit.GetActor()))
+	{
+		return true;
+	}
+
+	const UPrimitiveComponent* HitComponent = Hit.GetComponent();
+	return HitComponent && IsActorInternalToSubmarine(SubmarineActor, HitComponent->GetOwner());
+}
+
 bool UsesComplexAsSimpleSweep(const UPrimitiveComponent* PrimitiveComponent)
 {
 	const UStaticMeshComponent* StaticMeshComponent = Cast<UStaticMeshComponent>(PrimitiveComponent);
@@ -62,7 +101,7 @@ void USubMovementComponent::BeginPlay()
 	Super::BeginPlay();
 	InitializeNeutralBuoyancy();
 
-	// Tick order: SubFlood → SubMovement → InteriorFrame → CrewMovement.
+	// Tick order: SubFlood → SubMovement → CrewMovement.
 	// SubFlood must advance and push FloodImpactKg before SimulateStep reads it.
 	if (const ASubmarineBase* Sub = Cast<ASubmarineBase>(GetOwner()))
 	{
@@ -71,6 +110,19 @@ void USubMovementComponent::BeginPlay()
 			AddTickPrerequisiteComponent(Sub->SubFlood);
 		}
 	}
+
+	// Guardrail: warn loudly on the server side if the project is running with variable
+	// framerate. The sub physics loop emits one replication push per render frame, so
+	// variable framerate produces variable-content snapshots that the client cannot
+	// fully smooth — visible as trigger jitter on stair / breach. Production servers MUST
+	// run with Engine.UseFixedFrameRate=true. PIE inherits the project setting.
+	if (GetOwner() && GetOwner()->HasAuthority() && GEngine && !GEngine->bUseFixedFrameRate)
+	{
+		UE_LOG(LogSubMovement, Warning,
+			TEXT("Sub3D requires Engine.UseFixedFrameRate=true (Project Settings → Engine → ")
+			TEXT("General Settings → Framerate). Variable server framerate produces visible ")
+			TEXT("client trigger jitter on stair/breach. Cf. memory/project_motion_chain_jitter_root_cause_2026_04_27.md"));
+	}
 }
 
 void USubMovementComponent::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const
@@ -78,9 +130,9 @@ void USubMovementComponent::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>
 	Super::GetLifetimeReplicatedProps(OutLifetimeProps);
 	DOREPLIFETIME(USubMovementComponent, Ballasts);
 	DOREPLIFETIME(USubMovementComponent, GlobalTargetFill);
-	DOREPLIFETIME(USubMovementComponent, ThrustInput);
-	DOREPLIFETIME(USubMovementComponent, RudderInput);
-	DOREPLIFETIME(USubMovementComponent, DivePlaneInput);
+	// ThrustInput / RudderInput / DivePlaneInput intentionally NOT replicated as
+	// individual UPROPERTYs. They ride in FSubmarineNetState — see Phase A of
+	// reports/plans/2026-04-27_unified_motion_chain_master_refactor.md.
 }
 
 // -------------------------------------------------------------------------
@@ -164,37 +216,93 @@ void USubMovementComponent::TickComponent(float DeltaTime, ELevelTick TickType, 
 
 	if (!Owner->HasAuthority())
 	{
-		// Non-authority: Hermite cubic interpolation between the two most recent snapshots.
-		// Tangents = LinearVelocity * Δt at each endpoint. The replicated velocity guarantees
-		// C¹ continuity at snapshot boundaries — the velocity at α=1 of segment N matches the
-		// velocity at α=0 of segment N+1, eliminating the velocity-discontinuity jerk that
-		// linear lerp produced when the sub was accelerating (e.g., sinking under flood load).
-		// One-snapshot playback lag is unchanged.
-		if (bHasReceivedClientSnapshot && ClientTargetSnapshotTime > ClientPrevSnapshotTime)
+		// Non-authority: buffered render-delay playback per
+		// reports/plans/2026-04-27_submovement_non_authority_playback_refactor_and_audit.md.
+		const UWorld* World = Owner->GetWorld();
+		const double WorldNow = World ? World->GetTimeSeconds() : 0.0;
+		const FVector RenderLocBefore = Owner->GetActorLocation();
+
+		FClientPlaybackSample PlaybackSample;
+		const bool bHasPose = EvaluateClientPlaybackPose(WorldNow, PlaybackSample);
+
+		// Diagnostic: when the root-interpolation kill-switch is active, we DO compute the
+		// playback sample (so logs and Embark/Compartment state stay coherent) but we do
+		// NOT apply the interpolated pose to the actor root. Instead the actor root is
+		// snapped to the newest received snapshot pose, which advances in discrete jumps
+		// at the network update rate. This is the test for the GPT sim/presentation-conflict
+		// hypothesis on the CLIENT side: if the trigger jitter disappears with this on,
+		// the smoothed Owner.Transform is the cause; if it persists, the cause is below
+		// the playback layer (CMC base handling, CMC floor detection, etc).
+		const bool bDisableNonAuthRootInterp = IsSubRootInterpolationDisabled();
+		if (bHasPose && !bDisableNonAuthRootInterp)
 		{
-			const double Now = Owner->GetWorld() ? Owner->GetWorld()->GetTimeSeconds() : 0.0;
-			const double InterpDuration = ClientTargetSnapshotTime - ClientPrevSnapshotTime;
-			const float Alpha = FMath::Clamp(
-				static_cast<float>((Now - ClientTargetSnapshotTime) / InterpDuration), 0.f, 1.f);
-
-			const float DeltaSec = static_cast<float>(InterpDuration);
-			const FVector P0 = ClientPrevSnapshot.WorldLocation;
-			const FVector P1 = ClientTargetSnapshot.WorldLocation;
-			const FVector T0 = ClientPrevSnapshot.LinearVelocity * DeltaSec;
-			const FVector T1 = ClientTargetSnapshot.LinearVelocity * DeltaSec;
-			const FVector InterpLoc = FMath::CubicInterp(P0, T0, P1, T1, Alpha);
-
-			// Rotation: linear interp. Hermite on rotation needs angular-velocity tangent
-			// application, which is non-trivial because rotations don't compose like
-			// translations. Position jerk dominates visually for a translating sub; revisit
-			// if rotational jitter becomes prominent.
-			const FRotator InterpRot = FMath::Lerp(
-				ClientPrevSnapshot.QuantizedRotation,
-				ClientTargetSnapshot.QuantizedRotation,
-				Alpha);
-
-			Owner->SetActorLocationAndRotation(InterpLoc, InterpRot, false, nullptr, ETeleportType::None);
+			ApplyClientPlaybackPose(PlaybackSample.Location, PlaybackSample.Rotation);
 		}
+		else if (bDisableNonAuthRootInterp && ClientSnapshotBuffer.Num() > 0)
+		{
+			const FBufferedClientSubSnapshot& Newest = ClientSnapshotBuffer.Last();
+			Owner->SetActorLocationAndRotation(
+				Newest.State.WorldLocation, Newest.State.QuantizedRotation,
+				false, nullptr, ETeleportType::TeleportPhysics);
+		}
+
+		const FVector RenderLocAfter = Owner->GetActorLocation();
+		const float RenderStepCm = static_cast<float>((RenderLocAfter - RenderLocBefore).Size());
+
+		if (GetDefault<USub3DDebugSettings>()->ShouldLogSubMovement() && bHasPose)
+		{
+			const int32 BufferNum = ClientSnapshotBuffer.Num();
+			if (PlaybackSample.bBufferUnderrun)
+			{
+				UE_LOG(
+					LogSubMovement,
+					Log,
+					TEXT("Buffer underrun | QueueSize=%d | RenderAuth=%.4fs | NewestAuth=%.4fs"),
+					BufferNum,
+					PlaybackSample.RenderAuthorityTimeSeconds,
+					PlaybackSample.NewestAuthorityTimeSeconds);
+			}
+			else
+			{
+				UE_LOG(
+					LogSubMovement,
+					Log,
+					TEXT("Playback sample | Before=%s | After=%s | Alpha=%.2f | Seg=%.4fs | RenderStepCm=%.2f | SegmentCm=%.2f | QueueSize=%d"),
+					*RenderLocBefore.ToCompactString(),
+					*RenderLocAfter.ToCompactString(),
+					PlaybackSample.Alpha,
+					static_cast<float>(PlaybackSample.SegmentSeconds),
+					RenderStepCm,
+					PlaybackSample.SegmentDistanceCm,
+					BufferNum);
+			}
+		}
+
+		// Per-render-frame pacing diagnostic (independent toggle, untouched by plan refactor).
+		if (GetDefault<USub3DDebugSettings>()->ShouldLogSubInterpPacing())
+		{
+			const float DxRender = bHasLastPacingEndLocation
+				? static_cast<float>((RenderLocAfter - LastPacingEndLocation).Size())
+				: 0.f;
+			UE_LOG(
+				LogSubMovement,
+				Log,
+				TEXT("Pacing | Role=NonAuth | dt=%.4f | Sub.X=%.2f | dx=%.2f | alpha=%.2f | seg=%.4fs | bufN=%d | underrun=%d"),
+				DeltaTime,
+				RenderLocAfter.X,
+				DxRender,
+				PlaybackSample.Alpha,
+				static_cast<float>(PlaybackSample.SegmentSeconds),
+				ClientSnapshotBuffer.Num(),
+				PlaybackSample.bBufferUnderrun ? 1 : 0);
+			LastPacingEndLocation = RenderLocAfter;
+			bHasLastPacingEndLocation = true;
+		}
+		else
+		{
+			bHasLastPacingEndLocation = false;
+		}
+
 		return;
 	}
 
@@ -204,6 +312,18 @@ void USubMovementComponent::TickComponent(float DeltaTime, ELevelTick TickType, 
 	// the render pose via a Lerp(PrevSim, CurrSim, alpha) after the sim loop. The Undo
 	// above runs at the start of next tick so the sim always starts from the authoritative
 	// pose.
+	//
+	// CRITICAL: this loop emits ONE replication push per render frame, regardless of how
+	// many sim steps fit in DeltaTime. UE coalesces multiple per-frame RefreshRepState
+	// calls into one rep. So one snapshot may carry 1, 2 or 3 sim steps' worth of motion
+	// depending on render dt. The CLIENT then traverses this variable-content segment,
+	// producing visible jumps when the per-snapshot motion delta is uneven.
+	//
+	// REQUIRED PROJECT CONFIG: Engine.UseFixedFrameRate=true / FixedFrameRate=60
+	// (Project Settings → Engine → General Settings → Framerate). Without it, PIE
+	// variable framerate batches snapshots inconsistently and produces visible
+	// trigger jitter (stair traversal, breach activation, etc.) on clients. See
+	// memory/project_motion_chain_jitter_root_cause_2026_04_27.md.
 	SimAccumulator += DeltaTime;
 	const float FixedSimDt = FixedSimulationHz > KINDA_SMALL_NUMBER ? (1.f / FixedSimulationHz) : (1.f / 30.f);
 	bool bSimulated = false;
@@ -232,13 +352,44 @@ void USubMovementComponent::TickComponent(float DeltaTime, ELevelTick TickType, 
 	CurrSimLocation = Owner->GetActorLocation();
 	CurrSimRotation = Owner->GetActorRotation();
 
-	if (bHasSimBuffer && !bLastStepHadBlockingHit)
+	const bool bDisableRootInterpolation = IsSubRootInterpolationDisabled();
+	if (bDisableRootInterpolation)
+	{
+		bHasVisualOffset = false;
+	}
+	else if (bHasSimBuffer && !bLastStepHadBlockingHit)
 	{
 		const float Alpha = FMath::Clamp(SimAccumulator / FixedSimDt, 0.f, 1.f);
 		const FVector InterpLocation = FMath::Lerp(PrevSimLocation, CurrSimLocation, Alpha);
 		const FRotator InterpRotation = FMath::Lerp(PrevSimRotation, CurrSimRotation, Alpha);
 		Owner->SetActorLocationAndRotation(InterpLocation, InterpRotation, false, nullptr, ETeleportType::None);
 		bHasVisualOffset = true;
+	}
+
+	// ─── Per-render-frame pacing log (auth path) ───
+	if (GetDefault<USub3DDebugSettings>()->ShouldLogSubInterpPacing())
+	{
+		const FVector EndLoc = Owner->GetActorLocation();
+		const float DxRender = bHasLastPacingEndLocation
+			? static_cast<float>((EndLoc - LastPacingEndLocation).Size())
+			: 0.f;
+		const float Alpha = FMath::Clamp(SimAccumulator / FixedSimDt, 0.f, 1.f);
+		UE_LOG(
+			LogSubMovement,
+			Log,
+			TEXT("Pacing | Role=Auth | dt=%.4f | Sub.X=%.2f | dx=%.2f | simAcc=%.4f | alpha=%.2f | simStep=%d"),
+			DeltaTime,
+			EndLoc.X,
+			DxRender,
+			SimAccumulator,
+			Alpha,
+			bSimulated ? 1 : 0);
+		LastPacingEndLocation = EndLoc;
+		bHasLastPacingEndLocation = true;
+	}
+	else
+	{
+		bHasLastPacingEndLocation = false;
 	}
 }
 
@@ -252,9 +403,25 @@ void USubMovementComponent::SimulateStep(float DeltaTime)
 		}
 	}
 
+	// Capture pre-step kinematic state so we can derive authoritative acceleration.
+	// AngularVelocity layout in FSubmarineNetState mirrors (X=roll, Y=pitch, Z=yaw);
+	// we drive yaw/pitch only, roll stays 0.
+	const FVector PreStepVelocity = Velocity;
+	const float PreStepYawRate = YawRateDegPerSec;
+	const float PreStepPitchRate = PitchRateDegPerSec;
+
 	FloodedMassKg = FloodImpactKg;
 	UpdateBallasts(DeltaTime);
 	ApplyPhysics(DeltaTime);
+
+	if (DeltaTime > KINDA_SMALL_NUMBER)
+	{
+		LinearAcceleration = (Velocity - PreStepVelocity) / DeltaTime;
+		AngularAccelerationDeg = FVector(
+			0.f,
+			(PitchRateDegPerSec - PreStepPitchRate) / DeltaTime,
+			(YawRateDegPerSec - PreStepYawRate) / DeltaTime);
+	}
 }
 
 void USubMovementComponent::UpdateBallasts(float DeltaTime)
@@ -421,7 +588,7 @@ void USubMovementComponent::ApplyPhysics(float DeltaTime)
 	ForwardSpeedCmS = ClampedLocalVelocity.X;
 
 	// ── 7. Debug logging ────────────────────────────────────────────────
-	if (GetDefault<USub3DDebugSettings>()->bLogSubMovement)
+	if (GetDefault<USub3DDebugSettings>()->ShouldLogSubMovement())
 	{
 		static float ServerDebugLogTimer = 0.f;
 		ServerDebugLogTimer += DeltaTime;
@@ -477,7 +644,7 @@ void USubMovementComponent::ApplyPhysics(float DeltaTime)
 
 		if (UsesComplexAsSimpleSweep(SweepShape))
 		{
-			if (GetDefault<USub3DDebugSettings>()->bLogSubCollisionSweeps || GetDefault<USub3DDebugSettings>()->bLogSubMovement)
+			if (GetDefault<USub3DDebugSettings>()->bLogSubCollisionSweeps || GetDefault<USub3DDebugSettings>()->ShouldLogSubMovement())
 			{
 				UE_LOG(
 					LogSubMovement,
@@ -493,6 +660,16 @@ void USubMovementComponent::ApplyPhysics(float DeltaTime)
 		FComponentQueryParams Params(SCENE_QUERY_STAT(SubHullSweep));
 		Params.AddIgnoredActor(Owner);
 		Params.bTraceComplex = SweepShape->bTraceComplexOnMove;
+
+		TArray<AActor*> AttachedActors;
+		Owner->GetAttachedActors(AttachedActors, true);
+		for (AActor* AttachedActor : AttachedActors)
+		{
+			if (AttachedActor)
+			{
+				Params.AddIgnoredActor(AttachedActor);
+			}
+		}
 
 		// Iterative sweep → advance → slide → re-sweep. Each iteration consumes
 		// the remaining portion of the move along one contact plane; on the
@@ -523,12 +700,27 @@ void USubMovementComponent::ApplyPhysics(float DeltaTime)
 			{
 				for (const FHitResult& H : Hits)
 				{
-					if (H.bBlockingHit)
+					if (!H.bBlockingHit)
 					{
-						Blocking = H;
-						bHasBlocking = true;
-						break;
+						continue;
 					}
+
+					if (IsSweepHitInternalToSubmarine(Owner, H))
+					{
+						if (GetDefault<USub3DDebugSettings>()->bLogSubCollisionSweeps)
+						{
+							UE_LOG(LogSubMovement, Verbose,
+								TEXT("HullSweep ignored internal hit | Comp=%s | OtherActor=%s | OtherComp=%s"),
+								*GetNameSafe(SweepShape),
+								*GetNameSafe(H.GetActor()),
+								*GetNameSafe(H.GetComponent()));
+						}
+						continue;
+					}
+
+					Blocking = H;
+					bHasBlocking = true;
+					break;
 				}
 			}
 
@@ -725,87 +917,230 @@ void USubMovementComponent::HandleReplicatedNetState(const FSubmarineNetState& N
 		return;
 	}
 
-	const double Now = Owner->GetWorld() ? Owner->GetWorld()->GetTimeSeconds() : 0.0;
+	const UWorld* World = Owner->GetWorld();
+	const double WorldNow = World ? World->GetTimeSeconds() : 0.0;
 	const double RealNow = FPlatformTime::Seconds();
-	// Wall-clock gap since last snapshot receive. Independent of world time, so it keeps
-	// advancing even when this client's world is throttled (alt-tab, focus loss). World-time
-	// gap was useless here because both Now and ClientTargetSnapshotTime tick at the same
-	// throttled rate during alt-tab → gap stays small → snap-apply never fired.
+
 	const double RealGapSeconds = bHasReceivedClientSnapshot ? (RealNow - ClientLastReceiveRealTime) : 0.0;
-	ClientLastReceiveRealTime = RealNow;
 
 	if (!bHasReceivedClientSnapshot)
 	{
-		// First snapshot: nothing to lerp from yet. Snap-apply the pose so the actor starts
-		// at the correct position. Subsequent snapshots will buffer for interpolation.
-		ClientPrevSnapshot = NewState;
-		ClientTargetSnapshot = NewState;
-		ClientPrevSnapshotTime = Now;
-		ClientTargetSnapshotTime = Now;
-		bHasReceivedClientSnapshot = true;
-
-		Owner->SetActorLocationAndRotation(
-			NewState.WorldLocation, NewState.QuantizedRotation,
-			false, nullptr, ETeleportType::TeleportPhysics);
+		ResetClientPlayback(NewState, WorldNow, RealNow, TEXT("FirstSnapshot"));
+	}
+	else if (RealGapSeconds > ClientStallResetSeconds)
+	{
+		ResetClientPlayback(NewState, WorldNow, RealNow, TEXT("StallRecovery"));
 	}
 	else
 	{
-		// Throttle / focus-loss / hitch detection (real-time based). When the editor loses
-		// focus (alt-tab, another PIE window comes to front, OS app switch), UE throttles
-		// the unfocused world. World time advances slowly. But the network keeps queuing
-		// snapshots from the server. On focus return, snapshots arrive in rapid burst and
-		// the client world processes them. World-time gap stays small (Now barely advanced),
-		// but real-time gap is large. Snap directly to the latest authoritative pose to
-		// skip the stale-snapshot avalanche.
-		constexpr double SnapGapThresholdRealSeconds = 0.2;
-		if (RealGapSeconds > SnapGapThresholdRealSeconds)
+		QueueClientSnapshot(NewState, WorldNow, RealNow);
+	}
+}
+
+double USubMovementComponent::GetClientAuthorityStepSeconds() const
+{
+	return FixedSimulationHz > KINDA_SMALL_NUMBER ? (1.0 / static_cast<double>(FixedSimulationHz)) : (1.0 / 30.0);
+}
+
+double USubMovementComponent::GetClientAuthorityTimeSeconds(int32 SimFrame) const
+{
+	return static_cast<double>(SimFrame) * GetClientAuthorityStepSeconds();
+}
+
+double USubMovementComponent::EstimateClientAuthorityNowSeconds(double WorldNow) const
+{
+	if (ClientSnapshotBuffer.Num() == 0)
+	{
+		return 0.0;
+	}
+
+	const FBufferedClientSubSnapshot& Last = ClientSnapshotBuffer.Last();
+	const double ReceiveElapsedSeconds = FMath::Max(0.0, WorldNow - Last.WorldReceiveTime);
+	return Last.AuthorityTimeSeconds + ReceiveElapsedSeconds;
+}
+
+void USubMovementComponent::QueueClientSnapshot(const FSubmarineNetState& NewState, double WorldNow, double RealNow)
+{
+	const double AuthorityTimeSeconds = GetClientAuthorityTimeSeconds(NewState.SimFrame);
+	const int32 PreviousNum = ClientSnapshotBuffer.Num();
+	const FVector PreviousLoc = (PreviousNum > 0) ? FVector(ClientSnapshotBuffer.Last().State.WorldLocation) : FVector::ZeroVector;
+	const int32 PreviousSimFrame = (PreviousNum > 0) ? ClientSnapshotBuffer.Last().State.SimFrame : NewState.SimFrame;
+	const double PreviousAuthorityTime = (PreviousNum > 0) ? ClientSnapshotBuffer.Last().AuthorityTimeSeconds : AuthorityTimeSeconds;
+	const double PreviousRealTime = (PreviousNum > 0) ? ClientSnapshotBuffer.Last().RealReceiveTime : RealNow;
+
+	if (PreviousNum > 0)
+	{
+		const FBufferedClientSubSnapshot& Last = ClientSnapshotBuffer.Last();
+		if (NewState.SimFrame <= Last.State.SimFrame || AuthorityTimeSeconds <= Last.AuthorityTimeSeconds)
 		{
-			ClientPrevSnapshot = NewState;
-			ClientTargetSnapshot = NewState;
-			ClientPrevSnapshotTime = Now;
-			ClientTargetSnapshotTime = Now;
-			Owner->SetActorLocationAndRotation(
-				NewState.WorldLocation, NewState.QuantizedRotation,
-				false, nullptr, ETeleportType::TeleportPhysics);
-		}
-		else
-		{
-			// Normal shift: previous Target becomes Prev. New state becomes Target.
-			//
-			// Robust shift: if the previous segment's Hermite hadn't reached α=1 yet
-			// (snapshot arrived early relative to the previous InterpDuration), the actor
-			// is at some intermediate pose, NOT at the old Target's pose. Using the old
-			// Target as new Prev would cause a visible jump from current rendered pose to
-			// old Target on the next tick. Instead, anchor new Prev to the currently-rendered
-			// pose. The replicated LinearVelocity (carried over from old Target) stays as
-			// the new Prev's tangent — it's the server's authoritative velocity at the
-			// previous snapshot moment.
-			ClientPrevSnapshot = ClientTargetSnapshot;
-			ClientPrevSnapshot.WorldLocation = Owner->GetActorLocation();
-			ClientPrevSnapshot.QuantizedRotation = Owner->GetActorRotation();
-			ClientPrevSnapshotTime = ClientTargetSnapshotTime;
-			ClientTargetSnapshot = NewState;
-			ClientTargetSnapshotTime = Now;
+			if (GetDefault<USub3DDebugSettings>()->ShouldLogSubMovement())
+			{
+				UE_LOG(
+					LogSubMovement,
+					Warning,
+					TEXT("Snapshot dropped | Frame=%d | LastFrame=%d | AuthTime=%.4fs | LastAuth=%.4fs"),
+					NewState.SimFrame,
+					Last.State.SimFrame,
+					AuthorityTimeSeconds,
+					Last.AuthorityTimeSeconds);
+			}
+			return;
 		}
 	}
 
-	// Non-positional state is sampled directly each snapshot — used by HUD / Sub3D debugger.
+	ClientSnapshotBuffer.Add({NewState, AuthorityTimeSeconds, WorldNow, RealNow});
+	ClientLastReceiveRealTime = RealNow;
+	bHasReceivedClientSnapshot = true;
+
+	// Drop entries older than the configured retention window on the authority timeline.
+	const double OldestKeptAuthorityTime = AuthorityTimeSeconds - ClientMaxBufferHistorySeconds;
+	while (ClientSnapshotBuffer.Num() > 2 && ClientSnapshotBuffer[0].AuthorityTimeSeconds < OldestKeptAuthorityTime)
+	{
+		ClientSnapshotBuffer.RemoveAt(0, 1, EAllowShrinking::No);
+	}
+
+	// Non-positional state is sampled directly each snapshot — HUD, debugger, flood reads,
+	// rudder/dive-plane mesh visuals (until Phase B's smoothed presented values exist).
 	Velocity = NewState.LinearVelocity;
 	YawRateDegPerSec = NewState.AngularVelocity.Z;
 	PitchRateDegPerSec = NewState.AngularVelocity.Y;
+	LinearAcceleration = NewState.LinearAcceleration;
+	AngularAccelerationDeg = NewState.AngularAccelerationDeg;
+	RudderInput = NewState.RudderInput;
+	DivePlaneInput = NewState.DivePlaneInput;
+	ThrustInput = NewState.ThrustInput;
 	CurrentDepth = NewState.DepthMeters;
 	FloodedMassKg = NewState.FloodedMassKg;
 	ForwardSpeedCmS = NewState.ForwardSpeed;
 
-	if (GetDefault<USub3DDebugSettings>()->bLogSubMovement)
+	if (GetDefault<USub3DDebugSettings>()->ShouldLogSubMovement())
+	{
+		const double AuthorityGap = (PreviousNum > 0) ? (AuthorityTimeSeconds - PreviousAuthorityTime) : 0.0;
+		const double RealGap = (PreviousNum > 0) ? (RealNow - PreviousRealTime) : 0.0;
+		const int32 FrameGap = (PreviousNum > 0) ? (NewState.SimFrame - PreviousSimFrame) : 0;
+		const float StepCm = (PreviousNum > 0) ? FVector::Distance(NewState.WorldLocation, PreviousLoc) : 0.f;
+		UE_LOG(
+			LogSubMovement,
+			Log,
+			TEXT("Snapshot queued | Frame=%d | Loc=%s | QueueSize=%d | StepCm=%.2f | FrameGap=%d | AuthGap=%.4fs | RealGap=%.4fs"),
+			NewState.SimFrame,
+			*FVector(NewState.WorldLocation).ToCompactString(),
+			ClientSnapshotBuffer.Num(),
+			StepCm,
+			FrameGap,
+			static_cast<float>(AuthorityGap),
+			static_cast<float>(RealGap));
+	}
+}
+
+void USubMovementComponent::ResetClientPlayback(const FSubmarineNetState& NewState, double WorldNow, double RealNow, const TCHAR* Reason)
+{
+	const double PreviousRealTime = ClientLastReceiveRealTime;
+	const double RealGap = bHasReceivedClientSnapshot ? (RealNow - PreviousRealTime) : 0.0;
+	const double AuthorityTimeSeconds = GetClientAuthorityTimeSeconds(NewState.SimFrame);
+
+	ClientSnapshotBuffer.Reset();
+	ClientSnapshotBuffer.Add({NewState, AuthorityTimeSeconds, WorldNow, RealNow});
+	ClientLastReceiveRealTime = RealNow;
+	bHasReceivedClientSnapshot = true;
+
+	if (AActor* Owner = GetOwner())
+	{
+		Owner->SetActorLocationAndRotation(
+			NewState.WorldLocation, NewState.QuantizedRotation,
+			false, nullptr, ETeleportType::TeleportPhysics);
+	}
+
+	Velocity = NewState.LinearVelocity;
+	YawRateDegPerSec = NewState.AngularVelocity.Z;
+	PitchRateDegPerSec = NewState.AngularVelocity.Y;
+	LinearAcceleration = NewState.LinearAcceleration;
+	AngularAccelerationDeg = NewState.AngularAccelerationDeg;
+	RudderInput = NewState.RudderInput;
+	DivePlaneInput = NewState.DivePlaneInput;
+	ThrustInput = NewState.ThrustInput;
+	CurrentDepth = NewState.DepthMeters;
+	FloodedMassKg = NewState.FloodedMassKg;
+	ForwardSpeedCmS = NewState.ForwardSpeed;
+
+	if (GetDefault<USub3DDebugSettings>()->ShouldLogSubMovement())
 	{
 		UE_LOG(
 			LogSubMovement,
 			Log,
-			TEXT("Snapshot received | Frame=%d | Loc=%s | Δt=%.3fs"),
+			TEXT("Playback reset | Reason=%s | Frame=%d | AuthTime=%.4fs | RealGap=%.4fs"),
+			Reason ? Reason : TEXT("Unknown"),
 			NewState.SimFrame,
-			*NewState.WorldLocation.ToCompactString(),
-			static_cast<float>(ClientTargetSnapshotTime - ClientPrevSnapshotTime));
+			AuthorityTimeSeconds,
+			static_cast<float>(RealGap));
+	}
+}
+
+bool USubMovementComponent::EvaluateClientPlaybackPose(double WorldNow, FClientPlaybackSample& OutSample) const
+{
+	OutSample = FClientPlaybackSample();
+
+	const int32 BufferNum = ClientSnapshotBuffer.Num();
+	if (BufferNum == 0)
+	{
+		return false;
+	}
+
+	const double RenderAuthorityTime = EstimateClientAuthorityNowSeconds(WorldNow) - ClientPlaybackDelaySeconds;
+	const FBufferedClientSubSnapshot& First = ClientSnapshotBuffer[0];
+	const FBufferedClientSubSnapshot& Last = ClientSnapshotBuffer.Last();
+	OutSample.RenderAuthorityTimeSeconds = RenderAuthorityTime;
+	OutSample.NewestAuthorityTimeSeconds = Last.AuthorityTimeSeconds;
+
+	if (BufferNum == 1 || RenderAuthorityTime <= First.AuthorityTimeSeconds)
+	{
+		OutSample.Location = First.State.WorldLocation;
+		OutSample.Rotation = First.State.QuantizedRotation;
+		OutSample.bBufferUnderrun = true;
+		return true;
+	}
+
+	if (RenderAuthorityTime >= Last.AuthorityTimeSeconds)
+	{
+		OutSample.Location = Last.State.WorldLocation;
+		OutSample.Rotation = Last.State.QuantizedRotation;
+		OutSample.Alpha = 1.f;
+		OutSample.bBufferUnderrun = true;
+		return true;
+	}
+
+	int32 IdxHigh = BufferNum - 1;
+	while (IdxHigh > 0 && ClientSnapshotBuffer[IdxHigh].AuthorityTimeSeconds > RenderAuthorityTime)
+	{
+		--IdxHigh;
+	}
+	const int32 IdxA = IdxHigh;
+	const int32 IdxB = FMath::Min(IdxHigh + 1, BufferNum - 1);
+	const FBufferedClientSubSnapshot& A = ClientSnapshotBuffer[IdxA];
+	const FBufferedClientSubSnapshot& B = ClientSnapshotBuffer[IdxB];
+	const double SegmentSeconds = FMath::Max(B.AuthorityTimeSeconds - A.AuthorityTimeSeconds, 1e-6);
+	const float Alpha = FMath::Clamp(static_cast<float>((RenderAuthorityTime - A.AuthorityTimeSeconds) / SegmentSeconds), 0.f, 1.f);
+	const float SegmentSecondsF = static_cast<float>(SegmentSeconds);
+
+	const FVector P0 = A.State.WorldLocation;
+	const FVector P1 = B.State.WorldLocation;
+	const FVector T0 = FVector(A.State.LinearVelocity) * SegmentSecondsF;
+	const FVector T1 = FVector(B.State.LinearVelocity) * SegmentSecondsF;
+	OutSample.Location = FMath::CubicInterp(P0, T0, P1, T1, Alpha);
+	// Rotation: linear interp this phase. Hermite on rotation needs angular tangents
+	// applied via slerp composition; revisit if rotational jitter becomes prominent.
+	OutSample.Rotation = FMath::Lerp(A.State.QuantizedRotation, B.State.QuantizedRotation, Alpha);
+	OutSample.Alpha = Alpha;
+	OutSample.SegmentDistanceCm = FVector::Distance(P0, P1);
+	OutSample.SegmentSeconds = SegmentSeconds;
+	return true;
+}
+
+void USubMovementComponent::ApplyClientPlaybackPose(const FVector& Location, const FRotator& Rotation)
+{
+	if (AActor* Owner = GetOwner())
+	{
+		Owner->SetActorLocationAndRotation(Location, Rotation, false, nullptr, ETeleportType::None);
 	}
 }
 

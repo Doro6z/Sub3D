@@ -7,6 +7,28 @@
 #include "Engine/Canvas.h"
 #include "Engine/Engine.h"
 
+namespace
+{
+float WrapPhase01(float Phase01)
+{
+	return FMath::Frac(Phase01 + 10.f);
+}
+
+float SmoothStep01(float Edge0, float Edge1, float Value)
+{
+	const float Alpha = FMath::Clamp((Value - Edge0) / FMath::Max(KINDA_SMALL_NUMBER, Edge1 - Edge0), 0.f, 1.f);
+	return Alpha * Alpha * (3.f - 2.f * Alpha);
+}
+
+float FootPlantAlphaFromPhase01(float Phase01)
+{
+	const float WrappedPhase = WrapPhase01(Phase01);
+	const float PlantIn = SmoothStep01(0.02f, 0.10f, WrappedPhase);
+	const float PlantOut = 1.f - SmoothStep01(0.46f, 0.56f, WrappedPhase);
+	return FMath::Clamp(PlantIn * PlantOut, 0.f, 1.f);
+}
+}
+
 void USubCrewAnimInstance::NativeInitializeAnimation()
 {
 	Super::NativeInitializeAnimation();
@@ -38,6 +60,8 @@ void USubCrewAnimInstance::NativeUpdateAnimation(float DeltaSeconds)
 	{
 		return;
 	}
+
+	LocomotionState = FCrewAnimLocomotionState();
 
 	// Reset all bone transforms
 	Proc_Pelvis_Rot = FRotator::ZeroRotator;
@@ -115,41 +139,26 @@ void USubCrewAnimInstance::ReadInputState()
 	ASubCrewCharacter* Crew = CrewCharacter.Get();
 	USubCrewMovementComponent* CMC = CrewMovement.Get();
 
-	FVector TraversalVelocityWorld = CMC->Velocity;
-	const bool bUseSubRelativeTraversal =
-		Crew->CurrentSubmarine != nullptr
-		&& CMC->EmbarkState == ECrewEmbarkState::Embarked;
-	if (bUseSubRelativeTraversal)
-	{
-		TraversalVelocityWorld = Crew->CurrentSubmarine->GetActorTransform().TransformVectorNoScale(CMC->RelativeLinearVelocity);
-		Speed = CMC->RelativeLinearVelocity.Size2D();
-	}
-	else
-	{
-		Speed = TraversalVelocityWorld.Size2D();
-	}
+	MoveIntent = CMC->GetLastMoveIntent();
+	LocomotionFrame = CMC->GetLastLocomotionFrame();
+	LocomotionState.MoveIntent = MoveIntent;
+	LocomotionState.Frame = LocomotionFrame;
 
-	bIsMoving = Speed > 10.f;
-	bIsSwimming = Crew->bIsSwimmingByFlood;
-	bIsRunning = CMC->bIsRunning;
-	PostureAlpha = CMC->PostureAlpha;
-
-	if (bIsMoving)
-	{
-		Direction = FMath::FindDeltaAngleDegrees(
-			Crew->GetActorRotation().Yaw,
-			TraversalVelocityWorld.ToOrientationRotator().Yaw);
-	}
-	else
-	{
-		Direction = 0.f;
-	}
+	Speed = LocomotionFrame.Speed2D;
+	Direction = LocomotionFrame.DirectionDeg;
+	bIsMoving = LocomotionFrame.bIsMoving;
+	bIsSwimming = LocomotionFrame.bIsSwimming || Crew->bIsSwimmingByFlood;
+	bIsRunning = LocomotionFrame.bIsRunning;
+	PostureAlpha = LocomotionFrame.PostureAlpha;
+	Stance = LocomotionFrame.Stance;
+	Gait = LocomotionFrame.Gait;
 
 	SubPitchDeg = CMC->LocalSubAngularVelocityDegrees.Y;
 	SubRollDeg = CMC->LocalSubAngularVelocityDegrees.X;
 	SubAccelForward = CMC->LocalSubLinearAcceleration.X;
 	SubAccelLateral = CMC->LocalSubLinearAcceleration.Y;
-	SupportQuality = CMC->SupportQuality01;
+	SupportQuality = LocomotionFrame.SupportQuality01;
+	LocalTurnRateDegPerSec = LocomotionFrame.LocalTurnRateDegPerSec;
 }
 
 
@@ -188,6 +197,17 @@ void USubCrewAnimInstance::ComputeWalkCycle(float DeltaSeconds)
 		DistanceTraveled += Speed * DeltaSeconds;
 	}
 	WalkPhase = FMath::Fmod(DistanceTraveled * CycleRate, 2.f * PI);
+	LocomotionState.StridePhase01 = WrapPhase01(WalkPhase / (2.f * PI));
+	if (bIsMoving)
+	{
+		LocomotionState.RightFootPlantAlpha = FootPlantAlphaFromPhase01(LocomotionState.StridePhase01);
+		LocomotionState.LeftFootPlantAlpha = FootPlantAlphaFromPhase01(LocomotionState.StridePhase01 + 0.5f);
+	}
+	else
+	{
+		LocomotionState.RightFootPlantAlpha = 1.f;
+		LocomotionState.LeftFootPlantAlpha = 1.f;
+	}
 
 	// Speed alpha: 0 at idle, 1 at max
 	const float SpeedAlpha = FMath::Clamp(Speed / MaxSpd, 0.f, 1.f);
@@ -259,6 +279,17 @@ void USubCrewAnimInstance::ComputeCrawlCycle(float DeltaSeconds)
 		DistanceTraveled += Speed * DeltaSeconds * 0.45f;
 	}
 	WalkPhase = FMath::Fmod(DistanceTraveled * CrawlCycleRate, 2.f * PI);
+	LocomotionState.StridePhase01 = WrapPhase01(WalkPhase / (2.f * PI));
+	if (bIsMoving)
+	{
+		LocomotionState.RightFootPlantAlpha = FootPlantAlphaFromPhase01(LocomotionState.StridePhase01);
+		LocomotionState.LeftFootPlantAlpha = FootPlantAlphaFromPhase01(LocomotionState.StridePhase01 + 0.5f);
+	}
+	else
+	{
+		LocomotionState.RightFootPlantAlpha = 1.f;
+		LocomotionState.LeftFootPlantAlpha = 1.f;
+	}
 
 	const float SpeedAlpha = FMath::Clamp(Speed / 140.f, 0.f, 1.f);
 	const float RPhase = WalkPhase;
@@ -364,9 +395,13 @@ void USubCrewAnimInstance::ComputeSubMotion()
 	const float StumblePitch = SubAccelForward * SubStumbleMultiplier;
 	const float StumbleRoll = SubAccelLateral * SubStumbleMultiplier;
 	const float Instability = 1.f - SupportQuality;
+	const float TurnTwist = FMath::Clamp(LocalTurnRateDegPerSec * 0.025f, -10.f, 10.f);
 
 	Proc_Pelvis_Rot += MakeAxisRotator(StumblePitch * Instability * 2.f, SpineBendAxis, false);
 	Proc_Pelvis_Rot += MakeAxisRotator(StumbleRoll * Instability * 2.f, SpineTwistAxis, false);
+	Proc_Pelvis_Rot += MakeAxisRotator(TurnTwist * 0.4f, SpineTwistAxis, false);
+	Proc_Spine01_Rot += MakeAxisRotator(TurnTwist * 0.3f, SpineTwistAxis, false);
+	Proc_Spine02_Rot += MakeAxisRotator(TurnTwist * 0.2f, SpineTwistAxis, false);
 }
 
 
@@ -432,6 +467,9 @@ void USubCrewAnimInstance::ComputeSwimCycle(float DeltaSeconds)
 {
 	SwimPhase += DeltaSeconds * SwimStrokeRate * 2.f * PI;
 	if (SwimPhase > 2.f * PI) SwimPhase -= 2.f * PI;
+	LocomotionState.StridePhase01 = WrapPhase01(SwimPhase / (2.f * PI));
+	LocomotionState.RightFootPlantAlpha = 0.f;
+	LocomotionState.LeftFootPlantAlpha = 0.f;
 
 	const float SpeedAlpha = FMath::Clamp(Speed / 200.f, 0.f, 1.f);
 
@@ -487,6 +525,8 @@ void USubCrewAnimInstance::ComputeHandIK()
 		HandIK_R_Weight = 0.f;
 		HandIK_L_Target = FVector::ZeroVector;
 		HandIK_R_Target = FVector::ZeroVector;
+		HandIK_L_State = FCrewHandIKState();
+		HandIK_R_State = FCrewHandIKState();
 		return;
 	}
 
@@ -503,34 +543,71 @@ void USubCrewAnimInstance::ComputeHandIK()
 		{
 			HandIK_R_Target = FVector::ZeroVector;
 		}
+		HandIK_L_State = FCrewHandIKState();
+		HandIK_R_State = FCrewHandIKState();
 		return;
 	}
 
-	// Left hand: probe 0
-	const auto& ProbeL = CMC->HandProbes[0];
-	const float TargetL = ProbeL.bHit ? 1.f : 0.f;
-	HandIK_L_Weight = FMath::FInterpTo(HandIK_L_Weight, TargetL, GetDeltaSeconds(), ProbeL.bHit ? 5.f : 3.f);
-	if (ProbeL.bHit)
+	const auto PickBestProbe = [CMC](const int32* ProbeIndices, int32 ProbeCount) -> const USubCrewMovementComponent::FHandIKProbeResult*
 	{
-		HandIK_L_Target = ProbeL.WorldLocation;
-	}
-	else if (HandIK_L_Weight <= KINDA_SMALL_NUMBER)
-	{
-		HandIK_L_Target = FVector::ZeroVector;
-	}
+		const USubCrewMovementComponent::FHandIKProbeResult* BestProbe = nullptr;
+		for (int32 Index = 0; Index < ProbeCount; ++Index)
+		{
+			const USubCrewMovementComponent::FHandIKProbeResult& Probe = CMC->HandProbes[ProbeIndices[Index]];
+			if (!Probe.bHit)
+			{
+				continue;
+			}
 
-	// Right hand: probe 1
-	const auto& ProbeR = CMC->HandProbes[1];
-	const float TargetR = ProbeR.bHit ? 1.f : 0.f;
-	HandIK_R_Weight = FMath::FInterpTo(HandIK_R_Weight, TargetR, GetDeltaSeconds(), ProbeR.bHit ? 5.f : 3.f);
-	if (ProbeR.bHit)
+			if (!BestProbe || Probe.Distance < BestProbe->Distance)
+			{
+				BestProbe = &Probe;
+			}
+		}
+		return BestProbe;
+	};
+
+	const float ProneHandAlpha = FMath::Clamp(FMath::GetRangePct(0.35f, 0.f, PostureAlpha), 0.f, 1.f);
+	const float CrouchBraceAlpha = FMath::Clamp(FMath::GetRangePct(0.85f, 0.35f, PostureAlpha), 0.f, 1.f) * 0.65f;
+	const float InstabilityAlpha = FMath::Clamp(
+		(1.f - SupportQuality)
+		+ FMath::Abs(SubAccelForward) * 0.002f
+		+ FMath::Abs(SubAccelLateral) * 0.002f
+		+ FMath::Abs(LocalTurnRateDegPerSec) * 0.01f,
+		0.f,
+		1.f);
+	const float SpeedGate = FMath::Lerp(1.f, 0.25f, FMath::Clamp(Speed / 260.f, 0.f, 1.f));
+	const float BraceSourceAlpha = FMath::Max(ProneHandAlpha, FMath::Max(CrouchBraceAlpha, InstabilityAlpha));
+	const float BraceAlpha = FMath::Clamp(BraceSourceAlpha * SpeedGate, 0.f, 1.f);
+
+	const int32 LeftProbeIndices[] = { 0, 2, 4 };
+	const int32 RightProbeIndices[] = { 1, 3, 5 };
+	const USubCrewMovementComponent::FHandIKProbeResult* ProbeL = PickBestProbe(LeftProbeIndices, UE_ARRAY_COUNT(LeftProbeIndices));
+	const USubCrewMovementComponent::FHandIKProbeResult* ProbeR = PickBestProbe(RightProbeIndices, UE_ARRAY_COUNT(RightProbeIndices));
+
+	const auto UpdateHand = [this, BraceAlpha](const USubCrewMovementComponent::FHandIKProbeResult* Probe, float& Weight, FVector& Target, FCrewHandIKState& State)
 	{
-		HandIK_R_Target = ProbeR.WorldLocation;
-	}
-	else if (HandIK_R_Weight <= KINDA_SMALL_NUMBER)
-	{
-		HandIK_R_Target = FVector::ZeroVector;
-	}
+		const float TargetWeight = Probe ? BraceAlpha : 0.f;
+		Weight = FMath::FInterpTo(Weight, TargetWeight, GetDeltaSeconds(), Probe ? 6.f : 4.f);
+
+		if (Probe)
+		{
+			Target = Probe->WorldLocation;
+			State.bHasHit = true;
+			State.TargetWorldLocation = Probe->WorldLocation;
+			State.TargetWorldNormal = Probe->WorldNormal;
+		}
+		else if (Weight <= KINDA_SMALL_NUMBER)
+		{
+			Target = FVector::ZeroVector;
+			State = FCrewHandIKState();
+		}
+
+		State.Weight = Weight;
+	};
+
+	UpdateHand(ProbeL, HandIK_L_Weight, HandIK_L_Target, HandIK_L_State);
+	UpdateHand(ProbeR, HandIK_R_Weight, HandIK_R_Target, HandIK_R_State);
 }
 
 
@@ -545,10 +622,21 @@ void USubCrewAnimInstance::ComputeFootIK()
 	{
 		FootIK_R_Offset = FVector::ZeroVector;
 		FootIK_L_Offset = FVector::ZeroVector;
+		FootIK_R_State = FCrewFootIKState();
+		FootIK_L_State = FCrewFootIKState();
 		return;
 	}
 
-	FootIK_R_Offset = CMC->FootIK_R;
-	FootIK_L_Offset = CMC->FootIK_L;
-}
+	FootIK_R_State = CMC->FootIK_R_State;
+	FootIK_L_State = CMC->FootIK_L_State;
 
+	const float RightPlantAlpha = bIsMoving ? LocomotionState.RightFootPlantAlpha : 1.f;
+	const float LeftPlantAlpha = bIsMoving ? LocomotionState.LeftFootPlantAlpha : 1.f;
+	FootIK_R_State.PlantAlpha = RightPlantAlpha;
+	FootIK_L_State.PlantAlpha = LeftPlantAlpha;
+	FootIK_R_State.bIsPlanted = FootIK_R_State.bHasHit && RightPlantAlpha > 0.5f;
+	FootIK_L_State.bIsPlanted = FootIK_L_State.bHasHit && LeftPlantAlpha > 0.5f;
+
+	FootIK_R_Offset = FootIK_R_State.Offset * FootIK_R_State.Weight * RightPlantAlpha;
+	FootIK_L_Offset = FootIK_L_State.Offset * FootIK_L_State.Weight * LeftPlantAlpha;
+}
