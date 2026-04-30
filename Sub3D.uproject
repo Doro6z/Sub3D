@@ -38,6 +38,11 @@
 			"Name": "Sub3DTests",
 			"Type": "Editor",
 			"LoadingPhase": "Default"
+		},
+		{
+			"Name": "Sub3DWaterProto",
+			"Type": "Runtime",
+			"LoadingPhase": "Default"
 		}
 	],
 	"Plugins": [
@@ -78,6 +83,10 @@
 		},
 		{
 			"Name": "Sub3DDebugPanel",
+			"Enabled": true
+		},
+		{
+			"Name": "EditorScriptingUtilities",
 			"Enabled": true
 		}
 	],
