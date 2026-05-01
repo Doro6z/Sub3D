@@ -33,7 +33,8 @@ public:
         int32 NumSlices = 12,
         float CellSize = 25.0f,
         bool bAutoDetectOpenings = false,
-        float CapInsetCm = 2.0f);
+        float CapInsetCm = 2.0f,
+        int32 BakeResampleN = 64);
 
     /**
      * Bake + sauvegarde dans un asset persistant. PackagePath = chemin du dossier (avec slash final),
@@ -55,5 +56,6 @@ public:
         int32 NumSlices = 12,
         float CellSize = 25.0f,
         bool bAutoDetectOpenings = false,
-        float CapInsetCm = 2.0f);
+        float CapInsetCm = 2.0f,
+        int32 BakeResampleN = 64);
 };

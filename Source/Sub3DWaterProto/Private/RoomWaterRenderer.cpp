@@ -147,7 +147,7 @@ void URoomWaterRenderer::LazyInitializeFromBakedData()
     }
 
     CurrentSliceIndex = PickClosestSlice(CurrentWaterLevelLocalZ);
-    RegenerateCapMesh();
+    RebuildBlendedCapMesh();
     BuildSkirtMeshOnce();
     UpdateSkirtScale();
 
@@ -195,12 +195,11 @@ void URoomWaterRenderer::SetWaterLevel(float NewLocalZ)
         return;
     }
 
-    const int32 NewSliceIdx = PickClosestSlice(NewLocalZ);
-    if (NewSliceIdx != CurrentSliceIndex)
-    {
-        CurrentSliceIndex = NewSliceIdx;
-        RegenerateCapMesh();
-    }
+    // Rebuild systématique chaque appel : la lerp entre slices encadrantes change avec NewLocalZ,
+    // pas d'optimisation "même slice" comme avant. UpdateMeshSection est cheap (juste un buffer
+    // de verts à uploader, pas de re-cook collision).
+    CurrentSliceIndex = PickClosestSlice(NewLocalZ);
+    RebuildBlendedCapMesh();
 
     if (CapMeshComp)
     {
@@ -233,30 +232,154 @@ int32 URoomWaterRenderer::PickClosestSlice(float WaterZ_Local) const
     return BestIdx;
 }
 
-void URoomWaterRenderer::RegenerateCapMesh()
+void URoomWaterRenderer::FindBracketingSlices(float Z, int32& OutIdxBelow, int32& OutIdxAbove, float& OutT) const
 {
-    if (!BakedData || CurrentSliceIndex < 0 || !BakedData->CapMeshesPerSlice.IsValidIndex(CurrentSliceIndex))
+    OutIdxBelow = OutIdxAbove = 0;
+    OutT = 0.f;
+
+    if (!BakedData || BakedData->Slices.Num() == 0)
     {
-        if (CapMeshComp)
+        return;
+    }
+
+    const TArray<FCompartmentSlice>& Slices = BakedData->Slices;
+    const int32 N = Slices.Num();
+
+    // Hors range bas : clamp slice 0.
+    if (Z <= Slices[0].SliceZ_Local)
+    {
+        OutIdxBelow = OutIdxAbove = 0;
+        OutT = 0.f;
+        return;
+    }
+    // Hors range haut : clamp dernière slice.
+    if (Z >= Slices[N - 1].SliceZ_Local)
+    {
+        OutIdxBelow = OutIdxAbove = N - 1;
+        OutT = 0.f;
+        return;
+    }
+
+    // Cherche [i, i+1] tel que Slices[i].Z <= Z <= Slices[i+1].Z. Linéaire suffisant pour
+    // ~12 slices typiques ; si plus tard on en a beaucoup plus, passer en binary search.
+    for (int32 i = 0; i < N - 1; ++i)
+    {
+        if (Z >= Slices[i].SliceZ_Local && Z <= Slices[i + 1].SliceZ_Local)
+        {
+            OutIdxBelow = i;
+            OutIdxAbove = i + 1;
+            const float Span = Slices[i + 1].SliceZ_Local - Slices[i].SliceZ_Local;
+            OutT = (Span > KINDA_SMALL_NUMBER)
+                ? (Z - Slices[i].SliceZ_Local) / Span
+                : 0.f;
+            return;
+        }
+    }
+}
+
+void URoomWaterRenderer::RebuildBlendedCapMesh()
+{
+    if (!BakedData || !CapMeshComp || BakedData->CapMeshesPerSlice.Num() == 0)
+    {
+        return;
+    }
+
+    int32 IdxBelow = 0, IdxAbove = 0;
+    float T = 0.f;
+    FindBracketingSlices(CurrentWaterLevelLocalZ, IdxBelow, IdxAbove, T);
+
+    if (!BakedData->CapMeshesPerSlice.IsValidIndex(IdxBelow) ||
+        !BakedData->CapMeshesPerSlice.IsValidIndex(IdxAbove))
+    {
+        return;
+    }
+
+    const FCachedWaterMesh& Below = BakedData->CapMeshesPerSlice[IdxBelow];
+    const FCachedWaterMesh& Above = BakedData->CapMeshesPerSlice[IdxAbove];
+
+    // Cas slices vides (haut/bas du compartiment, 0 verts) : on choisit la slice non-vide,
+    // ou on clear si les deux sont vides.
+    const bool bBelowEmpty = (Below.Vertices.Num() == 0);
+    const bool bAboveEmpty = (Above.Vertices.Num() == 0);
+
+    if (bBelowEmpty && bAboveEmpty)
+    {
+        if (bCapSectionCreated)
         {
             CapMeshComp->ClearAllMeshSections();
+            bCapSectionCreated = false;
         }
         return;
     }
 
-    const FCachedWaterMesh& Tpl = BakedData->CapMeshesPerSlice[CurrentSliceIndex];
+    // Une seule des deux non-vide → on prend celle-là sans blending (transitions aux bords du
+    // compartiment). Pas idéal visuellement (saut sec sur 1 slice) mais cohérent avec un
+    // compartiment fermé en haut/bas.
+    const FCachedWaterMesh* SourceForTopology = nullptr;
+    TArray<FVector> BlendedVerts;
 
-    CapMeshComp->ClearAllMeshSections();
-    if (Tpl.Vertices.Num() == 0 || Tpl.Triangles.Num() == 0)
+    if (bBelowEmpty)
+    {
+        SourceForTopology = &Above;
+        BlendedVerts = Above.Vertices;
+    }
+    else if (bAboveEmpty)
+    {
+        SourceForTopology = &Below;
+        BlendedVerts = Below.Vertices;
+    }
+    else if (Below.Vertices.Num() == Above.Vertices.Num())
+    {
+        // Cas nominal : topologie identique (garantie par le resampling au bake).
+        SourceForTopology = &Below;
+        const int32 NumVerts = Below.Vertices.Num();
+        BlendedVerts.SetNumUninitialized(NumVerts);
+        for (int32 i = 0; i < NumVerts; ++i)
+        {
+            BlendedVerts[i] = FMath::Lerp(Below.Vertices[i], Above.Vertices[i], T);
+        }
+    }
+    else
+    {
+        // Mismatch (ne devrait pas arriver après le bake refactor) : fallback sur la plus
+        // proche. Log une fois par session pour signaler une bake stale.
+        UE_LOG(LogWaterProto, Warning,
+            TEXT("RebuildBlendedCapMesh: vertex count mismatch (below=%d above=%d) — re-bake required after switch to fan/resample"),
+            Below.Vertices.Num(), Above.Vertices.Num());
+        SourceForTopology = (T < 0.5f) ? &Below : &Above;
+        BlendedVerts = SourceForTopology->Vertices;
+    }
+
+    if (!SourceForTopology || SourceForTopology->Triangles.Num() == 0)
     {
         return;
     }
 
-    CapMeshComp->CreateMeshSection(
-        /*SectionIndex*/ 0,
-        Tpl.Vertices, Tpl.Triangles, Tpl.Normals, Tpl.UV0,
-        TArray<FColor>(), TArray<FProcMeshTangent>(),
-        /*bCreateCollision*/ false);
+    // Première frame : CreateMeshSection (alloue le buffer + crée la section).
+    // Frames suivantes : UpdateMeshSection (re-upload juste les verts, pas de re-cook).
+    if (!bCapSectionCreated)
+    {
+        CapMeshComp->CreateMeshSection(
+            /*SectionIndex*/ 0,
+            BlendedVerts,
+            SourceForTopology->Triangles,
+            SourceForTopology->Normals,
+            SourceForTopology->UV0,
+            TArray<FColor>(),
+            TArray<FProcMeshTangent>(),
+            /*bCreateCollision*/ false);
+        bCapSectionCreated = true;
+    }
+    else
+    {
+        CapMeshComp->UpdateMeshSection(
+            /*SectionIndex*/ 0,
+            BlendedVerts,
+            SourceForTopology->Normals,
+            SourceForTopology->UV0,
+            TArray<FColor>(),
+            TArray<FProcMeshTangent>());
+    }
 }
 
 void URoomWaterRenderer::BuildSkirtMeshOnce()

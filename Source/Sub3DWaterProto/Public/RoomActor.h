@@ -77,6 +77,17 @@ public:
         meta = (ClampMin = "0.0", ClampMax = "30.0"))
     float CapInsetCm = 2.0f;
 
+    /**
+     * Nombre de points uniformément resamplés sur le contour avant triangulation. Tous les caps
+     * de toutes les slices ont exactement N points dans le même ordre → topologie cohérente,
+     * permet le vertex blending au runtime entre slices adjacentes (transitions continues du
+     * niveau d'eau, pas de paliers). 32 = grossier mais léger. 64 = bon compromis. 128 = très
+     * fluide pour murs courbes complexes mais .uasset 2× plus gros.
+     */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Water Proto|Bake",
+        meta = (ClampMin = "16", ClampMax = "256"))
+    int32 BakeResampleN = 64;
+
     virtual void Tick(float DeltaTime) override;
 
     /**

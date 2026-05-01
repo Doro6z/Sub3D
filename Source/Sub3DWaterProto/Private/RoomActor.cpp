@@ -61,7 +61,8 @@ void ARoomActor::Bake()
         BakeNumSlices,
         BakeCellSize,
         bAutoDetectOpenings,
-        CapInsetCm);
+        CapInsetCm,
+        BakeResampleN);
 
     if (Result)
     {

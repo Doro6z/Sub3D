@@ -138,10 +138,27 @@ private:
     /** Init complète (heightfield buffers, texture, MID, fallback matériaux, premier mesh). Idempotent. */
     void LazyInitializeFromBakedData();
 
-    void RegenerateCapMesh();
     void BuildSkirtMeshOnce();
     void UpdateSkirtScale();
     void TickHeightfield(float DeltaTime);
     void PushHeightfieldToTexture();
     int32 PickClosestSlice(float WaterZ_Local) const;
+
+    /**
+     * Trouve les deux slices encadrant Z et le facteur d'interpolation t ∈ [0..1].
+     * t=0 → 100% slice IdxBelow, t=1 → 100% slice IdxAbove.
+     * Si Z hors range, retourne IdxBelow == IdxAbove (clamp aux bornes).
+     */
+    void FindBracketingSlices(float Z, int32& OutIdxBelow, int32& OutIdxAbove, float& OutT) const;
+
+    /**
+     * Recalcule le cap mesh par lerp des vertices entre les deux slices encadrantes au niveau
+     * d'eau courant. Suppose que toutes les slices ont la MÊME topologie (même nombre de verts,
+     * même triangulation) — assuré par le resampling au bake (BakeResampleN points + fan
+     * triangulation). Première frame : CreateMeshSection. Frames suivantes : UpdateMeshSection
+     * (modifie juste les verts, pas les triangles → pas de re-cook).
+     */
+    void RebuildBlendedCapMesh();
+
+    bool bCapSectionCreated = false;
 };

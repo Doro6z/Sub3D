@@ -296,66 +296,177 @@ namespace
     }
 
     // ─────────────────────────────────────────────────────────────────────────
-    // Cap mesh par triangulation Delaunay (Phase B).
+    // ResamplePolygonUniform : remappe un polygone fermé en N points uniformément espacés
+    // en arc-length le long du périmètre. Critique pour le vertex blending entre slices :
+    // tous les caps doivent avoir la MÊME topologie (N points en correspondance) pour qu'un
+    // simple lerp(below[i], above[i], t) produise un mesh cohérent.
     //
-    // Input : polygone fermé ordonné CCW (Outer loop convention).
-    // Output : FCachedWaterMesh triangulé via UE::Geometry::FConstrainedDelaunay2d.
-    //   - Vertices stockés à Z=0 (le runtime translate via SetRelativeLocation).
-    //   - Normales (0,0,1) up.
-    //   - UV0 planaire en mètres (1 UV unit = 100 cm, pour tilage de normal map à 1m).
-    //
-    // bSplitBowties true → robustesse aux self-intersections éventuelles du contour.
-    // bOutputCCW true → triangles CCW depuis +Z (= front face up = visible vu d'en haut).
+    // L'arc-length sampling garantit que pour deux slices de formes voisines, le point[i]
+    // de l'une correspond grossièrement au point[i] de l'autre (même fraction de périmètre).
     // ─────────────────────────────────────────────────────────────────────────
-    FCachedWaterMesh GenerateCapMeshFromPolygon(const TArray<FVector2D>& Polygon)
+    TArray<FVector2D> ResamplePolygonUniform(const TArray<FVector2D>& Polygon, int32 N)
+    {
+        TArray<FVector2D> Out;
+        const int32 M = Polygon.Num();
+        if (M < 3 || N < 3)
+        {
+            return Out;
+        }
+
+        // Périmètre + longueurs de segments.
+        TArray<float> SegLengths;
+        SegLengths.SetNumUninitialized(M);
+        float TotalLength = 0.f;
+        for (int32 i = 0; i < M; ++i)
+        {
+            SegLengths[i] = FVector2D::Distance(Polygon[i], Polygon[(i + 1) % M]);
+            TotalLength += SegLengths[i];
+        }
+        if (TotalLength < KINDA_SMALL_NUMBER)
+        {
+            return Out;
+        }
+
+        const float Step = TotalLength / static_cast<float>(N);
+        Out.Reserve(N);
+
+        // Marche le long du polygone, plante un point tous les Step cm.
+        int32 SegIdx = 0;
+        float SegStart = 0.f;
+        for (int32 k = 0; k < N; ++k)
+        {
+            const float Target = static_cast<float>(k) * Step;
+            // Avance jusqu'au segment qui contient Target.
+            while (SegIdx < M && SegStart + SegLengths[SegIdx] < Target)
+            {
+                SegStart += SegLengths[SegIdx];
+                ++SegIdx;
+            }
+            if (SegIdx >= M)
+            {
+                // Garde-fou numérique : devrait pas arriver, on duplique le dernier point.
+                Out.Add(Polygon[M - 1]);
+                continue;
+            }
+            const float SegT = (SegLengths[SegIdx] > KINDA_SMALL_NUMBER)
+                ? (Target - SegStart) / SegLengths[SegIdx]
+                : 0.f;
+            const FVector2D& A = Polygon[SegIdx];
+            const FVector2D& B = Polygon[(SegIdx + 1) % M];
+            Out.Add(FMath::Lerp(A, B, SegT));
+        }
+        return Out;
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // AlignPolygonStart : rotate le tableau pour que le polygone commence par le point
+    // d'angle minimal autour du centroïde (le plus à droite, à savoir angle 0 = +X axis).
+    // Garantit que toutes les slices ont leur point[0] "au même endroit relatif" → lerp
+    // cohérent entre slices.
+    // ─────────────────────────────────────────────────────────────────────────
+    void AlignPolygonStart(TArray<FVector2D>& Polygon)
+    {
+        const int32 N = Polygon.Num();
+        if (N < 3)
+        {
+            return;
+        }
+        FVector2D Centroid(0.f, 0.f);
+        for (const FVector2D& P : Polygon)
+        {
+            Centroid += P;
+        }
+        Centroid /= static_cast<float>(N);
+
+        // Cherche le point dont l'angle (atan2) autour du centroïde est le plus proche de 0
+        // (= direction +X par convention). Évite de prendre une convention arbitraire qui
+        // changerait selon le bake.
+        int32 BestIdx = 0;
+        float BestAbsAngle = TNumericLimits<float>::Max();
+        for (int32 i = 0; i < N; ++i)
+        {
+            const FVector2D D = Polygon[i] - Centroid;
+            const float Angle = FMath::Atan2(D.Y, D.X);
+            const float AbsAngle = FMath::Abs(Angle);
+            if (AbsAngle < BestAbsAngle)
+            {
+                BestAbsAngle = AbsAngle;
+                BestIdx = i;
+            }
+        }
+
+        if (BestIdx > 0)
+        {
+            TArray<FVector2D> Rotated;
+            Rotated.Reserve(N);
+            for (int32 i = 0; i < N; ++i)
+            {
+                Rotated.Add(Polygon[(BestIdx + i) % N]);
+            }
+            Polygon = MoveTemp(Rotated);
+        }
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // Cap mesh par triangulation FAN depuis le centroïde — topologie cohérente entre slices.
+    //
+    // Input : polygone fermé CCW à N points (déjà resamplé uniformément).
+    // Output : FCachedWaterMesh avec :
+    //   - Vertices = N points polygon + 1 centroïde, tous à Z=0
+    //   - Triangles = N tri en éventail (i, (i+1) % N, centroïde) → toujours CCW
+    //   - Normales (0,0,1) up
+    //   - UV0 planaire (1 UV unit = 100 cm)
+    //
+    // Pourquoi fan plutôt que Delaunay :
+    //   - Délaunay produit une triangulation différente pour chaque slice (la topologie
+    //     dépend de la disposition exacte des points). Impossible de blend deux meshes
+    //     entre slices voisines si les triangles diffèrent.
+    //   - Fan = N triangles toujours dans le même ordre, garantis identiques d'une slice à
+    //     l'autre. Vertex blending ↔ topologie unique.
+    //
+    // Limitation : pour un polygone fortement concave (L-shape, salle avec recoin), le fan
+    // peut produire des triangles qui sortent du polygone. Pour des compartiments typiques
+    // de sub (~convexe avec mur courbe), inoffensif.
+    // ─────────────────────────────────────────────────────────────────────────
+    FCachedWaterMesh GenerateCapMeshFanFromPolygon(const TArray<FVector2D>& Polygon)
     {
         FCachedWaterMesh Mesh;
-        if (Polygon.Num() < 3)
-        {
-            return Mesh;
-        }
-
-        UE::Geometry::FConstrainedDelaunay2d Triangulator;
-        Triangulator.bOutputCCW = true;
-        Triangulator.bSplitBowties = true;
-
         const int32 N = Polygon.Num();
-        Triangulator.Vertices.Reserve(N);
-        Triangulator.Edges.Reserve(N);
-
-        for (int32 i = 0; i < N; ++i)
+        if (N < 3)
         {
-            Triangulator.Vertices.Add(FVector2d(Polygon[i].X, Polygon[i].Y));
-        }
-        for (int32 i = 0; i < N; ++i)
-        {
-            Triangulator.Edges.Emplace(i, (i + 1) % N);
-        }
-
-        if (!Triangulator.Triangulate())
-        {
-            UE_LOG(LogWaterProto, Warning, TEXT("GenerateCapMeshFromPolygon: Triangulate() failed for polygon (N=%d)"), N);
             return Mesh;
         }
 
-        Mesh.Vertices.Reserve(Triangulator.Vertices.Num());
-        Mesh.Normals.Reserve(Triangulator.Vertices.Num());
-        Mesh.UV0.Reserve(Triangulator.Vertices.Num());
-
-        for (const FVector2d& V : Triangulator.Vertices)
+        // Centroïde = moyenne des points (suffisant pour un polygone CCW).
+        FVector2D Centroid(0.f, 0.f);
+        for (const FVector2D& P : Polygon)
         {
-            Mesh.Vertices.Add(FVector(static_cast<float>(V.X), static_cast<float>(V.Y), 0.f));
-            Mesh.Normals.Add(FVector(0.f, 0.f, 1.f));
-            // 1 UV unit = 100 cm.
-            Mesh.UV0.Add(FVector2D(static_cast<float>(V.X) * 0.01f, static_cast<float>(V.Y) * 0.01f));
+            Centroid += P;
         }
+        Centroid /= static_cast<float>(N);
 
-        Mesh.Triangles.Reserve(Triangulator.Triangles.Num() * 3);
-        for (const UE::Geometry::FIndex3i& Tri : Triangulator.Triangles)
+        // N + 1 verts : N polygone + 1 centroïde (index N).
+        Mesh.Vertices.Reserve(N + 1);
+        Mesh.Normals.Reserve(N + 1);
+        Mesh.UV0.Reserve(N + 1);
+        for (int32 i = 0; i < N; ++i)
         {
-            Mesh.Triangles.Add(Tri.A);
-            Mesh.Triangles.Add(Tri.B);
-            Mesh.Triangles.Add(Tri.C);
+            Mesh.Vertices.Add(FVector(Polygon[i].X, Polygon[i].Y, 0.f));
+            Mesh.Normals.Add(FVector(0.f, 0.f, 1.f));
+            Mesh.UV0.Add(FVector2D(Polygon[i].X * 0.01f, Polygon[i].Y * 0.01f));
+        }
+        Mesh.Vertices.Add(FVector(Centroid.X, Centroid.Y, 0.f));
+        Mesh.Normals.Add(FVector(0.f, 0.f, 1.f));
+        Mesh.UV0.Add(FVector2D(Centroid.X * 0.01f, Centroid.Y * 0.01f));
+
+        // N triangles fan : (i, (i+1)%N, centroïdeIdx). CCW garanti si polygone CCW.
+        const int32 CentroidIdx = N;
+        Mesh.Triangles.Reserve(N * 3);
+        for (int32 i = 0; i < N; ++i)
+        {
+            Mesh.Triangles.Add(i);
+            Mesh.Triangles.Add((i + 1) % N);
+            Mesh.Triangles.Add(CentroidIdx);
         }
 
         return Mesh;
@@ -409,8 +520,11 @@ URoomWaterBakedData* URoomWaterBakerLibrary::BakeVolume(
     int32 NumSlices,
     float CellSize,
     bool bAutoDetectOpenings,
-    float CapInsetCm)
+    float CapInsetCm,
+    int32 BakeResampleN)
 {
+    BakeResampleN = FMath::Clamp(BakeResampleN, 16, 256);
+
     if (!Volume)
     {
         UE_LOG(LogWaterProto, Warning, TEXT("BakeVolume: Volume null"));
@@ -618,7 +732,13 @@ URoomWaterBakedData* URoomWaterBakerLibrary::BakeVolume(
             OrderedPoly = InsetPolygon(OrderedPoly, CapInsetCm);
         }
 
-        FCachedWaterMesh Mesh = GenerateCapMeshFromPolygon(OrderedPoly);
+        // Resample uniforme à N points + alignement du point[0] → topologie cohérente entre
+        // slices (chaque cap mesh = exactement N+1 verts dans le même ordre), requise pour
+        // le vertex blending au runtime.
+        OrderedPoly = ResamplePolygonUniform(OrderedPoly, BakeResampleN);
+        AlignPolygonStart(OrderedPoly);
+
+        FCachedWaterMesh Mesh = GenerateCapMeshFanFromPolygon(OrderedPoly);
         if (Mesh.Vertices.Num() == 0)
         {
             ++DegenerateCount;
@@ -650,10 +770,13 @@ URoomWaterBakedData* URoomWaterBakerLibrary::BakeAndSave(
     int32 NumSlices,
     float CellSize,
     bool bAutoDetectOpenings,
-    float CapInsetCm)
+    float CapInsetCm,
+    int32 BakeResampleN)
 {
 #if WITH_EDITOR
-    URoomWaterBakedData* Transient = BakeVolume(Volume, CompartmentId, NumSlices, CellSize, bAutoDetectOpenings, CapInsetCm);
+    URoomWaterBakedData* Transient = BakeVolume(
+        Volume, CompartmentId, NumSlices, CellSize,
+        bAutoDetectOpenings, CapInsetCm, BakeResampleN);
     if (!Transient)
     {
         return nullptr;
@@ -715,6 +838,8 @@ URoomWaterBakedData* URoomWaterBakerLibrary::BakeAndSave(
     return Asset;
 #else
     UE_LOG(LogWaterProto, Warning, TEXT("BakeAndSave: editor-only, ignoré dans une build runtime"));
-    return BakeVolume(Volume, CompartmentId, NumSlices, CellSize, bAutoDetectOpenings, CapInsetCm);
+    return BakeVolume(
+        Volume, CompartmentId, NumSlices, CellSize,
+        bAutoDetectOpenings, CapInsetCm, BakeResampleN);
 #endif
 }
