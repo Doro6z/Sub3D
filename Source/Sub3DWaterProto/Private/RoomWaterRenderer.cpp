@@ -28,6 +28,10 @@ void URoomWaterRenderer::EnsureMeshComponents()
     if (!CapMeshComp)
     {
         CapMeshComp = NewObject<UProceduralMeshComponent>(this, TEXT("CapMesh"));
+        // Movable AVANT SetupAttachment+RegisterComponent : la chaîne d'attachement Unreal
+        // n'autorise pas un enfant Movable sous un parent Static. En portage Sub3D, le sub bouge
+        // → tous les enfants doivent être Movable pour que la transform propagation fonctionne.
+        CapMeshComp->SetMobility(EComponentMobility::Movable);
         CapMeshComp->SetupAttachment(this);
         CapMeshComp->RegisterComponent();
         CapMeshComp->SetCollisionEnabled(ECollisionEnabled::NoCollision);
@@ -36,6 +40,7 @@ void URoomWaterRenderer::EnsureMeshComponents()
     if (!SkirtMeshComp)
     {
         SkirtMeshComp = NewObject<UProceduralMeshComponent>(this, TEXT("SkirtMesh"));
+        SkirtMeshComp->SetMobility(EComponentMobility::Movable);
         SkirtMeshComp->SetupAttachment(this);
         SkirtMeshComp->RegisterComponent();
         SkirtMeshComp->SetCollisionEnabled(ECollisionEnabled::NoCollision);
@@ -46,6 +51,25 @@ void URoomWaterRenderer::EnsureMeshComponents()
 void URoomWaterRenderer::BeginPlay()
 {
     Super::BeginPlay();
+
+    // Garde-fou : un BP enfant peut avoir sérialisé WaterRenderer comme top-level non attaché
+    // (le constructeur C++ appelle SetupAttachment(CompartmentVolume), mais les BP créés avant
+    // cette ligne — ou modifiés manuellement — gardent leur structure d'origine). Sans parent,
+    // un USceneComponent flotte à world(RelativeLocation) au lieu de suivre l'Actor → cap mesh
+    // à world(0,0,0). On corrige ici en ré-attachant à la racine de l'Actor.
+    if (!GetAttachParent())
+    {
+        if (AActor* Owner = GetOwner())
+        {
+            if (USceneComponent* Root = Owner->GetRootComponent())
+            {
+                AttachToComponent(Root, FAttachmentTransformRules::KeepRelativeTransform);
+                UE_LOG(LogWaterProto, Warning,
+                    TEXT("URoomWaterRenderer (%s): was unparented in BP — auto-attached to root %s"),
+                    *GetNameSafe(Owner), *GetNameSafe(Root));
+            }
+        }
+    }
 
     EnsureMeshComponents();
 
