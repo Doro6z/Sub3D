@@ -69,6 +69,28 @@ public:
         meta = (ClampMin = "1.0", ClampMax = "300.0"))
     float DebugDrawDuration = 30.0f;
 
+    /**
+     * Si >= 0, le snapshot affiche UNIQUEMENT cette slice (au lieu de toutes).
+     * Permet d'isoler visuellement quand le bruit visuel devient excessif.
+     * -1 = toutes les slices.
+     */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Water Proto|Debug",
+        meta = (ClampMin = "-1"))
+    int32 DebugIsolateSliceIndex = -1;
+
+    /** Si true, snapshot affiche le SDF en gradient continu (au lieu de binaire vert/rouge). */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Water Proto|Debug")
+    bool bDebugShowSDFGradient = false;
+
+    /** Si true, affiche le contour Marching Squares avec points jaunes interpolés. */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Water Proto|Debug")
+    bool bDebugShowContourDetail = false;
+
+    /** Distance max utilisée pour normaliser le gradient SDF (cm). */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Water Proto|Debug",
+        meta = (ClampMin = "10.0", ClampMax = "500.0"))
+    float DebugSDFMaxDistance = 50.0f;
+
     UFUNCTION(BlueprintCallable, Category = "Water Proto")
     void SetWaterLevel(float NewLocalZ);
 

@@ -15,7 +15,9 @@ public class Sub3DWaterProto : ModuleRules
             "ProceduralMeshComponent",
             "Niagara",
             "RenderCore",
-            "RHI"
+            "RHI",
+            "GeometryCore",        // FVector2d, FIndex2i, FIndex3i (basic types, Phase B)
+            "GeometryAlgorithms"   // FConstrainedDelaunay2d pour cap mesh triangulation (Phase B)
         });
 
         PrivateDependencyModuleNames.AddRange(new string[]

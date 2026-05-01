@@ -32,7 +32,8 @@ public:
         FName CompartmentId,
         int32 NumSlices = 12,
         float CellSize = 25.0f,
-        bool bAutoDetectOpenings = false);
+        bool bAutoDetectOpenings = false,
+        float CapInsetCm = 2.0f);
 
     /**
      * Bake + sauvegarde dans un asset persistant. PackagePath = chemin du dossier (avec slash final),
@@ -41,6 +42,10 @@ public:
      * bAutoDetectOpenings : heuristique naïve "contour proche du bord du Box". Faux positifs sur
      * salle close avec Box légèrement plus grand. Désactivé par défaut. À remplacer en Étape B
      * par un système d'ouvertures explicites via ASubDoorActor.
+     *
+     * CapInsetCm : décalage cosmétique du cap mesh vers l'intérieur (le long de la normale
+     * inward du contour). Garantit que le cap est tucké dans le mur même si l'interpolation
+     * MS a 1-2mm d'erreur. 0 = pas d'inset (contour exact à SDF=0).
      */
     UFUNCTION(BlueprintCallable, Category = "Sub3DWaterProto|Bake")
     static URoomWaterBakedData* BakeAndSave(
@@ -49,5 +54,6 @@ public:
         const FString& PackagePath = TEXT("/Game/Sub3DWaterProto/BakedData/"),
         int32 NumSlices = 12,
         float CellSize = 25.0f,
-        bool bAutoDetectOpenings = false);
+        bool bAutoDetectOpenings = false,
+        float CapInsetCm = 2.0f);
 };

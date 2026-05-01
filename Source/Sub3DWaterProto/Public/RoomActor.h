@@ -68,6 +68,15 @@ public:
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Water Proto|Bake")
     bool bAutoDetectOpenings = false;
 
+    /**
+     * Inset cosmétique du cap mesh vers l'intérieur (cm). Pousse les vertices du contour le long
+     * de la normale inward avant triangulation Delaunay. Garantit que le cap est tucké dans le
+     * mur même si l'interpolation MS a 1-2mm d'erreur. 0 = pas d'inset (contour exact à SDF=0).
+     */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Water Proto|Bake",
+        meta = (ClampMin = "0.0", ClampMax = "30.0"))
+    float CapInsetCm = 2.0f;
+
     virtual void Tick(float DeltaTime) override;
 
     /**

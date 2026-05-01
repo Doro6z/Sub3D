@@ -452,9 +452,49 @@ void URoomWaterRenderer::DrawDebugSnapshot()
         return;
     }
 
-    URoomWaterDebugDrawer::DrawCompartmentSnapshot(
-        this, Volume, BakedData, CurrentWaterLevelLocalZ,
-        DebugDrawDuration, bDebugIncludeMaskMisses);
+    // Bornes Box (jaune).
+    URoomWaterDebugDrawer::DrawBoxBounds(this, Volume, DebugDrawDuration);
+
+    // Détermine quelles slices afficher : isolated si >= 0 et valide, sinon toutes.
+    TArray<int32> SlicesToDraw;
+    const bool bIsolated = (DebugIsolateSliceIndex >= 0) && BakedData->Slices.IsValidIndex(DebugIsolateSliceIndex);
+    if (bIsolated)
+    {
+        SlicesToDraw.Add(DebugIsolateSliceIndex);
+    }
+    else
+    {
+        for (int32 i = 0; i < BakedData->Slices.Num(); ++i)
+        {
+            SlicesToDraw.Add(i);
+        }
+    }
+
+    // Pour chaque slice : gradient SDF ou binary (selon mode), + contour détaillé optionnel.
+    for (int32 SliceIdx : SlicesToDraw)
+    {
+        if (bDebugShowSDFGradient)
+        {
+            URoomWaterDebugDrawer::DrawSliceSDFGradient(
+                this, Volume, BakedData, SliceIdx,
+                DebugSDFMaxDistance, DebugDrawDuration,
+                /*bShowValues=*/ bIsolated);
+        }
+        else
+        {
+            URoomWaterDebugDrawer::DrawSliceDetailed(
+                this, Volume, BakedData, SliceIdx,
+                DebugDrawDuration, bDebugIncludeMaskMisses);
+        }
+
+        if (bDebugShowContourDetail)
+        {
+            URoomWaterDebugDrawer::DrawSliceContourDetailed(
+                this, Volume, BakedData, SliceIdx,
+                DebugDrawDuration,
+                /*bShowTValues=*/ bIsolated);
+        }
+    }
 
     URoomWaterDebugDrawer::DumpBakedDataToLog(BakedData);
 }

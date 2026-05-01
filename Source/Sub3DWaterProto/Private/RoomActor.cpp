@@ -60,7 +60,8 @@ void ARoomActor::Bake()
         TEXT("/Game/Sub3DWaterProto/BakedData/"),
         BakeNumSlices,
         BakeCellSize,
-        bAutoDetectOpenings);
+        bAutoDetectOpenings,
+        CapInsetCm);
 
     if (Result)
     {

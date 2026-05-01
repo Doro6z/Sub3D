@@ -58,6 +58,38 @@ public:
         float Duration = 30.0f,
         bool bIncludeMaskMisses = false);
 
+    /**
+     * Affiche le SDF en gradient continu pour une slice. Vert = négatif (intérieur), rouge =
+     * positif (extérieur). Saturation proportionnelle à |SDF| / MaxDistance — cellules proches
+     * de la surface = sombres, loin = vif. Affiche aussi le contour MS bleu et un label de
+     * stats (min/max). Si bShowValues, écrit la valeur SDF de chaque cellule en texte.
+     */
+    UFUNCTION(BlueprintCallable, Category = "Sub3DWaterProto|Debug",
+        meta = (DefaultToSelf = "WorldContextObject"))
+    static void DrawSliceSDFGradient(
+        UObject* WorldContextObject,
+        UBoxComponent* Volume,
+        URoomWaterBakedData* BakedData,
+        int32 SliceIndex,
+        float MaxDistance = 50.0f,
+        float Duration = 30.0f,
+        bool bShowValues = false);
+
+    /**
+     * Affiche le contour Marching Squares interpolé d'une slice avec ses points exacts
+     * (sphères jaunes 3cm) + lignes bleu épaisses entre chaque paire. Si bShowTValues, écrit
+     * l'index du point et sa position locale en texte au-dessus de chaque sphère.
+     */
+    UFUNCTION(BlueprintCallable, Category = "Sub3DWaterProto|Debug",
+        meta = (DefaultToSelf = "WorldContextObject"))
+    static void DrawSliceContourDetailed(
+        UObject* WorldContextObject,
+        UBoxComponent* Volume,
+        URoomWaterBakedData* BakedData,
+        int32 SliceIndex,
+        float Duration = 30.0f,
+        bool bShowTValues = false);
+
     UFUNCTION(BlueprintCallable, Category = "Sub3DWaterProto|Debug",
         meta = (DefaultToSelf = "WorldContextObject"))
     static void MarkInjection(

@@ -199,6 +199,135 @@ void URoomWaterDebugDrawer::DrawSliceDetailed(
     }
 }
 
+void URoomWaterDebugDrawer::DrawSliceSDFGradient(
+    UObject* WorldContextObject,
+    UBoxComponent* Volume,
+    URoomWaterBakedData* BakedData,
+    int32 SliceIndex,
+    float MaxDistance,
+    float Duration,
+    bool bShowValues)
+{
+    if (!WorldContextObject || !Volume || !BakedData) { return; }
+    if (!BakedData->Slices.IsValidIndex(SliceIndex)) { return; }
+    UWorld* World = WorldContextObject->GetWorld();
+    if (!World) { return; }
+
+    const FCompartmentSlice& Slice = BakedData->Slices[SliceIndex];
+    const FTransform Xform = Volume->GetComponentTransform();
+    const FVector& Min = BakedData->LocalBoundsMin;
+    const FVector& Max = BakedData->LocalBoundsMax;
+    const float SpanX = Max.X - Min.X;
+    const int32 W = Slice.GridWidth;
+    const int32 H = Slice.GridHeight;
+    if (W <= 0 || H <= 0) { return; }
+    const float CellSize = SpanX / W;
+
+    if (Slice.SignedDistance.Num() != W * H)
+    {
+        UE_LOG(LogWaterProto, Warning,
+            TEXT("DrawSliceSDFGradient: SDF size mismatch (got %d, expected %d)"),
+            Slice.SignedDistance.Num(), W * H);
+        return;
+    }
+
+    const float ClampedMax = FMath::Max(MaxDistance, 1.0f);
+
+    float SDFMin = TNumericLimits<float>::Max();
+    float SDFMax = -TNumericLimits<float>::Max();
+    for (int32 y = 0; y < H; ++y)
+    {
+        for (int32 x = 0; x < W; ++x)
+        {
+            const int32 idx = y * W + x;
+            const float SDF = Slice.SignedDistance[idx];
+            SDFMin = FMath::Min(SDFMin, SDF);
+            SDFMax = FMath::Max(SDFMax, SDF);
+
+            const float Magnitude = FMath::Clamp(FMath::Abs(SDF) / ClampedMax, 0.f, 1.f);
+
+            // Gradient : sombre proche de la surface (50), vif loin (255). Vert si inside, rouge si outside.
+            const uint8 Intensity = static_cast<uint8>(50 + 205 * Magnitude);
+            const FColor C = (SDF < 0.f) ? FColor(0, Intensity, 0) : FColor(Intensity, 0, 0);
+
+            const FVector LocalPos(
+                Min.X + (x + 0.5f) * CellSize,
+                Min.Y + (y + 0.5f) * CellSize,
+                Slice.SliceZ_Local);
+            const FVector WorldPos = Xform.TransformPosition(LocalPos);
+
+            DrawDebugSphere(World, WorldPos, CellSize * 0.18f, 4, C, false, Duration, 0, 0.5f);
+
+            if (bShowValues)
+            {
+                DrawDebugString(World, WorldPos + FVector(0, 0, 5),
+                    FString::Printf(TEXT("%.1f"), SDF),
+                    nullptr, FColor::White, Duration, true);
+            }
+        }
+    }
+
+    // Contour bleu (toujours).
+    for (int32 i = 0; i + 1 < Slice.ContourPolygon.Num(); i += 2)
+    {
+        const FVector A_local(Slice.ContourPolygon[i].X, Slice.ContourPolygon[i].Y, Slice.SliceZ_Local);
+        const FVector B_local(Slice.ContourPolygon[i + 1].X, Slice.ContourPolygon[i + 1].Y, Slice.SliceZ_Local);
+        const FVector A = Xform.TransformPosition(A_local);
+        const FVector B = Xform.TransformPosition(B_local);
+        DrawDebugLine(World, A, B, FColor(0, 100, 255), false, Duration, 0, 2.0f);
+    }
+
+    // Label de la slice avec stats SDF.
+    const FVector LabelLoc = Xform.TransformPosition(FVector(Min.X - 30, Min.Y - 30, Slice.SliceZ_Local));
+    DrawDebugString(World, LabelLoc,
+        FString::Printf(TEXT("S%d Z=%.0f SDF[%.1f..%.1f]"),
+            SliceIndex, Slice.SliceZ_Local, SDFMin, SDFMax),
+        nullptr, FColor::White, Duration, true);
+}
+
+void URoomWaterDebugDrawer::DrawSliceContourDetailed(
+    UObject* WorldContextObject,
+    UBoxComponent* Volume,
+    URoomWaterBakedData* BakedData,
+    int32 SliceIndex,
+    float Duration,
+    bool bShowTValues)
+{
+    if (!WorldContextObject || !Volume || !BakedData) { return; }
+    if (!BakedData->Slices.IsValidIndex(SliceIndex)) { return; }
+    UWorld* World = WorldContextObject->GetWorld();
+    if (!World) { return; }
+
+    const FCompartmentSlice& Slice = BakedData->Slices[SliceIndex];
+    const FTransform Xform = Volume->GetComponentTransform();
+
+    // Sphères jaunes sur chaque point du contour.
+    for (int32 i = 0; i < Slice.ContourPolygon.Num(); ++i)
+    {
+        const FVector P_local(Slice.ContourPolygon[i].X, Slice.ContourPolygon[i].Y, Slice.SliceZ_Local);
+        const FVector P = Xform.TransformPosition(P_local);
+        DrawDebugSphere(World, P, 3.0f, 8, FColor::Yellow, false, Duration, 0, 1.0f);
+
+        if (bShowTValues)
+        {
+            DrawDebugString(World, P + FVector(0, 0, 8),
+                FString::Printf(TEXT("[%d] (%.1f, %.1f)"),
+                    i, Slice.ContourPolygon[i].X, Slice.ContourPolygon[i].Y),
+                nullptr, FColor::Yellow, Duration, true);
+        }
+    }
+
+    // Lignes bleues épaisses entre chaque paire (segments MS).
+    for (int32 i = 0; i + 1 < Slice.ContourPolygon.Num(); i += 2)
+    {
+        const FVector A_local(Slice.ContourPolygon[i].X, Slice.ContourPolygon[i].Y, Slice.SliceZ_Local);
+        const FVector B_local(Slice.ContourPolygon[i + 1].X, Slice.ContourPolygon[i + 1].Y, Slice.SliceZ_Local);
+        const FVector A = Xform.TransformPosition(A_local);
+        const FVector B = Xform.TransformPosition(B_local);
+        DrawDebugLine(World, A, B, FColor(0, 100, 255), false, Duration, 0, 3.0f);
+    }
+}
+
 void URoomWaterDebugDrawer::MarkInjection(
     UObject* WorldContextObject,
     FVector WorldLocation,
