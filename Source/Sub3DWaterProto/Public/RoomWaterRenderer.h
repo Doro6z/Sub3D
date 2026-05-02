@@ -97,6 +97,19 @@ public:
     UFUNCTION(BlueprintCallable, Category = "Water Proto")
     void InjectAt(FVector2D LocalPosXY, float Force, float Radius = 50.0f);
 
+    /**
+     * Helper BP-friendly : convertit un point world en local du compartiment et appelle InjectAt.
+     * Exemple typique : raycast caméra→clic souris → FHitResult.ImpactPoint → cet appel.
+     * Évite de coder la conversion world→local dans le BP (qui passerait par le component
+     * transform du renderer).
+     *
+     * Retourne true si l'injection a été appliquée. False si le point est hors du compartiment
+     * (XY hors LocalBoundsMin/Max), pour éviter de polluer le heightfield avec des injections
+     * outside.
+     */
+    UFUNCTION(BlueprintCallable, Category = "Water Proto")
+    bool InjectAtWorldPoint(FVector WorldPos, float Force, float Radius = 50.0f);
+
     UFUNCTION(BlueprintCallable, Category = "Water Proto")
     void ResetHeightfield();
 

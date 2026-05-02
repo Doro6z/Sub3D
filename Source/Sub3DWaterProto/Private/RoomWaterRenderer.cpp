@@ -575,6 +575,32 @@ void URoomWaterRenderer::InjectAt(FVector2D LocalPosXY, float Force, float Radiu
     }
 }
 
+bool URoomWaterRenderer::InjectAtWorldPoint(FVector WorldPos, float Force, float Radius)
+{
+    if (!BakedData)
+    {
+        return false;
+    }
+
+    // Conversion world → local du compartiment via la transform du component (le renderer
+    // est attaché à CompartmentVolume → sa transform = celle du Box). Cohérent avec ce que
+    // fait UDoorWaterBridge::OnDoorStateChanged.
+    const FVector LocalPos3D = GetComponentTransform().InverseTransformPosition(WorldPos);
+
+    // Filtre out-of-bounds : évite de polluer le heightfield avec un click hors du compartiment.
+    // Tolérance Radius pour permettre les clicks proches du bord.
+    const FVector& Min = BakedData->LocalBoundsMin;
+    const FVector& Max = BakedData->LocalBoundsMax;
+    if (LocalPos3D.X < Min.X - Radius || LocalPos3D.X > Max.X + Radius ||
+        LocalPos3D.Y < Min.Y - Radius || LocalPos3D.Y > Max.Y + Radius)
+    {
+        return false;
+    }
+
+    InjectAt(FVector2D(LocalPos3D.X, LocalPos3D.Y), Force, Radius);
+    return true;
+}
+
 void URoomWaterRenderer::ResetHeightfield()
 {
     FMemory::Memzero(Heights.GetData(), Heights.Num() * sizeof(float));

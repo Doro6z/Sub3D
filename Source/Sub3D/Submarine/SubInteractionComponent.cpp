@@ -64,6 +64,51 @@ bool USubInteractionComponent::PerformRepairTrace()
 	return ResolvePrimaryInteractTarget() != nullptr;
 }
 
+bool USubInteractionComponent::TraceFromView(FHitResult& OutHit) const
+{
+	AActor* Owner = GetOwner();
+	UWorld* World = Owner ? Owner->GetWorld() : nullptr;
+	if (!Owner || !World)
+	{
+		return false;
+	}
+
+	FVector Start = FVector::ZeroVector;
+	FVector End = FVector::ZeroVector;
+
+	// Path 1 : ASubCrewCharacter — caméra crew + InteractDistance (compat avec le repair trace).
+	if (const ASubCrewCharacter* Crew = Cast<ASubCrewCharacter>(Owner))
+	{
+		UCameraComponent* Cam = Crew->GetActiveViewCamera();
+		if (!Cam)
+		{
+			return false;
+		}
+		Start = Cam->GetComponentLocation();
+		End = Start + Cam->GetForwardVector() * Crew->InteractDistance;
+	}
+	// Path 2 : APawn générique — premier UCameraComponent trouvé + DefaultTraceDistance.
+	else if (const APawn* Pawn = Cast<APawn>(Owner))
+	{
+		UCameraComponent* Cam = Pawn->FindComponentByClass<UCameraComponent>();
+		if (!Cam)
+		{
+			return false;
+		}
+		Start = Cam->GetComponentLocation();
+		End = Start + Cam->GetForwardVector() * DefaultTraceDistance;
+	}
+	else
+	{
+		return false;
+	}
+
+	FCollisionQueryParams Params(SCENE_QUERY_STAT(SubInteractionTraceFromView), false);
+	Params.AddIgnoredActor(Owner);
+
+	return World->LineTraceSingleByChannel(OutHit, Start, End, ECC_Visibility, Params);
+}
+
 bool USubInteractionComponent::TryRepairFocusedTarget(float RepairStrength, float RadiusCm)
 {
 	FVector Start = FVector::ZeroVector;
