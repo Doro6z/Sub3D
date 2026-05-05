@@ -1557,10 +1557,11 @@ void ASubmarineBase::EnsureCompartmentVolumesFromDefinition()
 			continue;
 		}
 
+		// Constructor defaults already configure: CompartmentProbe collision profile,
+		// GenerateOverlapEvents=true, ECC_CompartmentProbe channel (crew overlap detection).
+		// DO NOT override those — crew embark detection depends on them.
 		NewVol->CompartmentId = Comp.CompartmentId;
 		NewVol->SetBoxExtent(HalfExtent, false);
-		NewVol->SetCollisionEnabled(ECollisionEnabled::NoCollision);
-		NewVol->SetGenerateOverlapEvents(false);
 		NewVol->SetMobility(EComponentMobility::Movable);
 		NewVol->SetupAttachment(SubmarineRoot);
 		NewVol->RegisterComponent();
