@@ -46,9 +46,19 @@ ASSET_PATH = f"{ASSET_FOLDER}/{ASSET_NAME}"
 # submarine local space centered on the origin. Set to False if the BP keeps X=0 at bow.
 CENTER_ORIGIN = True
 
-# Half-width and per-deck height used for FP-quality HydroBounds. Refine later.
-FP_HALF_BEAM_CM = 200.0
-FP_DECK_HEIGHT_CM = 200.0
+# Bounds Z margin (cm) added on each side of floor/ceiling to ensure voxelisation
+# captures the geometry on the boundary. ±5 cm is enough.
+BOUNDS_Z_MARGIN_CM = 5.0
+
+# Bounds Y margin (cm) added on each side of the hull profile half-beam to ensure
+# voxelisation captures the hull walls.
+BOUNDS_Y_MARGIN_CM = 5.0
+
+# Fallback half-beam when the JSON has no hull profile data covering a compartment.
+FALLBACK_HALF_BEAM_CM = 200.0
+
+# Fallback deck height when the JSON has no decks/profile data to compute ceiling.
+FALLBACK_CEIL_HEIGHT_CM = 200.0
 
 
 # ---------------------------------------------------------------------------
@@ -163,22 +173,91 @@ def verify_source_hashes(data: dict) -> None:
 
 
 # ---------------------------------------------------------------------------
+# Bounds derivation helpers
+# ---------------------------------------------------------------------------
+
+def compute_compartment_ceiling_z(compartment: dict, decks: list, deck_thick_cm: float, hull_top_z: float) -> float:
+    """
+    Ceiling Z for a compartment = floor of the next deck above minus deck thickness.
+    Falls back to hull top when no deck is above (top deck).
+
+    Conservative approach: if a deck above exists in the X range, clip there even if
+    parts of the compartment extend higher (areas outside that deck's X range will be
+    cropped — accepted FP compromise to keep AABB clean and avoid leaking into the
+    deck above's space).
+    """
+    floor_z = float(compartment["deck_z_cm"])
+    decks_above = [d for d in decks if float(d.get("z", -1e9)) > floor_z]
+    if not decks_above:
+        return hull_top_z if hull_top_z is not None else floor_z + FALLBACK_CEIL_HEIGHT_CM
+    next_deck = min(decks_above, key=lambda d: float(d["z"]))
+    return float(next_deck["z"]) - deck_thick_cm
+
+
+def compute_compartment_y_halfbeam(compartment: dict, hull_profile_samples: list, total_length_cm: float) -> float:
+    """
+    Half-beam (max |Y|) for a compartment, derived from hull profile samples whose x_norm
+    falls within the compartment's X range. Profile points are [Y, Z] pairs forming the
+    silhouette of a hull cross-section.
+    """
+    if total_length_cm <= 0.0 or not hull_profile_samples:
+        return FALLBACK_HALF_BEAM_CM
+    x_norm_min = float(compartment["min_x_cm"]) / total_length_cm
+    x_norm_max = float(compartment["max_x_cm"]) / total_length_cm
+    max_abs_y = 0.0
+    for sample in hull_profile_samples:
+        x_norm = float(sample.get("x_norm", -1.0))
+        if x_norm < x_norm_min or x_norm > x_norm_max:
+            continue
+        for pt in sample.get("profile", []):
+            if isinstance(pt, (list, tuple)) and len(pt) >= 1:
+                y = abs(float(pt[0]))
+                if y > max_abs_y:
+                    max_abs_y = y
+    return max_abs_y if max_abs_y > 0.0 else FALLBACK_HALF_BEAM_CM
+
+
+def compute_hull_top_z(hull_profile_samples: list) -> float:
+    """Highest Z value across all hull profile samples — used as fallback ceiling for top decks."""
+    max_z = -1e9
+    for sample in hull_profile_samples or []:
+        for pt in sample.get("profile", []):
+            if isinstance(pt, (list, tuple)) and len(pt) >= 2:
+                z = float(pt[1])
+                if z > max_z:
+                    max_z = z
+    return max_z if max_z > -1e9 else None
+
+
+# ---------------------------------------------------------------------------
 # Struct builders
 # ---------------------------------------------------------------------------
 
-def build_compartment(c: dict, length_cm: float) -> "unreal.GeneratedCompartmentDef":
+def build_compartment(c: dict, length_cm: float, decks: list, hull_profile_samples: list, deck_thick_cm: float, hull_top_z: float) -> "unreal.GeneratedCompartmentDef":
     out = unreal.GeneratedCompartmentDef()
 
     min_x = offset_x(c["min_x_cm"], length_cm)
     max_x = offset_x(c["max_x_cm"], length_cm)
-    floor_z = c["deck_z_cm"]
-    ceil_z = floor_z + FP_DECK_HEIGHT_CM
+    floor_z = float(c["deck_z_cm"])
 
-    bounds_min = unreal.Vector(min_x, -FP_HALF_BEAM_CM, floor_z)
-    bounds_max = unreal.Vector(max_x, FP_HALF_BEAM_CM, ceil_z)
+    # Ceiling: clipped to next deck floor minus deck thickness, fallback hull top.
+    ceil_z = compute_compartment_ceiling_z(c, decks, deck_thick_cm, hull_top_z)
+    if ceil_z <= floor_z:
+        log_warn(f"  compartment {c['id']}: computed ceiling_z ({ceil_z}) <= floor_z ({floor_z}) — using fallback")
+        ceil_z = floor_z + FALLBACK_CEIL_HEIGHT_CM
+
+    # Y half-beam: derived from hull profile samples in this compartment's X range.
+    half_beam = compute_compartment_y_halfbeam(c, hull_profile_samples, length_cm)
+
+    # AABB with small Z/Y margin so SDF voxelisation captures floor/ceiling/walls geometry.
+    bounds_min = unreal.Vector(min_x, -(half_beam + BOUNDS_Y_MARGIN_CM), floor_z - BOUNDS_Z_MARGIN_CM)
+    bounds_max = unreal.Vector(max_x, +(half_beam + BOUNDS_Y_MARGIN_CM), ceil_z + BOUNDS_Z_MARGIN_CM)
 
     length_along_x = max_x - min_x
-    capacity_liters = (length_along_x * (2.0 * FP_HALF_BEAM_CM) * FP_DECK_HEIGHT_CM) / 1000.0
+    height_cm = ceil_z - floor_z
+    capacity_liters = (length_along_x * (2.0 * half_beam) * height_cm) / 1000.0
+
+    log_info(f"  {c['id']}: bounds=[{min_x:.0f}..{max_x:.0f}, ±{half_beam:.0f}, {floor_z:.0f}..{ceil_z:.0f}] cap={capacity_liters:.0f}L")
 
     out.set_editor_property("compartment_id", unreal.Name(c["id"]))
     out.set_editor_property("display_name", unreal.Text(c["semantic"]))
@@ -186,7 +265,9 @@ def build_compartment(c: dict, length_cm: float) -> "unreal.GeneratedCompartment
     out.set_editor_property("capacity_liters", capacity_liters)
     out.set_editor_property("hydro_bounds_min", bounds_min)
     out.set_editor_property("hydro_bounds_max", bounds_max)
-    out.set_editor_property("max_water_height_cm", FP_DECK_HEIGHT_CM)
+    # Water cap is the full floor-to-ceiling height (compartment can fill completely).
+    # Restrict later if a different design (partial fill) is wanted per compartment.
+    out.set_editor_property("max_water_height_cm", height_cm)
     out.set_editor_property("walkable_floor_z_cm", floor_z)
     return out
 
@@ -233,17 +314,21 @@ def build_connection(n: dict, length_cm: float) -> "unreal.GeneratedConnectionDe
     return out
 
 
-def build_flood_graph(compartments: list, connections: list) -> "unreal.CompiledFloodGraph":
+def build_flood_graph(compartments: list, connections: list, total_length_cm: float, decks: list, hull_profile_samples: list, deck_thick_cm: float, hull_top_z: float) -> "unreal.CompiledFloodGraph":
     graph = unreal.CompiledFloodGraph()
 
     volumes = []
     for c in compartments:
         volume = unreal.DerivedFloodVolume()
         volume.set_editor_property("volume_id", unreal.Name(c["id"]))
-        volume.set_editor_property(
-            "capacity_liters",
-            float(c["length_cm"]) * (2.0 * FP_HALF_BEAM_CM) * FP_DECK_HEIGHT_CM / 1000.0,
-        )
+        # Derive capacity from same hull-profile geometry used in build_compartment.
+        floor_z = float(c["deck_z_cm"])
+        ceil_z = compute_compartment_ceiling_z(c, decks, deck_thick_cm, hull_top_z)
+        if ceil_z <= floor_z:
+            ceil_z = floor_z + FALLBACK_CEIL_HEIGHT_CM
+        half_beam = compute_compartment_y_halfbeam(c, hull_profile_samples, total_length_cm)
+        capacity_liters = float(c["length_cm"]) * (2.0 * half_beam) * (ceil_z - floor_z) / 1000.0
+        volume.set_editor_property("capacity_liters", capacity_liters)
         volumes.append(volume)
 
     edges = []
@@ -293,21 +378,40 @@ def main() -> None:
 
     meta = data["meta"]
     length_cm = float(meta["length_cm"])
+    deck_thick_cm = float(meta.get("deck_thick_cm", 18.0))
+    decks = data.get("decks", []) or []
+    hull_data = data.get("hull", {}) or {}
+    hull_profile_samples = hull_data.get("profile_samples", []) or []
+    hull_top_z = compute_hull_top_z(hull_profile_samples)
+
+    # Derive overall hull beam/height from profile data instead of magic constants.
+    overall_max_abs_y = 0.0
+    overall_min_z = 1e9
+    overall_max_z = -1e9
+    for sample in hull_profile_samples:
+        for pt in sample.get("profile", []):
+            if isinstance(pt, (list, tuple)) and len(pt) >= 2:
+                overall_max_abs_y = max(overall_max_abs_y, abs(float(pt[0])))
+                overall_min_z = min(overall_min_z, float(pt[1]))
+                overall_max_z = max(overall_max_z, float(pt[1]))
+    hull_beam_cm = (2.0 * overall_max_abs_y) if overall_max_abs_y > 0.0 else 2.0 * FALLBACK_HALF_BEAM_CM
+    hull_height_cm = (overall_max_z - overall_min_z) if overall_max_z > overall_min_z else 3.0 * FALLBACK_CEIL_HEIGHT_CM
 
     asset = load_or_create_definition()
 
     asset.set_editor_property("hull_length_cm", length_cm)
-    asset.set_editor_property("hull_beam_cm", 2.0 * FP_HALF_BEAM_CM)
-    asset.set_editor_property("hull_height_cm", 3.0 * FP_DECK_HEIGHT_CM)
+    asset.set_editor_property("hull_beam_cm", hull_beam_cm)
+    asset.set_editor_property("hull_height_cm", hull_height_cm)
     asset.set_editor_property("wall_thickness_cm", float(meta.get("hull_thick_cm", 15.0)))
 
-    compartments = [build_compartment(c, length_cm) for c in data["compartments"]]
+    log_info(f"deriving compartment bounds from hull profile (samples={len(hull_profile_samples)}, decks={len(decks)}, hull_top_z={hull_top_z}):")
+    compartments = [build_compartment(c, length_cm, decks, hull_profile_samples, deck_thick_cm, hull_top_z) for c in data["compartments"]]
     asset.set_editor_property("compartments", compartments)
 
     connections = [build_connection(n, length_cm) for n in data["connections"]]
     asset.set_editor_property("connections", connections)
 
-    flood_graph = build_flood_graph(data["compartments"], data["connections"])
+    flood_graph = build_flood_graph(data["compartments"], data["connections"], length_cm, decks, hull_profile_samples, deck_thick_cm, hull_top_z)
     asset.set_editor_property("flood_graph", flood_graph)
 
     asset.set_editor_property("station_slots", [])

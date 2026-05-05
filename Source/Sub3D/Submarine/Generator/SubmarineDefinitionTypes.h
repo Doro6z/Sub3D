@@ -77,15 +77,39 @@ struct FGeneratedCompartmentDef
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Compartment")
 	float CapacityLiters = 0.f;
 
-	/** Hydrostatic bounding box min (submarine local space). */
+	/**
+	 * Compartment bounding box, submarine-local space. CONTRACT:
+	 *   - Must FULLY ENCLOSE the compartment's interior geometry: hull walls,
+	 *     bulkheads, ceiling, floor, props.
+	 *   - Must STOP at structural boundaries: doors, bulkheads to neighbouring
+	 *     compartments, decks above/below. The volume must NOT extend into
+	 *     adjacent compartments (the bake's SDF + Marching Squares would then
+	 *     pick up neighbour walls as if they were boundaries of THIS compartment).
+	 *   - X/Y: clip exactly at door/bulkhead planes shared with adjacent compartments.
+	 *   - Z:   clip exactly at the deck above/below (with a small margin like ±5 cm
+	 *          to ensure floor/ceiling geometry is captured by voxelisation).
+	 *
+	 * This bounds drives:
+	 *   1. Auto-spawn of UCompartmentVolumeComponent (crew overlap detection,
+	 *      water plane sizing) — see ASubmarineBase::EnsureCompartmentVolumesFromDefinition.
+	 *   2. Phase 2 offline bake voxelisation volume (cap mesh generation).
+	 *
+	 * Common authoring mistake: setting Z range to [WalkableFloorZCm,
+	 * WalkableFloorZCm + MaxWaterHeightCm]. That captures water-volume only,
+	 * which is INSUFFICIENT — the volume must include the walkable headroom
+	 * above the water cap up to the ceiling.
+	 */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Compartment")
 	FVector HydroBoundsMin = FVector::ZeroVector;
 
-	/** Hydrostatic bounding box max (submarine local space). */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Compartment")
 	FVector HydroBoundsMax = FVector::ZeroVector;
 
-	/** Maximum water height in cm (floor to ceiling of the floodable volume). */
+	/**
+	 * Maximum water height in cm, measured from WalkableFloorZCm.
+	 * This is the WATER cap, may be less than the compartment's full Z extent
+	 * (HydroBoundsMax.Z - WalkableFloorZCm). Floor-to-ceiling can be > MaxWaterHeightCm.
+	 */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Compartment")
 	float MaxWaterHeightCm = 0.f;
 

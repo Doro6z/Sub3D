@@ -1543,6 +1543,20 @@ void ASubmarineBase::EnsureCompartmentVolumesFromDefinition()
 			continue;
 		}
 
+		// Sanity check: HydroBounds Z extent must include walkable headroom above water cap.
+		// If Z extent ≤ MaxWaterHeightCm, the bounds were authored as water-volume only —
+		// auto-spawned volume will be too tight, crew detection at ceiling level may miss,
+		// and Phase 2 bake will cut the cap mesh below the actual ceiling.
+		const float ZExtent = Max.Z - Min.Z;
+		if (Comp.MaxWaterHeightCm > 0.f && ZExtent <= Comp.MaxWaterHeightCm + 1.f)
+		{
+			UE_LOG(LogTemp, Warning,
+				TEXT("EnsureCompartmentVolumesFromDefinition: %s HydroBounds Z extent (%.1f cm) <= MaxWaterHeightCm (%.1f cm). ")
+				TEXT("Bounds likely authored as water-volume only — must include full floor-to-ceiling interior. ")
+				TEXT("Update DA values (HydroBoundsMin/Max) to enclose the entire compartment with door/deck cutoffs."),
+				*Comp.CompartmentId.ToString(), ZExtent, Comp.MaxWaterHeightCm);
+		}
+
 		const FVector Center = (Min + Max) * 0.5f;
 		const FVector HalfExtent = (Max - Min) * 0.5f;
 
