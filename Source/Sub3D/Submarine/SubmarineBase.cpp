@@ -5,7 +5,6 @@
 #include "CompartmentVolumeComponent.h"
 #include "FloodWaterPlaneComponent.h"
 #include "DoorFloodVfxComponent.h"
-#include "FloodWaterVisualsComponent.h"
 #include "GeneratedGeometry/SubmarineGeneratedGeometryComponent.h"
 #include "ProceduralMeshComponent.h"
 #include "Generator/SubmarineDefinition.h"
@@ -214,7 +213,6 @@ ASubmarineBase::ASubmarineBase()
 	StationManager = CreateDefaultSubobject<USubmarineStationManagerComponent>(TEXT("StationManager"));
 	Radar = CreateDefaultSubobject<USubmarineRadarComponent>(TEXT("Radar"));
 	BreachVfxManager = CreateDefaultSubobject<UBreachVfxManagerComponent>(TEXT("BreachVfxManager"));
-	FloodWaterVisuals = CreateDefaultSubobject<UFloodWaterVisualsComponent>(TEXT("FloodWaterVisuals"));
 	HullVisualDamage = CreateDefaultSubobject<USubHullVisualDamageComponent>(TEXT("HullVisualDamage"));
 	DoorFloodVfx = CreateDefaultSubobject<UDoorFloodVfxComponent>(TEXT("DoorFloodVfx"));
 	FeedbackManager = CreateDefaultSubobject<USubmarineFeedbackDirectorComponent>(TEXT("FeedbackManager"));
@@ -294,22 +292,27 @@ void ASubmarineBase::BeginPlay()
 
 		if (SubFlood)
 		{
-			// Priority order:
-			//  1) Manually-placed UCompartmentVolumeComponents (Craniata BP workflow) —
-			//     they're authoritative for compartment spatial identity, crew overlap
-			//     uses their CompartmentId. Flood graph must match.
-			//  2) GeneratedDefinition (procedural generator path).
-			//  3) LayoutAsset (Proto 7A legacy).
+			// [Phase 1 P1.3] Priority order INVERTED — DA is now source of truth (fundamental #8).
+			//  1) GeneratedDefinition (DA — production path; Craniata authored DA, future subs).
+			//  2) Manually-placed UCompartmentVolumeComponents (BP fallback if DA absent;
+			//     also keeps backward compat with Craniata BP-placed volumes during transition).
+			//  3) LayoutAsset (Phase 7A legacy — kept until all subs have a DA).
 			TArray<UCompartmentVolumeComponent*> Volumes;
 			GetComponents<UCompartmentVolumeComponent>(Volumes);
 
-			if (Volumes.Num() > 0)
-			{
-				SubFlood->InitializeFromCompartmentVolumes(Volumes);
-			}
-			else if (GeneratedDefinition)
+			if (GeneratedDefinition)
 			{
 				SubFlood->InitializeFromDefinition(GeneratedDefinition);
+			}
+			else if (Volumes.Num() > 0)
+			{
+				UE_LOG(
+					LogSubLegacy,
+					Warning,
+					TEXT("ASubmarineBase::BeginPlay: SubFlood initialized from BP-placed volumes on %s — ")
+					TEXT("no GeneratedDefinition. Convert to DA path (USubmarineDefinition) post-FP."),
+					*GetName());
+				SubFlood->InitializeFromCompartmentVolumes(Volumes);
 			}
 			else if (SubHull && SubHull->LayoutAsset)
 			{
@@ -326,7 +329,7 @@ void ASubmarineBase::BeginPlay()
 				UE_LOG(
 					LogSubLegacy,
 					Warning,
-					TEXT("ASubmarineBase::BeginPlay: SubFlood not initialized on %s — no volumes, Definition, or LayoutAsset."),
+					TEXT("ASubmarineBase::BeginPlay: SubFlood not initialized on %s — no Definition, volumes, or LayoutAsset."),
 					*GetName());
 			}
 		}
@@ -337,6 +340,15 @@ void ASubmarineBase::BeginPlay()
 		}
 	}
 
+	// [Phase 1 P1.4] Auto-spawn missing UCompartmentVolumeComponents from the DA.
+	// Runs on ALL net roles (server + clients), idempotent against BP-placed volumes.
+	// Ensures Step 6 (water plane spawning) finds a volume per compartment whether
+	// the BP authored them or not.
+	if (GeneratedDefinition)
+	{
+		EnsureCompartmentVolumesFromDefinition();
+	}
+
 	// ── Flood Visuals: spawn one UFloodWaterPlaneComponent per compartment volume ─
 	// Runs on ALL net roles so each client renders water locally without needing
 	// replication of plane transforms. The material (DefaultWaterMaterial) carries
@@ -344,7 +356,7 @@ void ASubmarineBase::BeginPlay()
 	// passive C++ (updates Z + visibility from its SourceVolume).
 	//
 	// This block is OUTSIDE the HasAuthority() branch on purpose — clients have
-	// the same UCompartmentVolumeComponents placed in the BP as the server.
+	// the same UCompartmentVolumeComponents (BP-placed or auto-spawned above).
 	{
 		const USub3DDebugSettings* DebugSettingsRef = GetDefault<USub3DDebugSettings>();
 		if (!(DebugSettingsRef && DebugSettingsRef->bDisableFloodWaterPlanes))
@@ -1488,5 +1500,79 @@ void ASubmarineBase::HandleBreachesUpdatedForFlood(const TArray<FBreachClusterSt
 		{
 			SubFlood->RemoveBreach(Existing.CompartmentId);
 		}
+	}
+}
+
+void ASubmarineBase::EnsureCompartmentVolumesFromDefinition()
+{
+	if (!GeneratedDefinition)
+	{
+		return;
+	}
+
+	// Index BP-placed (and previously auto-spawned) volumes by CompartmentId.
+	TArray<UCompartmentVolumeComponent*> ExistingVolumes;
+	GetComponents<UCompartmentVolumeComponent>(ExistingVolumes);
+
+	TSet<FName> CoveredCompartments;
+	CoveredCompartments.Reserve(ExistingVolumes.Num());
+	for (const UCompartmentVolumeComponent* Vol : ExistingVolumes)
+	{
+		if (Vol && !Vol->CompartmentId.IsNone())
+		{
+			CoveredCompartments.Add(Vol->CompartmentId);
+		}
+	}
+
+	int32 NumSpawned = 0;
+	for (const FGeneratedCompartmentDef& Comp : GeneratedDefinition->Compartments)
+	{
+		if (Comp.CompartmentId.IsNone() || CoveredCompartments.Contains(Comp.CompartmentId))
+		{
+			// BP-authored wins (or already auto-spawned).
+			continue;
+		}
+
+		const FVector Min = Comp.HydroBoundsMin;
+		const FVector Max = Comp.HydroBoundsMax;
+		if (Max.X <= Min.X || Max.Y <= Min.Y || Max.Z <= Min.Z)
+		{
+			UE_LOG(LogTemp, Warning,
+				TEXT("EnsureCompartmentVolumesFromDefinition: invalid HydroBounds for %s (Min=%s Max=%s) — skipping auto-spawn"),
+				*Comp.CompartmentId.ToString(), *Min.ToString(), *Max.ToString());
+			continue;
+		}
+
+		const FVector Center = (Min + Max) * 0.5f;
+		const FVector HalfExtent = (Max - Min) * 0.5f;
+
+		// NewObject + RegisterComponent pattern (cohérent avec UFloodWaterPlaneComponent spawn).
+		const FName ComponentName(*FString::Printf(TEXT("AutoCV_%s"), *Comp.CompartmentId.ToString()));
+		UCompartmentVolumeComponent* NewVol = NewObject<UCompartmentVolumeComponent>(this, ComponentName);
+		if (!NewVol)
+		{
+			UE_LOG(LogTemp, Warning,
+				TEXT("EnsureCompartmentVolumesFromDefinition: NewObject failed for %s"),
+				*Comp.CompartmentId.ToString());
+			continue;
+		}
+
+		NewVol->CompartmentId = Comp.CompartmentId;
+		NewVol->SetBoxExtent(HalfExtent, false);
+		NewVol->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+		NewVol->SetGenerateOverlapEvents(false);
+		NewVol->SetMobility(EComponentMobility::Movable);
+		NewVol->SetupAttachment(SubmarineRoot);
+		NewVol->RegisterComponent();
+		NewVol->SetRelativeLocation(Center);
+
+		++NumSpawned;
+	}
+
+	if (NumSpawned > 0)
+	{
+		UE_LOG(LogTemp, Display,
+			TEXT("EnsureCompartmentVolumesFromDefinition: auto-spawned %d UCompartmentVolumeComponent(s) on %s"),
+			NumSpawned, *GetName());
 	}
 }

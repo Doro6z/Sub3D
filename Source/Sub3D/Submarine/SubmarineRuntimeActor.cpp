@@ -115,7 +115,6 @@ ASubmarineRuntimeActor::ASubmarineRuntimeActor()
     BreachRuntimeComponent = CreateDefaultSubobject<USubmarineBreachRuntimeComponent>(TEXT("BreachRuntimeComponent"));
     FloodRuntimeComponent = CreateDefaultSubobject<USubmarineFloodRuntimeComponent>(TEXT("FloodRuntimeComponent"));
     DoorRuntimeComponent = CreateDefaultSubobject<USubmarineDoorRuntimeComponent>(TEXT("DoorRuntimeComponent"));
-    WaterVisualsComponent = CreateDefaultSubobject<UFloodWaterVisualsComponent>(TEXT("WaterVisualsComponent"));
 }
 
 void ASubmarineRuntimeActor::DebugTriggerBreach(FVector WorldLocation, float Damage, float Radius)
@@ -329,10 +328,9 @@ bool ASubmarineRuntimeActor::InitializeRuntimeSystems()
     FloodRuntimeComponent->InitializeFromFloodGraph(RuntimeAsset->FloodGraph);
     DoorRuntimeComponent->InitializeFromClosures(RuntimeAsset->CompiledClosures);
 
-    if (WaterVisualsComponent)
-    {
-        WaterVisualsComponent->RefreshFromCurrentFloodState();
-    }
+    // [Phase 1 cleanup] WaterVisualsComponent (UFloodWaterVisualsComponent) removed —
+    // legacy duplicate of UFloodWaterPlaneComponent. Per-compartment water rendering is
+    // now spawned in ASubmarineBase::BeginPlay step 6 from CompartmentVolumeComponents.
 
     return true;
 }

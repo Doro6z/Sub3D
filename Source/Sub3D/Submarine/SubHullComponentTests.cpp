@@ -4,7 +4,6 @@
 
 #include "BreachVfxManagerComponent.h"
 #include "Engine/DamageEvents.h"
-#include "FloodWaterVisualsComponent.h"
 #include "SubCompiler/SubCompilerMvpFactory.h"
 #include "SubCompiler/SubmarineCompilerActor.h"
 #include "SubHullAutomationTestProbe.h"
@@ -313,26 +312,10 @@ bool FSubHullBreachVfxDesiredCountTest::RunTest(const FString& Parameters)
 	return true;
 }
 
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(
-	FSubHullFloodWaterSurfaceZTest,
-	"Sub3D.Submarine.Hull.FloodVisuals.SurfaceZMatchesBounds",
-	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
-
-bool FSubHullFloodWaterSurfaceZTest::RunTest(const FString& Parameters)
-{
-	UFloodWaterVisualsComponent* FloodWaterVisuals = NewObject<UFloodWaterVisualsComponent>();
-	TestNotNull(TEXT("Flood water visuals component should exist"), FloodWaterVisuals);
-
-	if (!FloodWaterVisuals)
-	{
-		return false;
-	}
-
-	const FBox LocalBounds(FVector(-100.f, -50.f, -25.f), FVector(100.f, 50.f, 75.f));
-	TestEqual(TEXT("Water level 0 should map to bounds min Z"), FloodWaterVisuals->ComputeSurfaceLocalZ(LocalBounds, 0.f), -25.f);
-	TestEqual(TEXT("Water level 0.5 should map to the middle of the bounds"), FloodWaterVisuals->ComputeSurfaceLocalZ(LocalBounds, 0.5f), 25.f);
-	TestEqual(TEXT("Water level 1 should map to bounds max Z"), FloodWaterVisuals->ComputeSurfaceLocalZ(LocalBounds, 1.f), 75.f);
-	return true;
-}
+// [Phase 1 cleanup] FSubHullFloodWaterSurfaceZTest removed: tested
+// UFloodWaterVisualsComponent::ComputeSurfaceLocalZ which was a trivial
+// lerp between bounds Z. Component deleted (legacy duplicate of
+// UFloodWaterPlaneComponent). Equivalent surface-Z computation now lives
+// in UCompartmentVolumeComponent::GetWaterSurfaceWorldLocation().
 
 #endif

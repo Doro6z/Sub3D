@@ -19,7 +19,6 @@ class USubmarineRadarComponent;
 class UBreachVfxManagerComponent;
 class UCompartmentVolumeComponent;
 class UDoorFloodVfxComponent;
-class UFloodWaterVisualsComponent;
 class USubHullVisualDamageComponent;
 class USubmarineLayoutAsset;
 class USubmarineFeedbackDirectorComponent;
@@ -84,9 +83,6 @@ public:
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
 	UBreachVfxManagerComponent* BreachVfxManager;
-
-	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
-	UFloodWaterVisualsComponent* FloodWaterVisuals;
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
 	USubHullVisualDamageComponent* HullVisualDamage;
@@ -350,6 +346,17 @@ private:
 
 	/** Destroy any doors previously spawned by SpawnDoorsFromDefinition. */
 	void DestroySpawnedGeneratorDoors();
+
+	/**
+	 * For each compartment in GeneratedDefinition, ensure a UCompartmentVolumeComponent exists
+	 * with matching CompartmentId. If a BP-placed volume already covers the id, leave it alone
+	 * (BP-authored wins). Otherwise spawn a runtime UCompartmentVolumeComponent with bounds
+	 * derived from HydroBoundsMin/Max. Idempotent: safe to call multiple times.
+	 *
+	 * Called in BeginPlay after InitializeFromDefinition succeeds. Drives the per-compartment
+	 * water plane spawning (Step 6 of BeginPlay) without requiring manual BP placement.
+	 */
+	void EnsureCompartmentVolumesFromDefinition();
 
 	UPROPERTY(Transient)
 	TWeakObjectPtr<UPrimitiveComponent> BoundMovementCollisionComponent;

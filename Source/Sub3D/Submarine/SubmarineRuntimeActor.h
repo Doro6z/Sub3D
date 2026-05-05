@@ -6,7 +6,6 @@
 #include "Components/SubmarineDoorRuntimeComponent.h"
 #include "Components/SubmarineFloodRuntimeComponent.h"
 #include "SubHullComponent.h"
-#include "FloodWaterVisualsComponent.h"
 #include "Data/CompiledSubmarineRuntimeAsset.h"
 #include "SubmarineRuntimeActor.generated.h"
 
@@ -33,9 +32,6 @@ public:
 
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Submarine")
     TObjectPtr<USubmarineDoorRuntimeComponent> DoorRuntimeComponent;
-
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Submarine")
-    TObjectPtr<UFloodWaterVisualsComponent> WaterVisualsComponent;
 
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Submarine")
     TArray<TObjectPtr<UProceduralMeshComponent>> RenderMeshComponents;

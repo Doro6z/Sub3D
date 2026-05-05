@@ -135,7 +135,7 @@ void UFloodWaterPlaneComponent::EnsurePlaneMesh()
 		UE_LOG(
 			LogFloodWaterPlane,
 			Warning,
-			TEXT("Flood water plane on %s (compartment=%s) has no WaterMaterial. Assign ASubmarineBase.DefaultWaterMaterial on the BP; the legacy FloodWaterVisuals material is not used by this path."),
+			TEXT("Flood water plane on %s (compartment=%s) has no WaterMaterial. Assign ASubmarineBase.DefaultWaterMaterial on the BP."),
 			*GetNameSafe(GetOwner()),
 			Source ? *Source->CompartmentId.ToString() : TEXT("<none>"));
 	}

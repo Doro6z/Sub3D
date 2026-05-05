@@ -196,13 +196,7 @@ public:
 
 	// --- Events ----------------------------------------------------------
 
-	/**
-	 * Broadcast each tick with exported FCompartmentState array.
-	 * Note: existing systems (FloodWaterVisuals, DoorFloodVfx, etc.) currently
-	 * listen to SubHull's OnCompartmentFloodUpdated which uses FCompartmentRuntimeState.
-	 * Phase 4 must rewire those consumers to read from SubFlood directly or
-	 * adapt them to use ExportCompartmentStates / this delegate.
-	 */
+	/** Broadcast each tick with exported FCompartmentState array. */
 	UPROPERTY(BlueprintAssignable, Category = "Submarine|Flood|Events")
 	FOnFloodStateUpdated OnFloodStateUpdated;
 
