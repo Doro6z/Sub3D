@@ -408,27 +408,43 @@ namespace
     }
 
     // ─────────────────────────────────────────────────────────────────────────
-    // Cap mesh par triangulation FAN depuis le centroïde — topologie cohérente entre slices.
+    // Cap mesh par triangulation CONCENTRIC RINGS — topologie cohérente entre slices,
+    // tessellation interne pour montrer la propagation des ondes du heightfield.
     //
-    // Input : polygone fermé CCW à N points (déjà resamplé uniformément).
-    // Output : FCachedWaterMesh avec :
-    //   - Vertices = N points polygon + 1 centroïde, tous à Z=0
-    //   - Triangles = N tri en éventail (i, (i+1) % N, centroïde) → toujours CCW
-    //   - Normales (0,0,1) up
-    //   - UV0 planaire (1 UV unit = 100 cm)
+    // Pourquoi : la fan triangulation simple (1 centroïde + N polygon) n'a qu'UN seul vert
+    // intérieur. Le WPO étant per-vertex, seul le centroïde montre les ondes du heightfield ;
+    // la propagation vers les bords est invisible (interpolation triangulaire linéaire de
+    // centroïde vers les murs). Les utilisateurs perçoivent ça comme "singularité au centre"
+    // ou "dead zone" sur certaines triangles fines (proche embrasures de portes).
     //
-    // Pourquoi fan plutôt que Delaunay :
-    //   - Délaunay produit une triangulation différente pour chaque slice (la topologie
-    //     dépend de la disposition exacte des points). Impossible de blend deux meshes
-    //     entre slices voisines si les triangles diffèrent.
-    //   - Fan = N triangles toujours dans le même ordre, garantis identiques d'une slice à
-    //     l'autre. Vertex blending ↔ topologie unique.
+    // Solution : insérer R anneaux concentriques entre le centroïde et le polygone. Chaque
+    // anneau a N points placés par lerp(centroid, polygon[i], t_k) où t_k = (k+1)/(R+1).
+    // Le polygone reste l'anneau extérieur (t = 1).
     //
-    // Limitation : pour un polygone fortement concave (L-shape, salle avec recoin), le fan
-    // peut produire des triangles qui sortent du polygone. Pour des compartiments typiques
-    // de sub (~convexe avec mur courbe), inoffensif.
+    // Layout des indices :
+    //   0                          : centroïde (1 vert)
+    //   1 + k*N + i (k=0..R, i=0..N-1) : anneau k, vertex i (R+1 anneaux × N verts)
+    //   Total : 1 + (R+1)*N verts. Pour R=3, N=64 : 257 verts, 448 triangles. Léger.
+    //
+    // Triangulation :
+    //   - Inner fan : centroïde → anneau 0 (N triangles)
+    //   - Strips : entre anneau k et anneau k+1 pour k=0..R-1, chaque strip = 2N triangles
+    //   - Total : (2R+1) * N triangles
+    //
+    // BakeRingsCount = 0 : pas d'anneaux intermédiaires → fallback fan classique
+    // (1 + N verts, N triangles). Compatible avec l'ancien comportement.
+    //
+    // Topologie cohérente : R et N fixes au bake → toutes les slices ont le même nombre de
+    // verts et la même triangulation. Le RebuildBlendedCapMesh peut lerp vertex-par-vertex
+    // sans risque.
+    //
+    // Limitation : pour un polygone fortement concave (L-shape, recoin), les anneaux
+    // intermédiaires peuvent sortir du polygone (si centroïde proche d'un bord). Pour
+    // un compartiment typique sub (~convexe), inoffensif. Mitigation future : projeter
+    // les rings sur le squelette interne au lieu du lerp linéaire.
     // ─────────────────────────────────────────────────────────────────────────
-    FCachedWaterMesh GenerateCapMeshFanFromPolygon(const TArray<FVector2D>& Polygon)
+    FCachedWaterMesh GenerateCapMeshConcentricFromPolygon(
+        const TArray<FVector2D>& Polygon, int32 RingsCount)
     {
         FCachedWaterMesh Mesh;
         const int32 N = Polygon.Num();
@@ -436,8 +452,9 @@ namespace
         {
             return Mesh;
         }
+        const int32 R = FMath::Max(0, RingsCount);
 
-        // Centroïde = moyenne des points (suffisant pour un polygone CCW).
+        // Centroïde du polygone.
         FVector2D Centroid(0.f, 0.f);
         for (const FVector2D& P : Polygon)
         {
@@ -445,28 +462,75 @@ namespace
         }
         Centroid /= static_cast<float>(N);
 
-        // N + 1 verts : N polygone + 1 centroïde (index N).
-        Mesh.Vertices.Reserve(N + 1);
-        Mesh.Normals.Reserve(N + 1);
-        Mesh.UV0.Reserve(N + 1);
-        for (int32 i = 0; i < N; ++i)
-        {
-            Mesh.Vertices.Add(FVector(Polygon[i].X, Polygon[i].Y, 0.f));
-            Mesh.Normals.Add(FVector(0.f, 0.f, 1.f));
-            Mesh.UV0.Add(FVector2D(Polygon[i].X * 0.01f, Polygon[i].Y * 0.01f));
-        }
-        Mesh.Vertices.Add(FVector(Centroid.X, Centroid.Y, 0.f));
-        Mesh.Normals.Add(FVector(0.f, 0.f, 1.f));
-        Mesh.UV0.Add(FVector2D(Centroid.X * 0.01f, Centroid.Y * 0.01f));
+        // Nombre total d'anneaux (incluant le polygone) = R + 1.
+        const int32 TotalRings = R + 1;
+        const int32 TotalVerts = 1 + TotalRings * N;
+        Mesh.Vertices.Reserve(TotalVerts);
+        Mesh.Normals.Reserve(TotalVerts);
+        Mesh.UV0.Reserve(TotalVerts);
 
-        // N triangles fan : (i, (i+1)%N, centroïdeIdx). CCW garanti si polygone CCW.
-        const int32 CentroidIdx = N;
-        Mesh.Triangles.Reserve(N * 3);
+        auto PushVert = [&](const FVector2D& P)
+        {
+            Mesh.Vertices.Add(FVector(P.X, P.Y, 0.f));
+            Mesh.Normals.Add(FVector(0.f, 0.f, 1.f));
+            Mesh.UV0.Add(FVector2D(P.X * 0.01f, P.Y * 0.01f));
+        };
+
+        // Index 0 : centroïde.
+        PushVert(Centroid);
+
+        // Anneaux : k = 0..R. t_k = (k+1) / (R+1). Anneau R = polygone (t=1).
+        for (int32 k = 0; k < TotalRings; ++k)
+        {
+            const float T = static_cast<float>(k + 1) / static_cast<float>(R + 1);
+            for (int32 i = 0; i < N; ++i)
+            {
+                const FVector2D Pos = FMath::Lerp(Centroid, Polygon[i], T);
+                PushVert(Pos);
+            }
+        }
+
+        // Helper : index d'un vertex d'un anneau donné.
+        auto RingIdx = [N](int32 RingK, int32 VertI) -> int32
+        {
+            return 1 + RingK * N + VertI;
+        };
+
+        // Triangles. Allocation : N + R * 2N = (2R+1)*N tris × 3 indices.
+        Mesh.Triangles.Reserve((2 * R + 1) * N * 3);
+
+        // Inner fan : centroïde (idx 0) → anneau 0. CCW si polygone CCW.
         for (int32 i = 0; i < N; ++i)
         {
-            Mesh.Triangles.Add(i);
-            Mesh.Triangles.Add((i + 1) % N);
-            Mesh.Triangles.Add(CentroidIdx);
+            Mesh.Triangles.Add(0);
+            Mesh.Triangles.Add(RingIdx(0, i));
+            Mesh.Triangles.Add(RingIdx(0, (i + 1) % N));
+        }
+
+        // Strips entre anneaux consécutifs : R strips (entre ring k et ring k+1, k=0..R-1).
+        // Pour chaque i, deux triangles forment un quad :
+        //   T1 : (ring_k_i, ring_(k+1)_i, ring_(k+1)_(i+1))
+        //   T2 : (ring_k_i, ring_(k+1)_(i+1), ring_k_(i+1))
+        for (int32 k = 0; k < R; ++k)
+        {
+            for (int32 i = 0; i < N; ++i)
+            {
+                const int32 i_next = (i + 1) % N;
+                const int32 a = RingIdx(k, i);
+                const int32 b = RingIdx(k + 1, i);
+                const int32 c = RingIdx(k + 1, i_next);
+                const int32 d = RingIdx(k, i_next);
+
+                // T1 : a → b → c, CCW depuis +Z.
+                Mesh.Triangles.Add(a);
+                Mesh.Triangles.Add(b);
+                Mesh.Triangles.Add(c);
+
+                // T2 : a → c → d, CCW depuis +Z.
+                Mesh.Triangles.Add(a);
+                Mesh.Triangles.Add(c);
+                Mesh.Triangles.Add(d);
+            }
         }
 
         return Mesh;
@@ -521,9 +585,11 @@ URoomWaterBakedData* URoomWaterBakerLibrary::BakeVolume(
     float CellSize,
     bool bAutoDetectOpenings,
     float CapInsetCm,
-    int32 BakeResampleN)
+    int32 BakeResampleN,
+    int32 BakeRingsCount)
 {
     BakeResampleN = FMath::Clamp(BakeResampleN, 16, 256);
+    BakeRingsCount = FMath::Clamp(BakeRingsCount, 0, 8);
 
     if (!Volume)
     {
@@ -738,7 +804,7 @@ URoomWaterBakedData* URoomWaterBakerLibrary::BakeVolume(
         OrderedPoly = ResamplePolygonUniform(OrderedPoly, BakeResampleN);
         AlignPolygonStart(OrderedPoly);
 
-        FCachedWaterMesh Mesh = GenerateCapMeshFanFromPolygon(OrderedPoly);
+        FCachedWaterMesh Mesh = GenerateCapMeshConcentricFromPolygon(OrderedPoly, BakeRingsCount);
         if (Mesh.Vertices.Num() == 0)
         {
             ++DegenerateCount;
@@ -771,12 +837,13 @@ URoomWaterBakedData* URoomWaterBakerLibrary::BakeAndSave(
     float CellSize,
     bool bAutoDetectOpenings,
     float CapInsetCm,
-    int32 BakeResampleN)
+    int32 BakeResampleN,
+    int32 BakeRingsCount)
 {
 #if WITH_EDITOR
     URoomWaterBakedData* Transient = BakeVolume(
         Volume, CompartmentId, NumSlices, CellSize,
-        bAutoDetectOpenings, CapInsetCm, BakeResampleN);
+        bAutoDetectOpenings, CapInsetCm, BakeResampleN, BakeRingsCount);
     if (!Transient)
     {
         return nullptr;
@@ -840,6 +907,6 @@ URoomWaterBakedData* URoomWaterBakerLibrary::BakeAndSave(
     UE_LOG(LogWaterProto, Warning, TEXT("BakeAndSave: editor-only, ignoré dans une build runtime"));
     return BakeVolume(
         Volume, CompartmentId, NumSlices, CellSize,
-        bAutoDetectOpenings, CapInsetCm, BakeResampleN);
+        bAutoDetectOpenings, CapInsetCm, BakeResampleN, BakeRingsCount);
 #endif
 }

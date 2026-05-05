@@ -92,6 +92,30 @@ public:
         meta = (ClampMin = "0.0"))
     float FlowReceiverForce = 0.5f;
 
+    // ── [P-T4 mini-test] Boundary sync tunables ──
+    /** Sync forte sur Heights = continuité visuelle de surface. */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Bridge|BoundarySync",
+        meta = (ClampMin = "0.0", ClampMax = "1.0"))
+    float SyncStrengthHeights = 0.5f;
+
+    /** Sync faible sur Velocities = anti-résonance (R-6). */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Bridge|BoundarySync",
+        meta = (ClampMin = "0.0", ClampMax = "1.0"))
+    float SyncStrengthVelocities = 0.1f;
+
+    /** Damping additionnel des Velocities après merge (combat les oscillations résiduelles). */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Bridge|BoundarySync",
+        meta = (ClampMin = "0.5", ClampMax = "1.0"))
+    float VelocitiesPostSyncDamping = 0.95f;
+
+    /** Si true, dessine cyan/magenta les cellules pairées (P-T4.3). */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Bridge|BoundarySync")
+    bool bDrawDebugCells = false;
+
+    /** Désactive la sync (toggle pour comparer A/B en PIE). */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Bridge|BoundarySync")
+    bool bBoundarySyncEnabled = true;
+
     /**
      * Notification d'état porte. Appelée automatiquement par le polling de l'ASubDoorActor
      * parent. Peut aussi être appelée manuellement depuis BP si la porte n'est pas un
@@ -147,4 +171,45 @@ private:
 
     /** World Z du niveau d'eau d'un renderer (component world Z + waterLocalZ). */
     static float GetRendererWaterWorldZ(const URoomWaterRenderer* Renderer);
+
+    // ── [P-T4 mini-test] Boundary cell sync ──
+    /** Paire de cellules synchronisées entre RendererA et RendererB (linear flat indices). */
+    struct FCellPair
+    {
+        int32 IdxA = INDEX_NONE;
+        int32 IdxB = INDEX_NONE;
+        FVector WorldA = FVector::ZeroVector;   // For debug draw + diagnostics.
+        FVector WorldB = FVector::ZeroVector;
+    };
+
+    TArray<FCellPair> CellPairs;
+
+    /**
+     * Construit la liste de paires de cellules à synchroniser au tick.
+     * Algorithme générique (face detection sur la box du compartiment + nearest-neighbor pairing
+     * sur world space). Marche pour orientations arbitraires (Yaw=180 du Room_02 par exemple).
+     * Appelé après ResolveRenderers + une fois en BeginPlay (les transforms sont stables).
+     */
+    void RecomputeCellPairs();
+
+    /**
+     * Applique la sync au bord chaque tick si la porte est ouverte.
+     * Heights : lerp fort (continuité visuelle).
+     * Velocities : lerp faible + damping additionnel (anti-résonance).
+     */
+    void TickSyncBoundary();
+
+    /**
+     * Helper : pour un renderer donné + une position world (centre de porte), retourne :
+     *  - le côté de la box du renderer le plus proche du door center (face = 0:Xmin, 1:Xmax, 2:Ymin, 3:Ymax)
+     *  - la liste d'indices flat des cellules sur cette face dans le footprint world (DoorWidth × DoorHeight)
+     *  - les positions world de ces cellules pour pairing nearest-neighbor downstream.
+     * Retourne false si renderer ou BakedData null.
+     */
+    bool ComputeBoundaryCellsForRenderer(
+        URoomWaterRenderer* Renderer,
+        const FVector& DoorWorldCenter,
+        float DoorHalfWidthCm,
+        TArray<int32>& OutIndices,
+        TArray<FVector>& OutWorldPositions) const;
 };

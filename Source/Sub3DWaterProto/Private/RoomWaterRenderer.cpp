@@ -468,17 +468,28 @@ void URoomWaterRenderer::TickHeightfield(float dt)
     const int32 W = HeightfieldResolutionX;
     const int32 H = HeightfieldResolutionY;
 
+    // [P-T4 fix v2] Include boundary cells in wave equation with Neumann reflective BC
+    // (out-of-grid neighbor mirrors center). Previously the boundary cells were excluded from
+    // the loop entirely → no Laplacian, no Velocities damping → values written by external
+    // systems (UDoorWaterBridge sync) would stick forever and feed the interior as a permanent
+    // source. With boundary cells in the loop, they decay naturally like any other cell.
     TArray<float> NewHeights;
-    NewHeights.SetNumZeroed(W * H);
+    NewHeights.SetNumUninitialized(W * H);
 
-    for (int32 y = 1; y < H - 1; ++y)
+    for (int32 y = 0; y < H; ++y)
     {
-        for (int32 x = 1; x < W - 1; ++x)
+        for (int32 x = 0; x < W; ++x)
         {
             const int32 idx = y * W + x;
             const float h_center = Heights[idx];
-            const float h_avg = (Heights[idx - 1] + Heights[idx + 1] +
-                                 Heights[idx - W] + Heights[idx + W]) * 0.25f;
+
+            // Neumann (zero-gradient) BC: out-of-grid neighbor = mirror of center.
+            const float h_left  = (x > 0)     ? Heights[idx - 1] : h_center;
+            const float h_right = (x < W - 1) ? Heights[idx + 1] : h_center;
+            const float h_top   = (y > 0)     ? Heights[idx - W] : h_center;
+            const float h_bot   = (y < H - 1) ? Heights[idx + W] : h_center;
+
+            const float h_avg = (h_left + h_right + h_top + h_bot) * 0.25f;
             const float laplacian = h_avg - h_center;
 
             Velocities[idx] += laplacian * WaveSpeed * dt;
@@ -605,6 +616,23 @@ void URoomWaterRenderer::ResetHeightfield()
 {
     FMemory::Memzero(Heights.GetData(), Heights.Num() * sizeof(float));
     FMemory::Memzero(Velocities.GetData(), Velocities.Num() * sizeof(float));
+}
+
+FVector URoomWaterRenderer::GetCellWorldCenter(int32 nx, int32 ny) const
+{
+    if (!BakedData || HeightfieldResolutionX <= 0 || HeightfieldResolutionY <= 0)
+    {
+        return FVector::ZeroVector;
+    }
+    const FVector& Min = BakedData->LocalBoundsMin;
+    const FVector& Max = BakedData->LocalBoundsMax;
+    const float spanCellX = (Max.X - Min.X) / static_cast<float>(HeightfieldResolutionX);
+    const float spanCellY = (Max.Y - Min.Y) / static_cast<float>(HeightfieldResolutionY);
+    const FVector LocalCenter(
+        Min.X + (nx + 0.5f) * spanCellX,
+        Min.Y + (ny + 0.5f) * spanCellY,
+        CurrentWaterLevelLocalZ);
+    return GetComponentTransform().TransformPosition(LocalCenter);
 }
 
 void URoomWaterRenderer::DrawDebugSnapshot()

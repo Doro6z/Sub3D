@@ -113,6 +113,17 @@ public:
     UFUNCTION(BlueprintCallable, Category = "Water Proto")
     void ResetHeightfield();
 
+    // ── [P-T4 mini-test] Public accessors for boundary-sync experiment ──
+    // These are only useful for UDoorWaterBridge's TickSyncBoundary. To be removed after
+    // the test concludes (port to Sub3D will use a different access pattern via the manager).
+    TArray<float>& MutableHeights() { return Heights; }
+    TArray<float>& MutableVelocities() { return Velocities; }
+    int32 GetGridX() const { return HeightfieldResolutionX; }
+    int32 GetGridY() const { return HeightfieldResolutionY; }
+
+    /** World position of cell (nx, ny) center at the current water level. Requires BakedData. */
+    FVector GetCellWorldCenter(int32 nx, int32 ny) const;
+
     /**
      * Snapshot complet du compartiment dans le viewport (DebugDrawDuration secondes persistant).
      * Logue aussi un dump détaillé dans WaterProto.log. Appelable depuis Details panel (PIE et éditeur).

@@ -88,6 +88,27 @@ public:
         meta = (ClampMin = "16", ClampMax = "256"))
     int32 BakeResampleN = 64;
 
+    /**
+     * Nombre d'anneaux concentriques intermédiaires entre le centroïde et le polygone du
+     * contour, pour tessellater l'intérieur du cap mesh. Chaque vertex intérieur sample sa
+     * propre cellule du heightfield → la propagation des ondes devient visible (au lieu d'être
+     * concentrée sur un unique centroïde).
+     *
+     * 0 = aucun anneau intermédiaire (fan classique, cap = centroïde + polygone). Singularité
+     *     du centre + dead zones près des coins étroits visibles.
+     * 1-2 = tessellation modérée, propagation à 50% de visible. Léger côté .uasset.
+     * 3 = recommandé. Tessellation dense (4 anneaux dont le polygone), propagation visible
+     *     entre rings, pas de dead zone. Coût : .uasset ~4× plus gros, négligeable.
+     * 6-8 = très haute qualité, surdimensionné pour la plupart des cas.
+     *
+     * Total verts par slice : 1 + (BakeRingsCount + 1) × BakeResampleN.
+     * Total triangles : (2 × BakeRingsCount + 1) × BakeResampleN.
+     */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Water Proto|Bake",
+        meta = (ClampMin = "0", ClampMax = "8"))
+    int32 BakeRingsCount = 3;
+
+    virtual void BeginPlay() override;
     virtual void Tick(float DeltaTime) override;
 
     /**

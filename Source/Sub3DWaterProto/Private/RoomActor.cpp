@@ -23,6 +23,26 @@ ARoomActor::ARoomActor()
     WaterRenderer->SetupAttachment(CompartmentVolume);
 }
 
+void ARoomActor::BeginPlay()
+{
+    Super::BeginPlay();
+
+    // [P-T4.0 mini-test] Dump des transforms pour calibrer le sync au bord (boundary heightfield merge).
+    const FTransform Xform = GetActorTransform();
+    const FVector BoxExt = CompartmentVolume ? CompartmentVolume->GetScaledBoxExtent() : FVector::ZeroVector;
+    const FVector LocalBoundsMin = BakedData ? BakedData->LocalBoundsMin : FVector::ZeroVector;
+    const FVector LocalBoundsMax = BakedData ? BakedData->LocalBoundsMax : FVector::ZeroVector;
+
+    UE_LOG(LogWaterProto, Warning,
+        TEXT("[P-T4.0 ROOM] %s | Loc=%s Rot=%s | BoxExt=%s | BakedBoundsMin=%s BakedBoundsMax=%s"),
+        *RoomId.ToString(),
+        *Xform.GetLocation().ToString(),
+        *Xform.GetRotation().Rotator().ToString(),
+        *BoxExt.ToString(),
+        *LocalBoundsMin.ToString(),
+        *LocalBoundsMax.ToString());
+}
+
 void ARoomActor::Tick(float DeltaTime)
 {
     Super::Tick(DeltaTime);
@@ -62,7 +82,8 @@ void ARoomActor::Bake()
         BakeCellSize,
         bAutoDetectOpenings,
         CapInsetCm,
-        BakeResampleN);
+        BakeResampleN,
+        BakeRingsCount);
 
     if (Result)
     {
