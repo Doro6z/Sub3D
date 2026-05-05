@@ -16,12 +16,6 @@ struct SUB3DCORE_API FDerivedFloodVolume
     float CapacityLiters = 0.0f;
 
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Derived Flood Volume")
-    FVector BoundsMin = FVector::ZeroVector;
-
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Derived Flood Volume")
-    FVector BoundsMax = FVector::ZeroVector;
-
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Derived Flood Volume")
     TArray<ESub3DRoomTag> RoomTags;
 };
 

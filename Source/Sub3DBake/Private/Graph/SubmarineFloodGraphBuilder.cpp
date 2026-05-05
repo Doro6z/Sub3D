@@ -54,8 +54,6 @@ bool FSubmarineFloodGraphBuilder::BuildFloodGraph(
         FDerivedFloodVolume& Volume = OutFloodGraph.Volumes.AddDefaulted_GetRef();
         Volume.VolumeId = MakeVolumeId(Bay);
         Volume.CapacityLiters = ComputeBayCapacityLiters(Bay);
-        Volume.BoundsMin = FVector(Bay.StartX, -250.0f, -250.0f);
-        Volume.BoundsMax = FVector(Bay.EndX, 250.0f, 250.0f);
         BayToVolume.Add(Bay.BayId, Volume.VolumeId);
     }
 
@@ -88,14 +86,12 @@ bool FSubmarineFloodGraphBuilder::BuildFloodGraph(
         Edge.bExteriorEdge = false;
     }
 
-    // Add one explicit exterior edge on the fore-most volume for breach-ready routing.
+    // Add one explicit exterior edge on the first volume for breach-ready routing.
+    // [P0.3 cleanup] Previously sorted by BoundsMin.X to pick fore-most volume; that field
+    // was removed (no other readers). Sub3DBake is legacy paused for FP — first-added volume
+    // is acceptable here. Re-introduce a position-based pick if Sub3DBake is reactivated.
     if (!OutFloodGraph.Volumes.IsEmpty())
     {
-        OutFloodGraph.Volumes.Sort([](const FDerivedFloodVolume& A, const FDerivedFloodVolume& B)
-        {
-            return A.BoundsMin.X < B.BoundsMin.X;
-        });
-
         FFloodGraphEdge& ExteriorEdge = OutFloodGraph.Edges.AddDefaulted_GetRef();
         ExteriorEdge.VolumeA = OutFloodGraph.Volumes[0].VolumeId;
         ExteriorEdge.VolumeB = NAME_None;

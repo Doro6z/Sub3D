@@ -520,8 +520,6 @@ bool USubmarineGenerator::BuildFloodGraph(USubmarineDefinition* Def) const
 		FDerivedFloodVolume Vol;
 		Vol.VolumeId = Comp.CompartmentId;
 		Vol.CapacityLiters = Comp.CapacityLiters;
-		Vol.BoundsMin = Comp.HydroBoundsMin;
-		Vol.BoundsMax = Comp.HydroBoundsMax;
 		Graph.Volumes.Add(Vol);
 	}
 
