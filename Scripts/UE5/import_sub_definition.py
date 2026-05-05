@@ -95,7 +95,15 @@ def sha256_file(path: Path) -> str:
 
 
 def offset_x(x_cm: float, length_cm: float) -> float:
-    return x_cm - 0.5 * length_cm if CENTER_ORIGIN else x_cm
+    """
+    Convert JSON X coordinate (0 = bow, length = stern) to BP-local X.
+    BP convention (per Scripts/UE5/compose_craniata_bp_v2.py): bow lands at +X
+    after centering and X negation: BP-local X = -(json_x - length/2).
+    All callers (compartment bounds, connection positions, spawn points) must use
+    this same convention so the DA values align with the BP-placed mesh transforms.
+    """
+    centered = x_cm - 0.5 * length_cm if CENTER_ORIGIN else x_cm
+    return -centered  # BP convention: bow at +X, stern at -X
 
 
 def make_yaw_rotator(yaw_deg: float) -> "unreal.Rotator":
@@ -236,8 +244,12 @@ def compute_hull_top_z(hull_profile_samples: list) -> float:
 def build_compartment(c: dict, length_cm: float, decks: list, hull_profile_samples: list, deck_thick_cm: float, hull_top_z: float) -> "unreal.GeneratedCompartmentDef":
     out = unreal.GeneratedCompartmentDef()
 
-    min_x = offset_x(c["min_x_cm"], length_cm)
-    max_x = offset_x(c["max_x_cm"], length_cm)
+    # JSON min_x_cm is bow-side (smaller JSON x); offset_x negates so it becomes larger
+    # BP-local X (bow at +X). Use min/max to ensure bounds_min < bounds_max.
+    a_x = offset_x(c["min_x_cm"], length_cm)
+    b_x = offset_x(c["max_x_cm"], length_cm)
+    min_x = min(a_x, b_x)
+    max_x = max(a_x, b_x)
     floor_z = float(c["deck_z_cm"])
 
     # Ceiling: clipped to next deck floor minus deck thickness, fallback hull top.
