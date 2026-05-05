@@ -3,9 +3,19 @@
 #include "Components/ActorComponent.h"
 #include "Debug/Sub3DDebugSettings.h"
 #include "DrawDebugHelpers.h"
+#include "DynamicMeshBuilder.h"
+#include "Engine/Engine.h"
 #include "Engine/EngineBaseTypes.h"
 #include "Engine/World.h"
 #include "GameFramework/Actor.h"
+#include "MaterialDomain.h"
+#include "Materials/Material.h"
+#include "Materials/MaterialInstanceDynamic.h"
+#include "Materials/MaterialRenderProxy.h"
+#include "PrimitiveSceneProxy.h"
+#include "PrimitiveViewRelevance.h"
+#include "SceneInterface.h"
+#include "SceneManagement.h"
 #include "SubFloodComponent.h"
 
 UCompartmentVolumeComponent::UCompartmentVolumeComponent()
@@ -186,4 +196,169 @@ FVector UCompartmentVolumeComponent::GetWaterSurfaceWorldLocation() const
 	// Raise by the water height along the sub's up axis (follows sub pitch/roll).
 	const float HeightCm = GetWaterHeightCm();
 	return WorldBottom + WorldUp * HeightCm;
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// Custom SceneProxy — filled translucent X-ray faces for placement aid.
+// Inherits FPrimitiveSceneProxy directly (not FShapeSceneProxy) to fully control
+// rendering. Draws wireframe + 6 colored translucent faces in foreground DPG.
+// ────────────────────────────────────────────────────────────────────────────
+
+class FCompartmentVolumeSceneProxy final : public FPrimitiveSceneProxy
+{
+public:
+	SIZE_T GetTypeHash() const override
+	{
+		static size_t UniqueHash;
+		return reinterpret_cast<size_t>(&UniqueHash);
+	}
+
+	FCompartmentVolumeSceneProxy(const UCompartmentVolumeComponent* InComponent)
+		: FPrimitiveSceneProxy(InComponent)
+		, BoxExtent(InComponent->GetUnscaledBoxExtent())
+		, LineColor(InComponent->ShapeColor)
+		, LineThickness(InComponent->GetEditorLineThickness())
+		, FaceOpacity(InComponent->FaceOpacity)
+		, bShowFilled(InComponent->bShowFilledFaces)
+		, bXRay(InComponent->bDrawXRay)
+	{
+		FaceColors[0] = InComponent->FaceColorXPos;
+		FaceColors[1] = InComponent->FaceColorXNeg;
+		FaceColors[2] = InComponent->FaceColorYPos;
+		FaceColors[3] = InComponent->FaceColorYNeg;
+		FaceColors[4] = InComponent->FaceColorZPos;
+		FaceColors[5] = InComponent->FaceColorZNeg;
+		bWillEverBeLit = false;
+	}
+
+	virtual void GetDynamicMeshElements(
+		const TArray<const FSceneView*>& Views,
+		const FSceneViewFamily& ViewFamily,
+		uint32 VisibilityMap,
+		FMeshElementCollector& Collector) const override
+	{
+		const ESceneDepthPriorityGroup DPG = bXRay ? SDPG_Foreground : SDPG_World;
+		const FMatrix& LocalToWorldMat = GetLocalToWorld();
+		const FBox Box(-BoxExtent, BoxExtent);
+
+		for (int32 ViewIndex = 0; ViewIndex < Views.Num(); ++ViewIndex)
+		{
+			if (!(VisibilityMap & (1 << ViewIndex)))
+			{
+				continue;
+			}
+			const FSceneView* View = Views[ViewIndex];
+			FPrimitiveDrawInterface* PDI = Collector.GetPDI(ViewIndex);
+
+			// Wireframe always.
+			DrawWireBox(PDI, LocalToWorldMat, Box, LineColor, DPG, LineThickness, 0.f, /*bScreenSpace*/ false);
+
+			// Filled translucent faces.
+			if (bShowFilled && FaceOpacity > 0.f && GEngine && GEngine->DebugMeshMaterial)
+			{
+				UMaterialInterface* BaseMaterial = GEngine->DebugMeshMaterial;
+				for (int32 FaceIdx = 0; FaceIdx < 6; ++FaceIdx)
+				{
+					FLinearColor TintedColor = FaceColors[FaceIdx];
+					TintedColor.A = FaceOpacity;
+
+					FColoredMaterialRenderProxy* TintProxy = new FColoredMaterialRenderProxy(
+						BaseMaterial->GetRenderProxy(),
+						TintedColor);
+					Collector.RegisterOneFrameMaterialProxy(TintProxy);
+
+					FDynamicMeshBuilder MeshBuilder(View->GetFeatureLevel());
+					BuildBoxFace(MeshBuilder, FaceIdx, FColor::White);
+					MeshBuilder.GetMesh(LocalToWorldMat, TintProxy, DPG, /*bDisableBackfaceCulling*/ true,
+						/*bReceivesDecals*/ false, ViewIndex, Collector);
+				}
+			}
+		}
+	}
+
+	virtual FPrimitiveViewRelevance GetViewRelevance(const FSceneView* View) const override
+	{
+		FPrimitiveViewRelevance Relevance;
+		Relevance.bDrawRelevance = IsShown(View);
+		Relevance.bDynamicRelevance = true;
+		Relevance.bShadowRelevance = false;
+		Relevance.bEditorPrimitiveRelevance = UseEditorCompositing(View);
+		Relevance.bSeparateTranslucency = bShowFilled;
+		Relevance.bNormalTranslucency = bShowFilled;
+		return Relevance;
+	}
+
+	virtual uint32 GetMemoryFootprint() const override
+	{
+		return sizeof(*this) + GetAllocatedSize();
+	}
+
+private:
+	FVector BoxExtent;
+	FColor LineColor;
+	float LineThickness;
+	float FaceOpacity;
+	bool bShowFilled;
+	bool bXRay;
+	FLinearColor FaceColors[6];
+
+	void BuildBoxFace(FDynamicMeshBuilder& MeshBuilder, int32 FaceIdx, FColor Color) const
+	{
+		FVector V0, V1, V2, V3, Normal, Tangent;
+		const float X = BoxExtent.X;
+		const float Y = BoxExtent.Y;
+		const float Z = BoxExtent.Z;
+
+		switch (FaceIdx)
+		{
+		case 0: // +X (bow)
+			V0 = FVector(+X, -Y, -Z); V1 = FVector(+X, +Y, -Z);
+			V2 = FVector(+X, +Y, +Z); V3 = FVector(+X, -Y, +Z);
+			Normal = FVector(1, 0, 0); Tangent = FVector(0, 1, 0);
+			break;
+		case 1: // -X (stern)
+			V0 = FVector(-X, +Y, -Z); V1 = FVector(-X, -Y, -Z);
+			V2 = FVector(-X, -Y, +Z); V3 = FVector(-X, +Y, +Z);
+			Normal = FVector(-1, 0, 0); Tangent = FVector(0, -1, 0);
+			break;
+		case 2: // +Y (starboard)
+			V0 = FVector(+X, +Y, -Z); V1 = FVector(-X, +Y, -Z);
+			V2 = FVector(-X, +Y, +Z); V3 = FVector(+X, +Y, +Z);
+			Normal = FVector(0, 1, 0); Tangent = FVector(-1, 0, 0);
+			break;
+		case 3: // -Y (port)
+			V0 = FVector(-X, -Y, -Z); V1 = FVector(+X, -Y, -Z);
+			V2 = FVector(+X, -Y, +Z); V3 = FVector(-X, -Y, +Z);
+			Normal = FVector(0, -1, 0); Tangent = FVector(1, 0, 0);
+			break;
+		case 4: // +Z (top)
+			V0 = FVector(-X, -Y, +Z); V1 = FVector(+X, -Y, +Z);
+			V2 = FVector(+X, +Y, +Z); V3 = FVector(-X, +Y, +Z);
+			Normal = FVector(0, 0, 1); Tangent = FVector(1, 0, 0);
+			break;
+		case 5: // -Z (bottom)
+		default:
+			V0 = FVector(-X, +Y, -Z); V1 = FVector(+X, +Y, -Z);
+			V2 = FVector(+X, -Y, -Z); V3 = FVector(-X, -Y, -Z);
+			Normal = FVector(0, 0, -1); Tangent = FVector(1, 0, 0);
+			break;
+		}
+
+		const int32 I0 = MeshBuilder.AddVertex(FDynamicMeshVertex(FVector3f(V0), FVector3f(Tangent), FVector3f(Normal), FVector2f(0, 0), Color));
+		const int32 I1 = MeshBuilder.AddVertex(FDynamicMeshVertex(FVector3f(V1), FVector3f(Tangent), FVector3f(Normal), FVector2f(1, 0), Color));
+		const int32 I2 = MeshBuilder.AddVertex(FDynamicMeshVertex(FVector3f(V2), FVector3f(Tangent), FVector3f(Normal), FVector2f(1, 1), Color));
+		const int32 I3 = MeshBuilder.AddVertex(FDynamicMeshVertex(FVector3f(V3), FVector3f(Tangent), FVector3f(Normal), FVector2f(0, 1), Color));
+		MeshBuilder.AddTriangle(I0, I1, I2);
+		MeshBuilder.AddTriangle(I0, I2, I3);
+	}
+};
+
+FPrimitiveSceneProxy* UCompartmentVolumeComponent::CreateSceneProxy()
+{
+	// Custom proxy gives us filled translucent X-ray faces for placement.
+	// Falls back to standard wireframe-only behaviour (parent UBoxComponent path)
+	// if both bShowFilledFaces and bDrawXRay are off — but the proxy is still ours
+	// (it draws wireframe too, redundantly with parent if we'd called Super; we
+	// don't, since we render everything ourselves).
+	return new FCompartmentVolumeSceneProxy(this);
 }

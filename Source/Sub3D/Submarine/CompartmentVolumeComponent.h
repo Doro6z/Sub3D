@@ -62,6 +62,54 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Compartment|Visual")
 	FColor VolumeColor = FColor(50, 180, 220, 255);
 
+	// ── Filled-face X-ray visualization (placement aid) ──────────────────────────
+	// Renders 6 translucent faces with per-face colors so volumes can be precisely
+	// placed/scaled in the BP editor even when hull meshes occlude the wireframe.
+	// All faces drawn in foreground (visible through any opaque mesh) when bDrawXRay
+	// is true. Disable both bShowFilledFaces and bDrawXRay to fall back to standard
+	// UBoxComponent wireframe-only rendering.
+
+	/** If true, render 6 translucent filled faces with per-face colors (placement aid). */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Compartment|Visual|XRay")
+	bool bShowFilledFaces = true;
+
+	/** If true, draw in foreground depth priority — visible through opaque meshes. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Compartment|Visual|XRay")
+	bool bDrawXRay = true;
+
+	/** Translucency of the 6 filled faces (0 = invisible, 1 = opaque). */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Compartment|Visual|XRay", meta = (ClampMin = "0.0", ClampMax = "1.0", EditCondition = "bShowFilledFaces"))
+	float FaceOpacity = 0.18f;
+
+	/** Color of the +X face (bow side in BP-local space). */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Compartment|Visual|XRay", meta = (EditCondition = "bShowFilledFaces"))
+	FLinearColor FaceColorXPos = FLinearColor(1.0f, 0.3f, 0.3f);
+
+	/** Color of the -X face (stern side). */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Compartment|Visual|XRay", meta = (EditCondition = "bShowFilledFaces"))
+	FLinearColor FaceColorXNeg = FLinearColor(0.3f, 1.0f, 1.0f);
+
+	/** Color of the +Y face (starboard). */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Compartment|Visual|XRay", meta = (EditCondition = "bShowFilledFaces"))
+	FLinearColor FaceColorYPos = FLinearColor(0.3f, 1.0f, 0.3f);
+
+	/** Color of the -Y face (port). */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Compartment|Visual|XRay", meta = (EditCondition = "bShowFilledFaces"))
+	FLinearColor FaceColorYNeg = FLinearColor(1.0f, 1.0f, 0.3f);
+
+	/** Color of the +Z face (top). */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Compartment|Visual|XRay", meta = (EditCondition = "bShowFilledFaces"))
+	FLinearColor FaceColorZPos = FLinearColor(0.6f, 0.6f, 1.0f);
+
+	/** Color of the -Z face (bottom). */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Compartment|Visual|XRay", meta = (EditCondition = "bShowFilledFaces"))
+	FLinearColor FaceColorZNeg = FLinearColor(1.0f, 0.4f, 1.0f);
+
+	virtual FPrimitiveSceneProxy* CreateSceneProxy() override;
+
+	/** Public accessor for the protected UShapeComponent::LineThickness — used by our scene proxy. */
+	float GetEditorLineThickness() const { return LineThickness; }
+
 	/**
 	 * Per-compartment water surface mesh ("water cap"). When set, UFloodWaterPlaneComponent
 	 * uses this mesh at scale (1,1,1) instead of the generic engine plane. Authored in

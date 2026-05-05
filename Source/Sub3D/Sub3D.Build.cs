@@ -26,7 +26,12 @@ public class Sub3D : ModuleRules
 			"AnimGraphRuntime",
 			"DeveloperSettings",
 			"Sub3DRuntime",
-			"Sub3DCore"
+			"Sub3DCore",
+			// Required for FPrimitiveSceneProxy / FDynamicMeshBuilder / FColoredMaterialRenderProxy
+			// used by UCompartmentVolumeComponent's custom X-ray scene proxy.
+			"RenderCore",
+			"RHI",
+			"Renderer"
 		});
 
 		if (Target.bBuildEditor)

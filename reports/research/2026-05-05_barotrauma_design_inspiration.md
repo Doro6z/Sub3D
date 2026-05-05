@@ -213,3 +213,27 @@ Items ont des **ports nommés** (`toggle`, `set_state`, `state_out`, `power_in`,
 **Conclusion** : Barotrauma confirme la direction architecturale du plan eau Sub3D (Hull/Gap/Door séparation, compound rooms, semantic flags, IO patterns pour systèmes avancés). Quelques ajouts mineurs opportunistes (`bIsWetRoom`), et plusieurs références design pour la roadmap post-FP (Repairable, Pump direction, Door tool-gating).
 
 **Action concrète suite à cette passe** : mettre à jour le plan eau Phase 2 avec compound rooms (déjà documenté). Pas d'autre changement code immédiat.
+
+---
+
+## 9. Water propagation algorithm (inféré — code C# DLL, pas accessible)
+
+L'algo de propagation d'eau de Barotrauma n'est pas directement lisible (DLL only). Inféré depuis le pattern data (`<Hull water="N">`, `<Gap horizontal="bool" rect="...">`) + comportement gameplay observable :
+
+| Aspect | Mécanisme Baro | Sub3D équivalent existant |
+|---|---|---|
+| Storage water par compartiment | `<Hull water="N">` valeur scalaire | `FCompartmentState.WaterLiters` ✅ |
+| Passage entre compartiments | `<Gap horizontal="true/false" rect="W,H">` | `FFloodGraphEdge` + `PassageAreaCm2` ✅ |
+| Direction du flux | `horizontal=true` = pressure-driven (Torricelli), `horizontal=false` = gravity-driven | `EConnectionType::Door` (horizontal) vs `Hatch` (vertical) ✅ |
+| Door blocks gap | Item Door avec `IsOpen` couvre le rect du Gap | `FFloodEdgeState.bClosed` ✅ |
+| Flow rate | Probablement `v = sqrt(2gh) × area` (Torricelli) avec damping | `USubFloodComponent::AdvanceFlooding` (Torricelli) ✅ |
+| Surface eau visuelle | **Ligne 2D animée par hull (sin waves locales)** | Notre approche : cap mesh + heightfield CPU + boundary sync = **strictement plus ambitieux** |
+| Cross-hull wave continuity | **ABSENTE** dans Barotrauma | Notre Phase 4 = saut qualitatif vs Baro |
+| Crush pressure damage | Hulls prennent damage selon profondeur au-delà crush depth | Pas dans Sub3D FP, post-FP gameplay |
+
+**Conclusions sur l'algo** :
+
+1. ✅ **Sub3D = Barotrauma sur la sim** : per-compartment scalar level + Torricelli pour horizontal + gravity pour vertical + door state gates flow. Aucun design à modifier.
+2. 🚀 **Sub3D > Barotrauma sur le visuel** : Barotrauma rend l'eau comme une simple ligne horizontale par hull avec des sin waves locales — pas de continuité cross-hull. Notre cap mesh + heightfield + boundary sync (Phase 2-4) est nettement plus ambitieux. Confirmation que notre vision (fluide unique entre compartiments) n'est PAS un standard du genre — c'est un objectif visuel qui nous différencie.
+3. ⚠️ **Pas d'inspiration directe pour l'algo** : Baro confirme nos choix mais n'apporte rien que nous n'ayons déjà ou qui surpasserait notre approche heightfield.
+4. 📌 **Crush pressure** : à mémoriser pour post-FP gameplay (boucle breach + damage par profondeur).
