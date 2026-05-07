@@ -7,6 +7,8 @@
 #include "Types/Sub3DFloodTypes.h"
 #include "SubmarineDefinition.generated.h"
 
+class UCompartmentWaterBake;
+
 /**
  * Runtime single source of truth for a generated submarine.
  * Produced by USubmarineGenerator from a USubmarineGeneratorSpec.
@@ -89,6 +91,18 @@ public:
 
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Mesh")
 	TArray<FSubmarineBulkheadMeshData> BulkheadMeshes;
+
+	// ── Water Bake ───────────────────────────────────────────────────────
+	// Per-compartment baked silhouette + cap meshes. Populated by
+	// USubmarineWaterBakerLibrary::BakeCompartment (Editor module Sub3DWaterBake) and read at
+	// runtime by UFloodWaterPlaneComponent to produce the per-compartment water visual instead
+	// of the legacy flat plane.
+	//
+	// Key = FGeneratedCompartmentDef::CompartmentId. Value = soft ref to the
+	// /Game/Submarines/<Sub>/Water/CWB_<id> data asset. Missing entries fall back to the
+	// flat plane visual.
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Water")
+	TMap<FName, TObjectPtr<UCompartmentWaterBake>> WaterBakes;
 
 	// ── Flood defaults ───────────────────────────────────────────────────
 

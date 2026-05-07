@@ -91,11 +91,17 @@ public:
 	UPROPERTY(VisibleAnywhere, Category = "Bake Source")
 	FName CompartmentId;
 
-	/** Min corner of the union-AABB of all source volumes, in submarine-local space. */
+	/** Sub-local bounds of the AUTHORED BP volume (= what the user defined in the BP).
+	 *  This is what debug viewers should draw as the "compartment AABB", and what cap meshes
+	 *  fit. Cell positions in Slices[i].SignedDistance use an INTERNALLY PADDED grid of 1 cell
+	 *  on each X/Y side — convention: cell (x, y) sub-local centre =
+	 *      LocalBoundsMin.X - CellSizeCm + (x + 0.5) * CellSizeCm
+	 *      LocalBoundsMin.Y - CellSizeCm + (y + 0.5) * CellSizeCm
+	 *  The padding cells (cell index 0, GridWidth-1, etc.) are forced "outside" by the bake to
+	 *  guarantee MS edge-iteration captures every transition without inflating the bake region. */
 	UPROPERTY(VisibleAnywhere, Category = "Bake Source")
 	FVector LocalBoundsMin = FVector::ZeroVector;
 
-	/** Max corner of the union-AABB of all source volumes, in submarine-local space. */
 	UPROPERTY(VisibleAnywhere, Category = "Bake Source")
 	FVector LocalBoundsMax = FVector::ZeroVector;
 

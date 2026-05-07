@@ -499,23 +499,20 @@ UCompartmentWaterBake* USubmarineWaterBakerLibrary::BakeCompartment(
 	const FVector VolumeWorldCenter = Volume->GetComponentLocation();
 	const FVector VolumeSubLocalCenter = SubmarineXf.InverseTransformPosition(VolumeWorldCenter);
 	const FVector BoxExtent = Volume->GetUnscaledBoxExtent();
-	FVector LocalMin = VolumeSubLocalCenter - BoxExtent;
-	FVector LocalMax = VolumeSubLocalCenter + BoxExtent;
+	const FVector UserMin = VolumeSubLocalCenter - BoxExtent;
+	const FVector UserMax = VolumeSubLocalCenter + BoxExtent;
 
-	// CRITICAL: pad bounds in X/Y by 2 cells. Marching Squares iterates 2x2 squares with
-	// x=0..W-2, y=0..H-2 — transitions at the very last column/row are NOT processed. If
-	// the actual contour touches the AABB boundary (e.g. a wall mesh aligned with the
-	// volume edge), MS misses those transitions and produces an OPEN chain → cap mesh
-	// degenerate. Padding ensures the contour is interior to the AABB with at least 1
-	// cell of "outside" margin around it.
+	// Internal grid padding: extend bounds by ONE cell in X/Y. The cell-boundary pass below
+	// (Fix A) forces the outer ring of cells to "outside"; with 1-cell padding, that ring is
+	// the padding itself — the user's authored volume cells are fully preserved, and the
+	// contour's MS interpolation can place a vertex AT the user volume's edge by raycasting
+	// from the padding cell (forced outside) into the first user cell (inside).
 	//
-	// Z is NOT padded — slice mapping uses LocalMin.Z/LocalMax.Z directly, and oversized
-	// volumes already have Z headroom; padding Z would just waste slices on empty regions.
-	const float PadXY = CellSize * 2.f;
-	LocalMin.X -= PadXY;
-	LocalMin.Y -= PadXY;
-	LocalMax.X += PadXY;
-	LocalMax.Y += PadXY;
+	// Visible cost: the bake's stored bounds (cyan in the viewer) are 1 cell larger than the
+	// authored BP volume (yellow). With CellSizeCm=10 (default) this is a 10 cm visual delta.
+	// Cap meshes themselves stay inside the user's authored volume — no leak across bulkheads.
+	const FVector LocalMin(UserMin.X - CellSize, UserMin.Y - CellSize, UserMin.Z);
+	const FVector LocalMax(UserMax.X + CellSize, UserMax.Y + CellSize, UserMax.Z);
 
 	if ((LocalMax - LocalMin).GetMin() < 1.f)
 	{
@@ -558,8 +555,11 @@ UCompartmentWaterBake* USubmarineWaterBakerLibrary::BakeCompartment(
 	}
 
 	Bake->CompartmentId = CompartmentId;
-	Bake->LocalBoundsMin = LocalMin;
-	Bake->LocalBoundsMax = LocalMax;
+	// Store the AUTHORED USER bounds (not the internally-padded grid bounds). Viewers and
+	// runtime see cyan = yellow. Cell positions in Slices[i].SignedDistance are computed by
+	// consumers as `LocalBoundsMin - CellSizeCm + (x + 0.5) * CellSizeCm` — see header doc.
+	Bake->LocalBoundsMin = UserMin;
+	Bake->LocalBoundsMax = UserMax;
 	Bake->CellSizeCm = CellSize;
 	Bake->Slices.Reset();
 	Bake->CapMeshesPerSlice.Reset();
@@ -827,6 +827,12 @@ UCompartmentWaterBake* USubmarineWaterBakerLibrary::BakeCompartment(
 		// (with empty slices) but the caller should NOT add it to Definition->WaterBakes.
 		return nullptr;
 	}
+
+	// P2.5: register the bake in the DA's WaterBakes map. Runtime FloodWaterPlaneComponent
+	// looks up its compartment's CWB through this map. Mark the DA dirty so the panel's
+	// SaveLoadedAsset (asset action) actually persists the new reference.
+	Definition->WaterBakes.Add(CompartmentId, Bake);
+	Definition->MarkPackageDirty();
 
 	// Save the asset.
 	FAssetRegistryModule::AssetCreated(Bake);

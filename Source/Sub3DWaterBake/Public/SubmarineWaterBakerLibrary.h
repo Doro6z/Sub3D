@@ -21,9 +21,11 @@ struct SUB3DWATERBAKE_API FSubmarineWaterBakeParams
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, meta = (ClampMin = "2", ClampMax = "64"))
 	int32 NumSlices = 12;
 
-	/** Voxel cell size in cm. Smaller = more precise but slower bake. */
+	/** Voxel cell size in cm. Smaller = sharper corners + tighter cap-mesh-to-wall fit, but
+	 *  the bake cost scales as (1/cellsize)². 10 cm is a good balance for sub-scale geometry;
+	 *  drop to 5 cm for very fine corners (slow), bump to 25 cm for quick previews. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, meta = (ClampMin = "5.0", ClampMax = "200.0"))
-	float CellSizeCm = 25.0f;
+	float CellSizeCm = 10.0f;
 
 	/** Number of resampled polygon points (also = ring vertex count). */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, meta = (ClampMin = "16", ClampMax = "256"))
@@ -33,9 +35,10 @@ struct SUB3DWATERBAKE_API FSubmarineWaterBakeParams
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, meta = (ClampMin = "0", ClampMax = "8"))
 	int32 RingsCount = 3;
 
-	/** Polygon inward inset in cm (cosmetic). */
+	/** Polygon inward inset in cm (cosmetic). 0.5 cm leaves the cap mesh nearly flush with the
+	 *  wall while masking sub-mm raycast jitter. Bump to 2 cm if you see Z-fighting at the wall. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, meta = (ClampMin = "0.0", ClampMax = "20.0"))
-	float CapInsetCm = 2.0f;
+	float CapInsetCm = 0.5f;
 
 	/** Where to save the baked asset, relative to /Game. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite)

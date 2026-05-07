@@ -6,9 +6,14 @@
 #include "DrawDebugHelpers.h"
 #include "Engine/StaticMesh.h"
 #include "Engine/World.h"
+#include "GameFramework/Actor.h"
+#include "Generator/SubmarineDefinition.h"
 #include "Materials/Material.h"
 #include "Materials/MaterialInstanceDynamic.h"
 #include "Materials/MaterialInterface.h"
+#include "ProceduralMeshComponent.h"
+#include "SubmarineBase.h"
+#include "Types/CompartmentWaterBake.h"
 #include "UObject/ConstructorHelpers.h"
 
 DEFINE_LOG_CATEGORY_STATIC(LogFloodWaterPlane, Log, All);
@@ -57,7 +62,188 @@ void UFloodWaterPlaneComponent::RefreshFromFlood()
 
 	const float Level01 = Source->GetWaterLevel01();
 	const float HeightCm = Source->GetWaterHeightCm();
+
+	// Try the bake path first (P2.6). If a UCompartmentWaterBake exists for this compartment in
+	// the owning sub's DA, drive a UProceduralMeshComponent from the bake's slice closest to the
+	// current water surface. The legacy SMC plane is hidden when the bake is active.
+	const bool bBakeActive = RefreshBakeCapMesh(HeightCm);
+	if (bBakeActive)
+	{
+		// Hide the legacy plane (the bake renders the cap instead).
+		if (PlaneMeshComponent->IsVisible())
+		{
+			PlaneMeshComponent->SetVisibility(false, true);
+		}
+		// Visibility on the bake PMC is driven by Level01 threshold.
+		const bool bShouldBeVisible = Level01 > VisibilityThreshold01;
+		if (BakeCapMeshComp && bShouldBeVisible != bLastVisible)
+		{
+			BakeCapMeshComp->SetVisibility(bShouldBeVisible, true);
+			bLastVisible = bShouldBeVisible;
+			BP_OnVisibilityChanged(bShouldBeVisible);
+		}
+		// Drive the bake MID with the same params (the material can read Level01 / HeightCm).
+		if (BakeCapMID)
+		{
+			BakeCapMID->SetScalarParameterValue(TEXT("WaterLevel01"), Level01);
+			BakeCapMID->SetScalarParameterValue(TEXT("WaterHeightCm"), HeightCm);
+		}
+		// Level change event.
+		if (FMath::Abs(Level01 - LastLevel01) > LevelChangeEventThreshold01)
+		{
+			LastLevel01 = Level01;
+			BP_OnWaterLevelChanged(Level01, HeightCm);
+		}
+		return;
+	}
+
+	// Fallback: legacy flat plane.
 	ApplyWaterState(Level01, HeightCm);
+}
+
+UCompartmentWaterBake* UFloodWaterPlaneComponent::ResolveBake()
+{
+	if (CachedBake) return CachedBake;
+	if (bBakeResolveAttempted) return nullptr; // resolved to nullptr previously, don't retry every tick
+
+	bBakeResolveAttempted = true;
+
+	const UCompartmentVolumeComponent* Source = SourceVolume.Get();
+	if (!Source || Source->CompartmentId.IsNone()) return nullptr;
+
+	const ASubmarineBase* Sub = Cast<ASubmarineBase>(GetOwner());
+	if (!Sub || !Sub->GeneratedDefinition) return nullptr;
+
+	if (TObjectPtr<UCompartmentWaterBake>* Found = Sub->GeneratedDefinition->WaterBakes.Find(Source->CompartmentId))
+	{
+		CachedBake = *Found;
+	}
+	return CachedBake;
+}
+
+bool UFloodWaterPlaneComponent::RefreshBakeCapMesh(float WaterHeightLocalCm)
+{
+	UCompartmentWaterBake* Bake = ResolveBake();
+	if (!Bake || Bake->Slices.Num() == 0 || Bake->CapMeshesPerSlice.Num() == 0)
+	{
+		return false;
+	}
+
+	// Lazily create the PMC attached to the SUBMARINE ROOT (NOT to `this`). The bake stores cap
+	// mesh vertices in submarine-local space, so attaching to `this` (which is itself attached to
+	// UCompartmentVolumeComponent at its sub-local RelativeLocation) would double-offset the
+	// vertices by the volume center.
+	if (!BakeCapMeshComp)
+	{
+		USceneComponent* SubRoot = nullptr;
+		if (AActor* Owner = GetOwner())
+		{
+			SubRoot = Owner->GetRootComponent();
+		}
+		BakeCapMeshComp = NewObject<UProceduralMeshComponent>(GetOwner(),
+			FName(*FString::Printf(TEXT("BakeCapMesh_%s"),
+				SourceVolume.IsValid() ? *SourceVolume->CompartmentId.ToString() : TEXT("?"))));
+		if (SubRoot)
+		{
+			BakeCapMeshComp->SetupAttachment(SubRoot);
+		}
+		BakeCapMeshComp->RegisterComponent();
+		BakeCapMeshComp->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+		BakeCapMeshComp->SetGenerateOverlapEvents(false);
+		BakeCapMeshComp->SetCastShadow(false);
+		BakeCapMeshComp->SetReceivesDecals(false);
+		BakeCapMeshComp->bUseAsyncCooking = false;
+		BakeCapMeshComp->SetVisibility(false, true);
+
+		if (WaterMaterial)
+		{
+			BakeCapMID = BakeCapMeshComp->CreateDynamicMaterialInstance(0, WaterMaterial);
+		}
+	}
+
+	// Map water level 0..1 to the FIRST/LAST VALID slice's Z range — not the volume's Z range.
+	// The user's authored compartment volume is often oversized in Z (extends above the actual
+	// ceiling and/or below the actual floor) so that the bake captures generous margins. Using
+	// the volume Z as the water-level reference makes L=1.0 sit ABOVE the actual ceiling (the
+	// compartment looks empty even though sim is full).
+	//
+	// The valid-slice range IS the actual room: slices outside the room have empty cap meshes
+	// (rejected as degenerate). First valid Z ≈ floor, last valid Z ≈ ceiling. Lerp by L01 maps
+	// the visual water surface to the actual room's interior regardless of volume oversize.
+	int32 FirstValidIdx = INDEX_NONE;
+	int32 LastValidIdx = INDEX_NONE;
+	for (int32 i = 0; i < Bake->Slices.Num() && i < Bake->CapMeshesPerSlice.Num(); ++i)
+	{
+		if (Bake->CapMeshesPerSlice[i].Vertices.Num() >= 3)
+		{
+			if (FirstValidIdx == INDEX_NONE) FirstValidIdx = i;
+			LastValidIdx = i;
+		}
+	}
+	if (FirstValidIdx == INDEX_NONE)
+	{
+		// No valid cap meshes anywhere — bake produced nothing usable for this compartment.
+		return false;
+	}
+
+	const float Level01 = SourceVolume.IsValid()
+		? FMath::Clamp(SourceVolume->GetWaterLevel01(), 0.f, 1.f)
+		: 0.f;
+	const float SliceZFirst = Bake->Slices[FirstValidIdx].SliceZ_Local;
+	const float SliceZLast = Bake->Slices[LastValidIdx].SliceZ_Local;
+	const float WaterZLocal = FMath::Lerp(SliceZFirst, SliceZLast, Level01);
+
+	(void)WaterHeightLocalCm; // No longer used for slice picking; kept on the API for callers.
+
+	int32 BestIdx = FirstValidIdx;
+	float BestDiff = TNumericLimits<float>::Max();
+	for (int32 i = FirstValidIdx; i <= LastValidIdx; ++i)
+	{
+		if (Bake->CapMeshesPerSlice[i].Vertices.Num() < 3) continue;
+		const float Diff = FMath::Abs(Bake->Slices[i].SliceZ_Local - WaterZLocal);
+		if (Diff < BestDiff)
+		{
+			BestDiff = Diff;
+			BestIdx = i;
+		}
+	}
+
+	const bool bValidIndex = Bake->CapMeshesPerSlice.IsValidIndex(BestIdx);
+	const FCachedBakeMesh* CapMesh = bValidIndex ? &Bake->CapMeshesPerSlice[BestIdx] : nullptr;
+	const bool bValidMesh = CapMesh && CapMesh->Vertices.Num() >= 3 && CapMesh->Triangles.Num() >= 3;
+
+	if (BestIdx != LastSliceIndex)
+	{
+		if (!bValidMesh)
+		{
+			// Slice has no usable cap (typical for the topmost/bottom-most slice if it's outside
+			// the actual room). Clear any existing mesh section so we don't render stale geometry
+			// from a previous slice at a misleading Z height.
+			if (BakeCapMeshComp->GetNumSections() > 0)
+			{
+				BakeCapMeshComp->ClearAllMeshSections();
+			}
+		}
+		else
+		{
+			TArray<FVector2D> EmptyUV1;
+			TArray<FColor> EmptyColors;
+			TArray<FProcMeshTangent> EmptyTangents;
+			BakeCapMeshComp->CreateMeshSection(0,
+				CapMesh->Vertices, CapMesh->Triangles, CapMesh->Normals,
+				CapMesh->UV0, EmptyColors, EmptyTangents, /*bCreateCollision*/ false);
+			if (BakeCapMID)
+			{
+				BakeCapMeshComp->SetMaterial(0, BakeCapMID);
+			}
+		}
+		LastSliceIndex = BestIdx;
+	}
+
+	// Position the PMC at the current water surface Z (sub-local). Cap mesh vertices have Z=0
+	// — the PMC translation places the slice at the right altitude.
+	BakeCapMeshComp->SetRelativeLocation(FVector(0.f, 0.f, WaterZLocal));
+	return true;
 }
 
 void UFloodWaterPlaneComponent::EnsurePlaneMesh()

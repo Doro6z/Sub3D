@@ -172,7 +172,13 @@ void AWaterBakeViewer::Tick(float DeltaTime)
 			const int32 W = S.GridWidth;
 			const int32 H = S.GridHeight;
 			const float CellSize = BakeToView->CellSizeCm;
+			// LocalBoundsMin is the AUTHORED user volume bounds. The internal SDF grid is padded
+			// by 1 cell on each X/Y side (see CompartmentWaterBake.h convention). Cell (0,0)
+			// centre is therefore at (LocalBoundsMin - CellSize + 0.5*CellSize) = LocalBoundsMin
+			// - 0.5*CellSize.
 			const FVector& Min = BakeToView->LocalBoundsMin;
+			const float GridOriginX = Min.X - CellSize;
+			const float GridOriginY = Min.Y - CellSize;
 			const int32 Step = FMath::Max(1, SDFSubsampleStep);
 			constexpr float MaxDist = 100.f;
 			constexpr float SaturatedOutsideCm = 900.f;
@@ -184,8 +190,8 @@ void AWaterBakeViewer::Tick(float DeltaTime)
 					const float D = S.SignedDistance[y * W + x];
 					if (D > SaturatedOutsideCm) continue;
 					const FVector LocalPos(
-						Min.X + (x + 0.5f) * CellSize,
-						Min.Y + (y + 0.5f) * CellSize,
+						GridOriginX + (x + 0.5f) * CellSize,
+						GridOriginY + (y + 0.5f) * CellSize,
 						S.SliceZ_Local);
 					const FVector WP = Xf.TransformPosition(LocalPos);
 					const float Mag01 = FMath::Clamp(FMath::Abs(D) / MaxDist, 0.f, 1.f);
