@@ -152,20 +152,23 @@ def _add_volume_component(sds, blueprint, root_handle, compartment_id: str, cent
         err(f"could not cast to CompartmentVolumeComponent for {compartment_id}: got {type(comp_obj).__name__}")
         return None, None
 
-    # Configure properties.
+    # Configure properties. Use set_editor_property as the *primary* path so the
+    # values land on the BP component template (CDO) and survive compile + save.
+    # The set_box_extent / set_relative_location runtime setters mutate live state
+    # but do not always mark the template dirty; calling them as a follow-up keeps
+    # the editor preview consistent.
+    comp.modify()
     comp.set_editor_property("compartment_id", unreal.Name(compartment_id))
-    # Box extent (half-extents in cm).
+    comp.set_editor_property("box_extent", half_extent)
+    comp.set_editor_property("relative_location", center)
     try:
         comp.set_box_extent(half_extent, update_overlaps=False)
     except Exception:
-        # Older API: direct property setter. SetBoxExtent triggers UBodySetup rebuild
-        # which may be problematic in some contexts; fall back to direct field set.
-        comp.set_editor_property("box_extent", half_extent)
-    # Relative location (compartment center in BP-local space).
+        pass
     try:
         comp.set_relative_location(center, sweep=False, teleport=True)
     except Exception:
-        comp.set_editor_property("relative_location", center)
+        pass
 
     return new_handle, comp
 

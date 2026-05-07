@@ -6,6 +6,13 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 Sub3D is an Unreal Engine 5.7 submarine simulation game on Windows. The submarine hull and interior are procedurally generated at runtime from a data-driven pipeline. The project targets a "First Playable" milestone.
 
+## Hardware target
+
+- Dev machine: i7-9700K, GTX 1660 Super, Win64.
+- Use `-NullRHI` for all CLI automation tests (skips renderer, massive speedup).
+- Avoid running multiple Lumen/MegaLights screenshot tests in parallel; serialize them.
+- 4–16 player coop is the multiplayer target (host-listen architecture).
+
 ## Build & launch
 
 ```bash
@@ -20,6 +27,24 @@ C:/Dev/sub3d/LaunchEditor.bat
 ```
 
 The solution file `Sub3D.sln` is gitignored — regenerate it from the .uproject if needed.
+
+### Iterative code-change workflow (Claude must apply this automatically)
+
+When Claude modifies C++ source and needs to verify the running editor picks up the change, the workflow is:
+
+1. **Save all** in editor — not scriptable. Skip; the user pre-saves before approving the implementation step.
+2. **Quit editor** — use PowerShell, not Bash: `Get-Process UnrealEditor -ErrorAction SilentlyContinue | Stop-Process -Force`. (Bash on Windows mangles `taskkill /IM …` because Git Bash interprets `/IM` as a path. Force kill is required because graceful kill of GUI apps on Windows is unreliable; the user accepts losing unsaved editor work as the cost of automation.)
+3. **Build** — `Build.bat Sub3DEditor Win64 Development …`. Module additions, UCLASS additions, or any change touching reflection metadata require a full rebuild — Live Coding (`Ctrl+Alt+F11`) is not sufficient.
+4. **Restart editor** — PowerShell: `Start-Process -FilePath "C:\Program Files\Epic Games\UE_5.7\Engine\Binaries\Win64\UnrealEditor.exe" -ArgumentList "C:\Dev\Sub3D\Sub3D.uproject"`.
+5. **Wait for editor to load** — typically 20–60 s. Continue with other prep work (writing test plan, reading other files) instead of polling.
+
+When this workflow is **NOT** required:
+
+- Pure text/markdown/asset changes (no compile needed).
+- Live-Coding-safe changes (existing function bodies, new private members, log lines): user can `Ctrl+Alt+F11` themselves; no need to kill the editor.
+- Build-only verification with no runtime check needed (the user only wants to know "does it compile?"): just run `Build.bat` while editor stays open. Build will succeed if Live Coding is off, or fail with "Live Coding active" message — in which case fall back to the full quit/build/restart workflow.
+
+For sub-step validation gates that require the editor (e.g. "click this button, see this log line"): Claude executes steps 2–4 automatically before announcing the gate so the user can immediately validate without an extra round-trip.
 
 ### Automation tests cadence
 
@@ -186,15 +211,128 @@ The UnrealClaude plugin exposes MCP tools that let you query the **live editor s
 - When the editor is closed (the tools will hang or fail).
 - For any change you intend to persist — those go through assets/code, not MCP.
 
+## Test loop & AI workflow
+
+This section is the **how** of testing; the **when** is in the "Automation tests cadence" subsection of Build & launch.
+
+The AI iterates against a tiered ladder. Pick the cheapest tier that produces a deterministic signal. Escalate only when the lower tier cannot answer.
+
+### Tier ladder
+
+| Tier | Mechanism | Latency | Use when |
+| --- | --- | --- | --- |
+| 1 | CLI Automation Framework + JSON report | 5–30 s | Pure logic, math, isolated component behavior |
+| 2 | MCP-driven PIE (UnrealClaude tools) | 30 s–2 min | Replication, physics ticking, world spawn, UI in PIE |
+| 3 | Claude vision oracle on captured viewport | 3–10 s per call | Perceptual checks (lighting, water look, gauges legibility) |
+| 4 | Human as oracle | — | Aesthetic/creative decisions only — must be requested explicitly with a screenshot package |
+
+Tier 1 is the default. Never escalate to vision when a `TestEqual` or a log assertion would do.
+
+### CLI commands (Tier 1)
+
+```bash
+# List all Sub3D-prefixed tests
+"C:/Program Files/Epic Games/UE_5.7/Engine/Binaries/Win64/UnrealEditor-Cmd.exe" \
+  "C:/Dev/Sub3D/Sub3D.uproject" \
+  -ExecCmds="Automation List;Quit" -unattended -NullRHI -nopause
+
+# Run all Sub3D tests, write JSON report to Saved/Automation/Reports
+"C:/Program Files/Epic Games/UE_5.7/Engine/Binaries/Win64/UnrealEditor-Cmd.exe" \
+  "C:/Dev/Sub3D/Sub3D.uproject" \
+  -ExecCmds="Automation RunTests Sub3D.+;Quit" \
+  -unattended -nopause -NullRHI -NOSPLASH \
+  -testexit="Automation Test Queue Empty" \
+  -ReportOutputPath="C:/Dev/Sub3D/Saved/Automation/Reports" \
+  -log -stdout
+
+# Smoke filter (fast subset)
+"C:/Program Files/Epic Games/UE_5.7/Engine/Binaries/Win64/UnrealEditor-Cmd.exe" \
+  "C:/Dev/Sub3D/Sub3D.uproject" \
+  -ExecCmds="Automation RunFilter Smoke;Quit" -unattended -NullRHI -nopause
+```
+
+`-testexit="Automation Test Queue Empty"` is **load-bearing** — without it the editor process never terminates and the AI hangs waiting on stdout.
+
+The deterministic signal is `Saved/Automation/Reports/index.json`. Parse it directly — vision on stdout is unnecessary.
+
+### Test naming convention
+
+| Prefix | Backing macro / class | Purpose |
+|---|---|---|
+| `Sub3D.Unit.<System>.<Behavior>` | `IMPLEMENT_SIMPLE_AUTOMATION_TEST` | Pure logic, no PIE — millisecond-fast |
+| `Sub3D.Spec.<System>` | `BEGIN_DEFINE_SPEC` / `Describe` / `It` | BDD across scenarios, no PIE |
+| `Sub3D.Functional.<Feature>` | `AFunctionalTest` actor in map `FTEST_<Feature>` | Needs world, ticks, replication |
+| `Sub3D.Visual.<Feature>` | `AFunctionalTest` + `Take Automation Screenshot` | Image diff against checked-in baseline |
+
+Existing tests live in `Source/Sub3DTests/` (module `Sub3DTests`). New tests must follow the prefix scheme. Existing pre-convention tests are grandfathered until next refactor of the file they live in.
+
+### MCP-driven PIE workflow (Tier 2)
+
+UnrealClaude (`mcp__unrealclaude__*`) is the bridge. Canonical loop for a feature requiring a live PIE:
+
+1. `unreal_status` — confirm editor up and which map is loaded.
+2. Compile via `unreal_console_command("LiveCoding.Compile")` (Live Coding) or external `Build.bat` for full rebuild on header changes.
+3. `unreal_console_command("WebControl.StartServer")` — opens Remote Control HTTP on `127.0.0.1:30010`.
+4. `curl -X PUT http://127.0.0.1:30010/remote/object/property` to toggle a `UPROPERTY(EditAnywhere)`. **Object path prefix** is `UEDPIE_<InstanceID>_` once PIE is live (e.g. `/Game/Maps/UEDPIE_0_L_WaterProto_TwoRooms.L_WaterProto_TwoRooms:PersistentLevel.BP_SubDoor_C_1.DoorWaterBridge`).
+5. **PIE start** — currently manual click. Phase B (mcp-unreal) closes this gap with `pie_control(start, map=...)`.
+6. `unreal_capture_viewport` → image bytes for the AI.
+7. Tier 3 vision call **only if** the assertion is perceptual; otherwise read structured output via `unreal_get_output_log` and assert in code.
+8. **PIE stop** — currently manual. Phase B: `pie_control(stop)`.
+
+### Logging convention
+
+New log lines must use `UE_LOGFMT` (since UE 5.2):
+
+```cpp
+UE_LOGFMT(LogSub3D, Warning, "Hull breach at compartment {Comp} pressure={Pressure}",
+          ("Comp", CompartmentName), ("Pressure", CurrentPressure));
+```
+
+Categories already declared in tree:
+
+- `LogSub3D` — gameplay default.
+- `LogSub3DNet` — replication, server/client mismatch.
+- `LogSub3DWaterProto` — water proto module.
+
+Other rules:
+
+- `LogTemp` is exclusively for one-shot scratch — never check it into shipping code.
+- For motion-chain visual validation, set `bLogPresentationChain = true` in `USub3DDebugSettings` (master switch).
+
+### Anti-patterns (refuse these)
+
+- AI "clicking" the editor via Anthropic Computer Use during inner-loop iteration. Slow, expensive, flaky. Use MCP.
+- Vision call where a `TestEqual` or a log substring match would answer the question. Burns tokens, adds noise.
+- Running tests on a packaged build during inner-loop. Editor context with `EditorContext | ProductFilter` flags is the inner-loop target; packaged-build runs are CI/nightly, not iteration.
+- `Take Automation Screenshot` without a checked-in baseline in `Saved/Automation/Comparisons/<TestName>/Approved/`. The diff is meaningless without ground truth.
+- Asking the human to launch PIE manually as part of a routine test. Acceptable only when MCP genuinely cannot reach the asserted state (rare).
+
 ## Naming conventions (enforced by .editorconfig)
 
 Standard Unreal prefixes: `A` (actors), `U` (UObjects), `S` (Slate widgets), `F` (structs), `E` (enums), `T` (templates), `b` (booleans). All PascalCase.
 
 ## Planning & source of truth
 
-- Authority-max plan: `reports/plans/2026-04-10_first_playable_strategic_analysis.md`
+- **Authority-max plan**: `reports/plans/2026-04-10_first_playable_strategic_analysis.md` — decision-making frame for FP scope.
+- **Active execution plan**: `reports/plans/2026-05-04_water_implementation_plan.md` — internal water Phase 0–5. Current branch `water-proto-minitest-pt4` runs proto mini-tests P-T3/P-T4 before main-line Phase 3–4 portage.
 - Older plan documents are subordinate references only. If they conflict, the 2026-04-10 strategic analysis takes precedence.
 - Source of truth for code is always the repository (`Source/`, `Plugins/`, `Config/`), not memory or summaries.
+
+### System status
+
+| System | Status | Reference |
+| --- | --- | --- |
+| Submarine handmade (Craniata) | Production | `BP_Submarine_Craniata`, FP target |
+| Crew embarked — Local Grid Space Authority | Done | Phase 1 complete (commits 24b1cb7, a95ce17, 716d1a2) |
+| Crew environment axis | Done | Phases 1+2+3 (2026-04-22/23) |
+| Helm cockpit redesign | Done | PIE-validated (memory `project_helm_cockpit_redesign_2026_04_18.md`) |
+| Motion-chain jitter | Done | Project Settings → Use Fixed Frame Rate 60 (memory `project_motion_chain_jitter_root_cause_2026_04_27.md`) |
+| Internal water rendering | Active | Phase 0 of water plan; proto on `water-proto-*` branches |
+| Ladder climb system | Backlog | `reports/plans/2026-04-27_ladder_climb_system.md`, post-helm roadmap |
+| Procedural crew animation | Backlog | `reports/plans/2026-04-23_procedural_crew_animation_architecture_and_execution_plan.md` |
+| Hull breaking / breach reaction loop | Backlog | Post-helm roadmap (memory `project_post_helm_roadmap_2026_04_28.md`) |
+| Generator pipeline (`Sub3DBuilder`) | Paused | FP pause; bugs go to `reports/backlog/post_fp_debt.md` |
+| Bake pipeline (`Sub3DBake`) | Paused | Legacy Proto03/04 only |
 
 ## Utility scripts
 

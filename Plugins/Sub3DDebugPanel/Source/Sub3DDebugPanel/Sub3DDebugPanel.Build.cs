@@ -15,6 +15,7 @@ public class Sub3DDebugPanel : ModuleRules
 		{
 			"CoreUObject",
 			"Engine",
+			"ApplicationCore",  // FPlatformApplicationMisc::ClipboardCopy
 			"Slate",
 			"SlateCore",
 			"InputCore",
@@ -25,7 +26,9 @@ public class Sub3DDebugPanel : ModuleRules
 			"WorkspaceMenuStructure",
 			"PropertyEditor",
 			"DeveloperSettings",
-			"Sub3D"
+			"Sub3D",
+			"Sub3DCore",       // UCompartmentWaterBake (return type of bake)
+			"Sub3DWaterBake"   // USubmarineWaterBakerLibrary (Authoring section bake button)
 		});
 	}
 }

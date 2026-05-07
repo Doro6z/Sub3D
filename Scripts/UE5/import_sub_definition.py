@@ -60,6 +60,15 @@ FALLBACK_HALF_BEAM_CM = 200.0
 # Fallback deck height when the JSON has no decks/profile data to compute ceiling.
 FALLBACK_CEIL_HEIGHT_CM = 200.0
 
+# Minimum gap (cm) between a compartment floor and the next deck above when
+# scanning for the ceiling. The Craniata stations.json `decks` list contains a
+# `lower` entry at z=-180 that does not correspond to a structural deck — it is
+# the catwalk/upper-edge of the lower-deck mesh, while the lower compartments
+# stand at z=-240. Without this gate, lower compartments end up clipped to a
+# 42 cm-tall ceiling. 100 cm rejects intra-deck markers and forces the search
+# to continue to the next true deck.
+MIN_DECK_GAP_CM = 100.0
+
 
 # ---------------------------------------------------------------------------
 # Connection type mapping
@@ -195,7 +204,9 @@ def compute_compartment_ceiling_z(compartment: dict, decks: list, deck_thick_cm:
     deck above's space).
     """
     floor_z = float(compartment["deck_z_cm"])
-    decks_above = [d for d in decks if float(d.get("z", -1e9)) > floor_z]
+    # Require MIN_DECK_GAP_CM so intra-deck markers (e.g. catwalk surface above bilge)
+    # do not get picked as the structural ceiling.
+    decks_above = [d for d in decks if float(d.get("z", -1e9)) >= floor_z + MIN_DECK_GAP_CM]
     if not decks_above:
         return hull_top_z if hull_top_z is not None else floor_z + FALLBACK_CEIL_HEIGHT_CM
     next_deck = min(decks_above, key=lambda d: float(d["z"]))

@@ -120,7 +120,11 @@
       "Bash(curl -s -X POST http://localhost:3000/mcp/tool/task_result -H 'Content-Type: application/json' -d '{\"task_id\":\"64B63C6A478134B249BBADB22D157F84\"}')",
       "Bash(curl -s http://localhost:3000/mcp/tools)",
       "Bash(python -c \"import sys,json; tools=json.load\\(sys.stdin\\); [print\\(t['name'],'->',t.get\\('schema','no schema'\\)\\) for t in tools.get\\('tools',[]\\)]\")",
-      "Bash(curl -s http://localhost:3000/mcp/tool/execute_script)"
+      "Bash(curl -s http://localhost:3000/mcp/tool/execute_script)",
+      "Bash(Get-ChildItem -Path \"C:/Dev/Sub3D/Source/Sub3DWaterProto/\" -Recurse)",
+      "Bash(Select-Object FullName)",
+      "Bash(Get-ChildItem -Path \"C:\\\\Dev\\\\Sub3D\\\\Source\\\\Sub3D\\\\Submarine\" -Recurse -Filter \"*.h\")",
+      "Bash(Select-Object -ExpandProperty FullName)"
     ],
     "additionalDirectories": [
       "c:\\Users\\coren\\AppData\\Roaming\\Antigravity\\User",

@@ -1,0 +1,127 @@
+{
+  "blueprint_path": "/Game/Sub3D/FirstPlayableRun/BP_Submarine_Craniata",
+  "name_prefix": "BP_SubDoor",
+  "count": 6,
+  "components": [
+    {
+      "component_name": "BP_SubDoor_LowerD_BallastAft_GEN_VARIABLE",
+      "component_class": "ChildActorComponent",
+      "child_actor_class": "/Game/Sub3D/Blueprint/SubBP/BP_SubDoor.BP_SubDoor_C",
+      "relative_location_cm": {
+        "x": -63.0,
+        "y": 0.0,
+        "z": -130.0
+      },
+      "relative_rotation_deg": {
+        "pitch": 0.0,
+        "yaw": 0.0,
+        "roll": 0.0
+      },
+      "relative_scale3d": {
+        "x": 1.0,
+        "y": 1.0,
+        "z": 1.0
+      }
+    },
+    {
+      "component_name": "BP_SubDoor_LowerD_BallastFwd_GEN_VARIABLE",
+      "component_class": "ChildActorComponent",
+      "child_actor_class": "/Game/Sub3D/Blueprint/SubBP/BP_SubDoor.BP_SubDoor_C",
+      "relative_location_cm": {
+        "x": 693.0,
+        "y": 0.0,
+        "z": -130.0
+      },
+      "relative_rotation_deg": {
+        "pitch": 0.0,
+        "yaw": 180.0,
+        "roll": 0.0
+      },
+      "relative_scale3d": {
+        "x": 1.0,
+        "y": 1.0,
+        "z": 1.0
+      }
+    },
+    {
+      "component_name": "BP_SubDoor_MainD_Control_GEN_VARIABLE",
+      "component_class": "ChildActorComponent",
+      "child_actor_class": "/Game/Sub3D/Blueprint/SubBP/BP_SubDoor.BP_SubDoor_C",
+      "relative_location_cm": {
+        "x": -537.6,
+        "y": 1.0420738760785753e-06,
+        "z": 90.0
+      },
+      "relative_rotation_deg": {
+        "pitch": 0.0,
+        "yaw": 0.0,
+        "roll": 0.0
+      },
+      "relative_scale3d": {
+        "x": 1.0,
+        "y": 1.0,
+        "z": 1.0
+      }
+    },
+    {
+      "component_name": "BP_SubDoor_MainD_Fwd_GEN_VARIABLE",
+      "component_class": "ChildActorComponent",
+      "child_actor_class": "/Game/Sub3D/Blueprint/SubBP/BP_SubDoor.BP_SubDoor_C",
+      "relative_location_cm": {
+        "x": 1159.1999999999998,
+        "y": 1.0420738760785753e-06,
+        "z": 90.0
+      },
+      "relative_rotation_deg": {
+        "pitch": 0.0,
+        "yaw": 180.0,
+        "roll": -0.0
+      },
+      "relative_scale3d": {
+        "x": 1.0,
+        "y": 1.0,
+        "z": 1.0
+      }
+    },
+    {
+      "component_name": "BP_SubDoor_UpperD_Airlock_Inner_GEN_VARIABLE",
+      "component_class": "ChildActorComponent",
+      "child_actor_class": "/Game/Sub3D/Blueprint/SubBP/BP_SubDoor.BP_SubDoor_C",
+      "relative_location_cm": {
+        "x": -594.0,
+        "y": 0.0,
+        "z": 389.0
+      },
+      "relative_rotation_deg": {
+        "pitch": 0.0,
+        "yaw": 0.0,
+        "roll": 0.0
+      },
+      "relative_scale3d": {
+        "x": 1.0,
+        "y": 1.0,
+        "z": 1.0
+      }
+    },
+    {
+      "component_name": "BP_SubDoor_UpperD_Armory_GEN_VARIABLE",
+      "component_class": "ChildActorComponent",
+      "child_actor_class": "/Game/Sub3D/Blueprint/SubBP/BP_SubDoor.BP_SubDoor_C",
+      "relative_location_cm": {
+        "x": 943.0,
+        "y": -132.0,
+        "z": 389.0
+      },
+      "relative_rotation_deg": {
+        "pitch": 0.0,
+        "yaw": 180.0,
+        "roll": 0.0
+      },
+      "relative_scale3d": {
+        "x": 1.0,
+        "y": 1.0,
+        "z": 1.0
+      }
+    }
+  ]
+}

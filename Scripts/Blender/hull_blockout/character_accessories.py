@@ -2,7 +2,9 @@
 Sub3D — Crew Character + Full Accessories Kit
 ===============================================
 One scene, everything visible:
-  - 5 dressed body outfits (multi-material, 2cm voxels)
+  - 1 base nude body (multi-material, 2cm voxels + 0.67cm fingers)
+  - 5 modular clothing previews (base body + clothing mesh)
+  - 1 normalized Tier 1 pressure suit (base body + suit mesh)
   - 6 face variations (0.5cm relief plates with 3D depth)
   - 5 beards (2cm)
   - 5 head equipment (2cm)
@@ -11,9 +13,17 @@ One scene, everything visible:
 Blender > Scripting > Open > Alt+P
 """
 
+import random
+
 import bpy
 
 VOXEL = 2
+CHARACTER_SPACING_CM = 200
+ACCESSORY_SPACING_CM = 60
+ITEM_SPACING_CM = 90
+SECTION_GAP_CM = 100
+ASSEMBLY_X_CM = 240
+FACE_FORWARD_CM = 2
 
 # ═══════════════════════════════════════════════════════════
 # MATERIAL INDICES
@@ -24,38 +34,449 @@ SUIT_DK = 2
 BOOT    = 3
 HAIR    = 4
 ACCENT  = 5
+HELMET     = 6
+SUIT_SHELL = 7
+JOINT      = 8
+BRASS      = 9
+VISOR_GLOW = 10
+LCD_GREEN  = 11
+LIGHT      = 12
+ARMOR      = 13
+EXOSKEL    = 14
+BIOLUM_C   = 15
+BIOLUM_V   = 16
 
 # Per-outfit colors for SUIT, SUIT_DK, ACCENT slots
 OUTFIT_DEFS = {
     'crew': {
         'label': 'Crew_Basic',
-        'suit':    (0.15, 0.28, 0.22),
-        'suit_dk': (0.07, 0.16, 0.12),
-        'accent':  (0.10, 0.10, 0.10),
+        'suit':    (0.03, 0.07, 0.13),   # Navy mechanic coverall
+        'suit_dk': (0.01, 0.02, 0.04),
+        'accent':  (0.70, 0.55, 0.18),   # Worn brass patches
     },
     'engineer': {
         'label': 'Engineer',
-        'suit':    (0.15, 0.28, 0.22),
-        'suit_dk': (0.07, 0.16, 0.12),
-        'accent':  (0.85, 0.45, 0.05),  # Orange hi-vis
+        'suit':    (0.70, 0.26, 0.09),   # Dirty orange coverall
+        'suit_dk': (0.28, 0.12, 0.05),
+        'accent':  (0.78, 0.56, 0.12),   # Yellow hardhat/paint
     },
     'captain': {
         'label': 'Captain',
-        'suit':    (0.05, 0.08, 0.18),   # Navy
-        'suit_dk': (0.03, 0.04, 0.10),
+        'suit':    (0.16, 0.16, 0.15),   # Faded charcoal jacket
+        'suit_dk': (0.06, 0.06, 0.05),
         'accent':  (0.85, 0.65, 0.10),   # Gold
     },
     'diver': {
         'label': 'Diver',
-        'suit':    (0.05, 0.05, 0.05),   # Black wetsuit
-        'suit_dk': (0.02, 0.02, 0.02),
-        'accent':  (0.90, 0.80, 0.10),   # Yellow
+        'suit':    (0.025, 0.025, 0.03), # Black wetsuit
+        'suit_dk': (0.01, 0.01, 0.012),
+        'accent':  (0.66, 0.52, 0.12),   # Brass/gold bands
     },
     'medic': {
         'label': 'Medic',
-        'suit':    (0.80, 0.80, 0.78),   # White coat
-        'suit_dk': (0.60, 0.60, 0.58),
-        'accent':  (0.75, 0.10, 0.10),   # Red cross
+        'suit':    (0.70, 0.67, 0.58),   # Worn off-white jumpsuit
+        'suit_dk': (0.42, 0.39, 0.33),
+        'accent':  (0.65, 0.08, 0.06),   # Red cross
+    },
+}
+CLOTHING_KEYS = ['crew', 'engineer', 'captain', 'diver', 'medic']
+
+# ═══════════════════════════════════════════════════════════
+# COMBI TIER 1 DEFINITIONS
+# ═══════════════════════════════════════════════════════════
+
+COMBI_TIER1_DEFS = {
+    'default': {
+        'label': 'Combi_T1_Default',
+        'shell':    (0.29, 0.31, 0.32),  # #4A4E52 brushed gunmetal
+        'shell_dk': (0.10, 0.10, 0.10),  # #1A1A1A rubber/dark plate
+        'helmet':   (0.29, 0.31, 0.32),  # Same tier color for every role
+        'brass':    (0.72, 0.45, 0.17),  # #B8732C copper/brass
+        'accent':   (0.79, 0.52, 0.12),
+    },
+    't2_abyss': {
+        'label': 'Combi_T2_Abyss',
+        'shell':    (0.36, 0.53, 0.42),  # Hospital green, oxidized and colder
+        'shell_dk': (0.04, 0.12, 0.16),  # Deep blue rubber
+        'helmet':   (0.20, 0.34, 0.36),
+        'brass':    (0.72, 0.45, 0.17),
+        'accent':   (0.08, 0.28, 0.48),
+    },
+    't3_hadal': {
+        'label': 'Combi_T3_Hadal',
+        'shell':    (0.42, 0.08, 0.06),  # Red pressure plating
+        'shell_dk': (0.02, 0.04, 0.12),  # Dark blue under-suit
+        'helmet':   (0.07, 0.10, 0.22),
+        'brass':    (0.82, 0.34, 0.10),
+        'accent':   (0.06, 0.30, 0.68),
+    },
+    'camera_black': {
+        'label': 'Combi_CameraRig',
+        'shell':    (0.15, 0.18, 0.20),
+        'shell_dk': (0.02, 0.02, 0.025),
+        'helmet':   (0.08, 0.09, 0.10),
+        'brass':    (0.55, 0.34, 0.15),
+        'accent':   (0.18, 0.42, 0.56),
+    },
+}
+
+# ═══════════════════════════════════════════════════════════
+# MODULAR EQUIPMENT MODULE LISTS
+# ═══════════════════════════════════════════════════════════
+
+HELMET_MODULES = {
+    'helmet_t1_default': {
+        'label': 'Helmet_T1_Default',
+        'tier_visual': 1,
+        'flags': {'has_lights': True, 'has_panoramic_visor': True},
+        'build_fn': 'build_helmet_t1_default',
+    },
+    'helmet_t1_lit': {
+        'label': 'Helmet_T1_Lit',
+        'tier_visual': 1,
+        'flags': {'has_lights': True, 'light_consumption_high': True},
+        'build_fn': 'build_helmet_t1_lit',
+    },
+    'helmet_t1_modular': {
+        'label': 'Helmet_T1_ModularHUD',
+        'tier_visual': 1,
+        'flags': {'has_lights': True, 'has_hud_slot': True},
+        'build_fn': 'build_helmet_t1_modular',
+    },
+    'helmet_t1_armored': {
+        'label': 'Helmet_T1_Armored',
+        'tier_visual': 1,
+        'flags': {'has_lights': True, 'is_armored': True},
+        'build_fn': 'build_helmet_t1_armored',
+    },
+    'helmet_t2_observer': {
+        'label': 'Helmet_T2_Observer',
+        'tier_visual': 2,
+        'flags': {'has_lights': True, 'has_panoramic_visor': True, 'has_sensor_crown': True},
+        'build_fn': 'build_helmet_t2_observer',
+        'material_variant': 't2_abyss',
+    },
+    'helmet_t2_camera': {
+        'label': 'Helmet_T2_CameraRig',
+        'tier_visual': 2,
+        'flags': {'has_lights': True, 'no_visor': True, 'has_camera_cluster': True},
+        'build_fn': 'build_helmet_t2_camera',
+        'material_variant': 'camera_black',
+    },
+    'helmet_t3_splitlens': {
+        'label': 'Helmet_T3_SplitLens',
+        'tier_visual': 3,
+        'flags': {'has_lights': True, 'has_split_lenses': True, 'is_armored': True},
+        'build_fn': 'build_helmet_t3_splitlens',
+        'material_variant': 't3_hadal',
+    },
+}
+
+SUIT_MODULES = {
+    'suit_t1_default': {
+        'label': 'Suit_T1_Default',
+        'tier_visual': 1,
+        'flags': {'has_o2_tank': True, 'inventory_size': 'medium'},
+        'build_fn': 'build_suit_t1_default',
+    },
+    'suit_t1_explorer': {
+        'label': 'Suit_T1_Explorer',
+        'tier_visual': 1,
+        'flags': {'has_o2_tank': True, 'inventory_size': 'medium', 'has_sensor_pack': True},
+        'build_fn': 'build_suit_t1_explorer',
+    },
+    'suit_t1_mining': {
+        'label': 'Suit_T1_Mining',
+        'tier_visual': 1,
+        'flags': {'has_o2_tank': True, 'inventory_size': 'large', 'is_high_visibility': True},
+        'build_fn': 'build_suit_t1_mining',
+    },
+    'suit_t1_combat': {
+        'label': 'Suit_T1_Combat',
+        'tier_visual': 1,
+        'flags': {'has_o2_tank': True, 'is_armored': True, 'inventory_size': 'small'},
+        'build_fn': 'build_suit_t1_combat',
+    },
+    'suit_t2_abyssal': {
+        'label': 'Suit_T2_Abyssal',
+        'tier_visual': 2,
+        'flags': {'has_o2_tank': True, 'inventory_size': 'large', 'has_external_frame': True},
+        'build_fn': 'build_suit_t2_abyssal',
+        'material_variant': 't2_abyss',
+    },
+    'suit_t3_hadal': {
+        'label': 'Suit_T3_HadalFrame',
+        'tier_visual': 3,
+        'flags': {'has_o2_tank': True, 'is_armored': True, 'has_external_frame': True},
+        'build_fn': 'build_suit_t3_hadal',
+        'material_variant': 't3_hadal',
+    },
+}
+
+GLOVE_MODULES = {
+    'gloves_t1_default': {
+        'label': 'Gloves_T1_Default',
+        'tier_visual': 1,
+        'flags': {'sealed': True},
+        'build_fn': 'build_gloves_t1_default',
+    },
+    'gloves_t1_grapple': {
+        'label': 'Gloves_T1_Grapple',
+        'tier_visual': 1,
+        'flags': {'sealed': True, 'has_grapple': True},
+        'build_fn': 'build_gloves_t1_grapple',
+    },
+    'gloves_t1_tool': {
+        'label': 'Gloves_T1_UtilityGrip',
+        'tier_visual': 1,
+        'flags': {'sealed': True, 'has_tool_mount': True, 'has_reinforced_grip': True},
+        'build_fn': 'build_gloves_t1_tool',
+    },
+    'gloves_t1_reinforced': {
+        'label': 'Gloves_T1_Reinforced',
+        'tier_visual': 1,
+        'flags': {'sealed': True, 'is_armored': True},
+        'build_fn': 'build_gloves_t1_reinforced',
+    },
+}
+
+BOOT_MODULES = {
+    'boots_t1_default': {
+        'label': 'Boots_T1_Default',
+        'tier_visual': 1,
+        'flags': {'sealed': True, 'anti_slip': True},
+        'build_fn': 'build_boots_t1_default',
+    },
+    'boots_t1_propeller': {
+        'label': 'Boots_T1_Propeller',
+        'tier_visual': 1,
+        'flags': {'sealed': True, 'has_swim_propulsion': True},
+        'build_fn': 'build_boots_t1_propeller',
+    },
+    'boots_t1_magnetic': {
+        'label': 'Boots_T1_Magnetic',
+        'tier_visual': 1,
+        'flags': {'sealed': True, 'is_magnetic': True},
+        'build_fn': 'build_boots_t1_magnetic',
+    },
+    'boots_t1_combat': {
+        'label': 'Boots_T1_Combat',
+        'tier_visual': 1,
+        'flags': {'sealed': True, 'is_armored': True},
+        'build_fn': 'build_boots_t1_combat',
+    },
+}
+
+EQUIPMENT_MODULES = {
+    'helmet': HELMET_MODULES,
+    'suit': SUIT_MODULES,
+    'gloves': GLOVE_MODULES,
+    'boots': BOOT_MODULES,
+}
+
+EQUIPMENT_LOADOUTS = [
+    (
+        'Standard',
+        {
+            'helmet': 'helmet_t1_default',
+            'suit': 'suit_t1_default',
+            'gloves': 'gloves_t1_default',
+            'boots': 'boots_t1_default',
+        },
+    ),
+    (
+        'T1_Explorer',
+        {
+            'helmet': 'helmet_t1_modular',
+            'suit': 'suit_t1_explorer',
+            'gloves': 'gloves_t1_grapple',
+            'boots': 'boots_t1_propeller',
+            'material_variant': 'default',
+        },
+    ),
+    (
+        'T1_Mining',
+        {
+            'helmet': 'helmet_t1_lit',
+            'suit': 'suit_t1_mining',
+            'gloves': 'gloves_t1_tool',
+            'boots': 'boots_t1_magnetic',
+            'material_variant': 'default',
+        },
+    ),
+    (
+        'T1_Combat',
+        {
+            'helmet': 'helmet_t1_armored',
+            'suit': 'suit_t1_combat',
+            'gloves': 'gloves_t1_reinforced',
+            'boots': 'boots_t1_combat',
+            'material_variant': 'default',
+        },
+    ),
+    (
+        'T2_Abyss',
+        {
+            'helmet': 'helmet_t2_observer',
+            'suit': 'suit_t2_abyssal',
+            'gloves': 'gloves_t1_tool',
+            'boots': 'boots_t1_propeller',
+            'material_variant': 't2_abyss',
+        },
+    ),
+    (
+        'T2_CameraRig',
+        {
+            'helmet': 'helmet_t2_camera',
+            'suit': 'suit_t1_explorer',
+            'gloves': 'gloves_t1_tool',
+            'boots': 'boots_t1_magnetic',
+            'material_variant': 'camera_black',
+        },
+    ),
+    (
+        'T3_Hadal',
+        {
+            'helmet': 'helmet_t3_splitlens',
+            'suit': 'suit_t3_hadal',
+            'gloves': 'gloves_t1_reinforced',
+            'boots': 'boots_t1_combat',
+            'material_variant': 't3_hadal',
+        },
+    ),
+    (
+        'Recovery',
+        {
+            'helmet': 'helmet_t1_lit',
+            'suit': 'suit_t1_explorer',
+            'gloves': 'gloves_t1_default',
+            'boots': 'boots_t1_propeller',
+            'material_variant': 't2_abyss',
+        },
+    ),
+    (
+        'HullRepair',
+        {
+            'helmet': 'helmet_t1_modular',
+            'suit': 'suit_t1_mining',
+            'gloves': 'gloves_t1_tool',
+            'boots': 'boots_t1_magnetic',
+            'material_variant': 'default',
+        },
+    ),
+]
+
+BACK_MODULES = {
+    'tank_o2_single': {
+        'label': 'Tank_O2_Single',
+        'flags': {'o2_tanks': 1},
+        'build_fn': 'build_back_tank_o2_single',
+        'material_variant': 'default',
+    },
+    'tank_o2_double': {
+        'label': 'Tank_O2_Double',
+        'flags': {'o2_tanks': 2},
+        'build_fn': 'build_back_tank_o2_double',
+        'material_variant': 't2_abyss',
+    },
+    'tank_o2_liquid_heavy': {
+        'label': 'Tank_LiquidO2_Heavy',
+        'flags': {'o2_tanks': 1, 'is_pressurized_heavy': True},
+        'build_fn': 'build_back_tank_o2_liquid_heavy',
+        'material_variant': 't3_hadal',
+    },
+    'pack_co2_recycler': {
+        'label': 'Pack_CO2_Recycler',
+        'flags': {'has_recycler': True},
+        'build_fn': 'build_back_pack_co2_recycler',
+        'material_variant': 't2_abyss',
+    },
+    'pack_abyssal_battery': {
+        'label': 'Pack_Abyssal_Battery',
+        'flags': {'has_battery': True, 'has_bioluminescent_accents': True},
+        'build_fn': 'build_back_pack_abyssal_battery',
+        'material_variant': 't3_hadal',
+    },
+}
+
+HANDHELD_TOOLS = {
+    'tool_pipe_wrench': {
+        'label': 'Tool_PipeWrench',
+        'flags': {'is_repair_tool': True, 'two_handed': False},
+        'build_fn': 'build_tool_pipe_wrench',
+    },
+    'tool_welder': {
+        'label': 'Tool_Welder',
+        'flags': {'is_repair_tool': True, 'has_heat': True},
+        'build_fn': 'build_tool_welder',
+    },
+    'tool_diagnostic': {
+        'label': 'Tool_DiagnosticMeter',
+        'flags': {'is_repair_tool': True, 'has_screen': True},
+        'build_fn': 'build_tool_diagnostic',
+    },
+    'tool_flashlight': {
+        'label': 'Tool_IndustrialFlashlight',
+        'flags': {'has_light': True},
+        'build_fn': 'build_tool_flashlight',
+    },
+    'tool_drill_t1': {
+        'label': 'Tool_Drill_T1_TwoHand',
+        'flags': {'is_mining_tool': True, 'two_handed': True},
+        'build_fn': 'build_tool_drill_t1',
+    },
+    'tool_drill_t2_heavy': {
+        'label': 'Tool_Drill_T2_Heavy',
+        'flags': {'is_mining_tool': True, 'two_handed': True, 'is_heavy': True},
+        'build_fn': 'build_tool_drill_t2_heavy',
+    },
+    'tool_propulsor_onehand': {
+        'label': 'Tool_Propulsor_OneHand',
+        'flags': {'has_swim_propulsion': True, 'two_handed': False},
+        'build_fn': 'build_tool_propulsor_onehand',
+    },
+    'tool_propulsor_heavy': {
+        'label': 'Tool_Propulsor_HeavyTwoHand',
+        'flags': {'has_swim_propulsion': True, 'two_handed': True, 'is_heavy': True},
+        'build_fn': 'build_tool_propulsor_heavy',
+    },
+}
+
+WEAPONS = {
+    'weapon_harpoon_pistol': {
+        'label': 'Weapon_HarpoonPistol',
+        'flags': {'fires_harpoon': True},
+        'build_fn': 'build_weapon_harpoon_pistol',
+    },
+    'weapon_board_revolver': {
+        'label': 'Weapon_BoardRevolver',
+        'flags': {'ballistic': True, 'emergency_only': True},
+        'build_fn': 'build_weapon_board_revolver',
+    },
+    'weapon_harpoon_rifle': {
+        'label': 'Weapon_HarpoonRifle',
+        'flags': {'fires_harpoon': True, 'two_handed': True},
+        'build_fn': 'build_weapon_harpoon_rifle',
+    },
+    'weapon_needle_launcher': {
+        'label': 'Weapon_NeedleLauncher',
+        'flags': {'fires_needles': True, 'underwater': True},
+        'build_fn': 'build_weapon_needle_launcher',
+    },
+    'weapon_net_launcher': {
+        'label': 'Weapon_NetLauncher',
+        'flags': {'fires_net': True, 'non_lethal': True},
+        'build_fn': 'build_weapon_net_launcher',
+    },
+    'weapon_cavitation_pistol': {
+        'label': 'Weapon_CavitationPistol',
+        'flags': {'experimental': True, 'underwater': True},
+        'build_fn': 'build_weapon_cavitation_pistol',
+    },
+    'weapon_signal_pistol': {
+        'label': 'Weapon_SignalPistol',
+        'flags': {'signal': True},
+        'build_fn': 'build_weapon_signal_pistol',
     },
 }
 
@@ -63,6 +484,15 @@ OUTFIT_DEFS = {
 SKIN_COL = (0.72, 0.55, 0.42)
 BOOT_COL = (0.08, 0.07, 0.06)
 HAIR_COL = (0.20, 0.12, 0.06)
+JOINT_COL = (0.10, 0.10, 0.10)
+VISOR_GLOW_COL = (1.00, 0.69, 0.38)
+LCD_GREEN_COL = (0.29, 0.88, 0.44)
+SAFETY_ACCENT_COL = (0.79, 0.52, 0.12)
+LIGHT_COL = (0.95, 0.93, 0.85)
+ARMOR_COL = (0.18, 0.20, 0.22)
+EXOSKEL_COL = (0.10, 0.10, 0.10)
+BIOLUM_C_COL = (0.29, 0.88, 0.88)
+BIOLUM_V_COL = (0.69, 0.25, 0.88)
 
 
 # ═══════════════════════════════════════════════════════════
@@ -287,6 +717,122 @@ def dress_body(body_set, outfit_key):
                 g[(x,y,z)] = SUIT  # Long coat
 
     return g
+
+
+# ═══════════════════════════════════════════════════════════
+# BODY + CLOTHING SPLIT — 2cm voxels
+# ═══════════════════════════════════════════════════════════
+
+def build_base_body_mat(body_set):
+    return {p: SKIN for p in body_set}
+
+def build_clothing(clothing_key, body_set):
+    g = {}
+
+    def set_mat(x, y, z, mat):
+        g[(x, y, z)] = mat
+
+    def fb(x0, y0, z0, x1, y1, z1, mat):
+        for x in range(x0, x1+1):
+            for y in range(y0, y1+1):
+                for z in range(z0, z1+1):
+                    set_mat(x, y, z, mat)
+
+    def add_if_body(cond, mat):
+        for p in body_set:
+            if cond(*p):
+                g[p] = mat
+
+    def seam_front(z0, z1, mat=SUIT_DK):
+        for z in range(z0, z1+1):
+            for x in range(3, 6):
+                set_mat(x, 0, z, mat)
+
+    def belt(z=49):
+        for x in range(-5, 6):
+            for y in range(-9, 10):
+                if (x, y, z) in body_set or abs(x) >= 4 or abs(y) >= 8:
+                    set_mat(x, y, z, SUIT_DK)
+        fb(4, -1, z, 5, 1, z+1, ACCENT)
+
+    # Shared clothing coverage: torso, legs, boots, upper arms.
+    add_if_body(lambda x, y, z: 44 <= z <= 73 and abs(y) <= 13, SUIT)
+    add_if_body(lambda x, y, z: 6 <= z <= 43, SUIT)
+    add_if_body(lambda x, y, z: z <= 5, BOOT)
+    add_if_body(lambda x, y, z: abs(y) >= 11 and 56 <= z <= 72, SUIT)
+    add_if_body(lambda x, y, z: abs(y) >= 11 and 40 <= z <= 55, SUIT_DK)
+    seam_front(52, 70)
+    belt()
+
+    if clothing_key == 'crew':
+        # Navy operator: harness, headset, chest radio, thigh straps.
+        fb(5, -7, 56, 6, -4, 66, SUIT_DK)
+        fb(5, 4, 56, 6, 7, 66, SUIT_DK)
+        fb(6, -3, 59, 7, 3, 64, ACCENT)
+        fb(-3, -9, 30, 4, -7, 33, SUIT_DK)
+        fb(-3, 7, 30, 4, 9, 33, SUIT_DK)
+        fb(-1, -7, 83, 1, -6, 86, SUIT_DK)
+        fb(-1, 6, 83, 1, 7, 86, SUIT_DK)
+        fb(4, -1, 57, 6, 1, 60, ACCENT)
+
+    elif clothing_key == 'engineer':
+        # Orange heavy coverall: hardhat, rolled sleeves, tool belt.
+        fb(-5, -6, 90, 5, 6, 91, ACCENT)
+        fb(-4, -5, 92, 4, 5, 93, ACCENT)
+        fb(3, -7, 90, 7, 7, 90, ACCENT)
+        fb(0, -12, 58, 1, -10, 61, SUIT_DK)
+        fb(0, 10, 58, 1, 12, 61, SUIT_DK)
+        fb(-5, -9, 47, -3, -6, 52, ACCENT)
+        fb(-5, 6, 47, -3, 9, 52, ACCENT)
+        fb(5, -2, 44, 6, 2, 48, SUIT_DK)
+        fb(3, -7, 24, 5, -3, 31, SUIT_DK)
+        fb(3, 3, 24, 5, 7, 31, SUIT_DK)
+
+    elif clothing_key == 'captain':
+        # Charcoal jacket and peaked cap with gold rank details.
+        fb(-5, -9, 52, 6, 9, 57, SUIT_DK)
+        fb(1, -12, 69, 2, -9, 71, ACCENT)
+        fb(1, 9, 69, 2, 12, 71, ACCENT)
+        fb(-5, -5, 90, 5, 5, 91, SUIT_DK)
+        fb(-4, -4, 92, 4, 4, 93, SUIT_DK)
+        fb(4, -5, 90, 8, 5, 90, SUIT_DK)
+        fb(5, -1, 91, 6, 1, 91, ACCENT)
+        fb(3, -3, 72, 4, 3, 73, ACCENT)
+        fb(4, -8, 35, 5, -4, 41, SUIT_DK)
+        fb(4, 4, 35, 5, 8, 41, SUIT_DK)
+
+    elif clothing_key == 'diver':
+        # Black diver undersuit: gold bands, hoses, compact back tank.
+        add_if_body(lambda x, y, z: abs(y) >= 11 and 40 <= z <= 72, SUIT)
+        fb(4, -12, 62, 5, -10, 64, ACCENT)
+        fb(4, 10, 62, 5, 12, 64, ACCENT)
+        fb(3, -8, 24, 5, -1, 26, ACCENT)
+        fb(3, 1, 24, 5, 8, 26, ACCENT)
+        fb(-7, -3, 50, -5, 3, 67, SUIT_DK)
+        fb(-8, -2, 52, -6, 2, 65, ACCENT)
+        for i in range(12):
+            set_mat(-6 + i // 3, -8 + i, 62 + i // 3, SUIT_DK)
+            set_mat(-5 + i // 3, -8 + i, 62 + i // 3, SUIT_DK)
+        fb(5, -1, 55, 6, 1, 59, ACCENT)
+
+    elif clothing_key == 'medic':
+        # Worn off-white medical suit: red crosses, chest pouch, armband.
+        fb(3, -7, 56, 6, 7, 63, SUIT_DK)
+        fb(6, -1, 58, 7, 1, 61, ACCENT)
+        fb(5, 0, 57, 7, 0, 62, ACCENT)
+        fb(3, 5, 46, 6, 9, 53, SUIT_DK)
+        fb(5, 6, 48, 7, 8, 51, ACCENT)
+        fb(6, 7, 47, 6, 7, 52, ACCENT)
+        fb(0, -12, 62, 1, -10, 65, ACCENT)
+        fb(0, 10, 62, 1, 12, 65, ACCENT)
+        fb(2, -8, 29, 5, -4, 38, SUIT_DK)
+        fb(2, 4, 29, 5, 8, 38, SUIT_DK)
+
+    return g
+
+def build_visible_body_under_clothing(body_set, clothing_grid):
+    covered_body = {p for p in clothing_grid if p in body_set}
+    return {p: SKIN for p in body_set if p not in covered_body}
 
 
 # ═══════════════════════════════════════════════════════════
@@ -818,6 +1364,737 @@ def equip_05_gasmask():
 
 
 # ═══════════════════════════════════════════════════════════
+# COMBI TIER 1 BUILDER — 2cm voxels
+# ═══════════════════════════════════════════════════════════
+
+def build_combi_tier1(body_voxels=None):
+    if body_voxels is None:
+        body = set()
+    elif hasattr(body_voxels, 'keys'):
+        body = set(body_voxels.keys())
+    else:
+        body = set(body_voxels)
+
+    g = {
+        SUIT_DK: set(),
+        HELMET: set(),
+        SUIT_SHELL: set(),
+        JOINT: set(),
+        BRASS: set(),
+        VISOR_GLOW: set(),
+        LCD_GREEN: set(),
+    }
+
+    def overlay(mat, x, y, z):
+        p = (x, y, z)
+        if p in body:
+            return
+        for layer in g.values():
+            layer.discard(p)
+        g[mat].add(p)
+
+    def fb(mat, x0, y0, z0, x1, y1, z1):
+        for x in range(x0, x1+1):
+            for y in range(y0, y1+1):
+                for z in range(z0, z1+1):
+                    overlay(mat, x, y, z)
+
+    def profile(mat, slices):
+        sl = sorted(slices, key=lambda s: s[0])
+        for z in range(sl[0][0], sl[-1][0]+1):
+            lo, hi = sl[0], sl[-1]
+            for i in range(len(sl)-1):
+                if sl[i][0] <= z <= sl[i+1][0]:
+                    lo, hi = sl[i], sl[i+1]
+                    break
+            span = hi[0] - lo[0]
+            t = (z - lo[0]) / span if span > 0 else 0
+            yw = round(lo[1] + (hi[1] - lo[1]) * t)
+            xd = round(lo[2] + (hi[2] - lo[2]) * t)
+            fb(mat, -xd, -yw, z, xd, yw, z)
+
+    def tube_y(mat, y0, y1, cx, cz, rx, rz):
+        for y in range(y0, y1+1):
+            for x in range(cx-rx, cx+rx+1):
+                for z in range(cz-rz, cz+rz+1):
+                    if ((x - cx) / (rx + 0.25)) ** 2 + ((z - cz) / (rz + 0.25)) ** 2 <= 1.0:
+                        overlay(mat, x, y, z)
+
+    def leg_volume(mat, cy, z0, z1, rx, ry):
+        for z in range(z0, z1+1):
+            for x in range(-rx, rx+1):
+                for y in range(cy-ry, cy+ry+1):
+                    if (x / (rx + 0.25)) ** 2 + ((y - cy) / (ry + 0.25)) ** 2 <= 1.0:
+                        overlay(mat, x, y, z)
+
+    # Exterior panoramic visor: front glass continues over the crown to the upper nape.
+    for z in range(80, 92):
+        y_half = 5 if z in (80, 91) else 7
+        for y in range(-y_half, y_half+1):
+            for x in range(11, 15):
+                overlay(VISOR_GLOW, x, y, z)
+            if abs(y) >= y_half - 1:
+                for x in range(8, 12):
+                    overlay(VISOR_GLOW, x, y, z)
+
+    for z in range(90, 95):
+        for x in range(-6, 13):
+            for y in range(-6, 7):
+                d = ((x - 3) / 9.6) ** 2 + (y / 6.4) ** 2 + ((z - 89) / 5.8) ** 2
+                if 0.72 <= d <= 1.22:
+                    overlay(VISOR_GLOW, x, y, z)
+
+    for x in range(-8, -2):
+        for y in range(-5, 6):
+            for z in range(86, 94):
+                d = ((x + 5) / 3.8) ** 2 + (y / 5.8) ** 2 + ((z - 89) / 5.8) ** 2
+                if 0.68 <= d <= 1.16:
+                    overlay(VISOR_GLOW, x, y, z)
+
+    # Thin helmet frame, rear shell, temple lamps, and sealed neck collar.
+    fb(HELMET, -10, -7, 80, -8, 7, 93)
+    fb(HELMET, -9, -8, 80, 6, -7, 91)
+    fb(HELMET, -9, 7, 80, 6, 8, 91)
+    fb(HELMET, -9, -6, 93, -5, 6, 95)
+    fb(JOINT, -8, -8, 75, 8, 8, 77)
+    fb(JOINT, -7, -7, 78, 7, 7, 78)
+    fb(VISOR_GLOW, 11, -10, 84, 14, -9, 87)
+    fb(VISOR_GLOW, 11, 9, 84, 14, 10, 87)
+    fb(BRASS, 15, -7, 80, 15, -6, 91)
+    fb(BRASS, 15, 6, 80, 15, 7, 91)
+    fb(BRASS, 15, -6, 80, 15, 6, 81)
+    fb(BRASS, 15, -5, 91, 15, 5, 92)
+    fb(BRASS, -8, -6, 88, -8, 6, 92)
+
+    # Pressurized torso shell with armor plates.
+    profile(SUIT_SHELL, [
+        (42, 10, 7), (48, 11, 8), (56, 13, 9),
+        (64, 14, 8), (70, 11, 7), (74, 7, 5),
+    ])
+    fb(SUIT_DK, 7, -8, 53, 9, 8, 69)
+    fb(SUIT_DK, 6, -6, 44, 8, 6, 53)
+    fb(SUIT_DK, -9, -8, 50, -7, 8, 72)
+    fb(SUIT_DK, -6, -5, 69, -4, 5, 74)
+    fb(SUIT_SHELL, -5, 12, 64, 6, 18, 74)
+    fb(SUIT_SHELL, -5, -18, 64, 6, -12, 74)
+
+    # Arms, gloves, legs, and boots.
+    tube_y(SUIT_SHELL, 12, 36, 0, 68, 4, 5)
+    tube_y(SUIT_SHELL, -36, -12, 0, 68, 4, 5)
+    fb(SUIT_DK, -4, 32, 64, 5, 40, 72)
+    fb(SUIT_DK, -4, -40, 64, 5, -32, 72)
+    leg_volume(SUIT_SHELL, 4, 23, 43, 5, 5)
+    leg_volume(SUIT_SHELL, -4, 23, 43, 5, 5)
+    leg_volume(SUIT_SHELL, 4, 6, 22, 4, 5)
+    leg_volume(SUIT_SHELL, -4, 6, 22, 4, 5)
+    fb(SUIT_DK, -4, 1, 0, 8, 9, 7)
+    fb(SUIT_DK, -4, -9, 0, 8, -1, 7)
+
+    # Rubber seals and articulation bands.
+    fb(JOINT, -5, 11, 65, 5, 15, 72)
+    fb(JOINT, -5, -15, 65, 5, -11, 72)
+    fb(JOINT, -4, 21, 64, 4, 24, 72)
+    fb(JOINT, -4, -24, 64, 4, -21, 72)
+    fb(JOINT, -4, 32, 64, 4, 34, 72)
+    fb(JOINT, -4, -34, 64, 4, -32, 72)
+    fb(JOINT, -6, -11, 43, 6, 11, 46)
+    fb(JOINT, -5, 0, 22, 5, 9, 25)
+    fb(JOINT, -5, -9, 22, 5, 0, 25)
+    fb(JOINT, -4, 1, 5, 5, 9, 7)
+    fb(JOINT, -4, -9, 5, 5, -1, 7)
+
+    # Back tank, harness, hoses, front valve, LCD, rivets.
+    for z in range(48, 76):
+        for x in range(-15, -8):
+            for y in range(-5, 6):
+                if ((x + 12) / 3.5) ** 2 + (y / 5.4) ** 2 <= 1.0:
+                    overlay(BRASS, x, y, z)
+    fb(SUIT_DK, -15, -4, 48, -9, 4, 50)
+    fb(SUIT_DK, -15, -4, 74, -9, 4, 76)
+    fb(BRASS, -10, -7, 55, -8, 7, 57)
+    fb(BRASS, -10, -7, 66, -8, 7, 68)
+    fb(BRASS, -13, -1, 76, -11, 1, 78)
+
+    hose_path = [
+        (-10, -3, 70), (-9, -3, 70), (-8, -3, 69), (-7, -3, 69),
+        (-6, -3, 68), (-5, -3, 68), (-4, -3, 67), (-3, -3, 66),
+        (-2, -3, 65), (-1, -3, 64), (0, -3, 63), (1, -3, 62),
+        (2, -2, 61), (3, -2, 60), (4, -2, 60), (5, -2, 60),
+    ]
+    for x, y, z in hose_path:
+        fb(BRASS, x, y, z, x, y+1, z)
+    fb(BRASS, 8, -3, 57, 10, 3, 62)
+    fb(BRASS, 10, -1, 59, 11, 1, 60)
+    fb(LCD_GREEN, 5, -29, 66, 6, -25, 70)
+
+    for y in (-8, -4, 4, 8):
+        for z in (54, 61, 68):
+            overlay(BRASS, 10, y, z)
+    for y in (-17, 17):
+        for z in (66, 72):
+            overlay(BRASS, 6, y, z)
+
+    return {mat: voxels for mat, voxels in g.items() if voxels}
+
+
+# ═══════════════════════════════════════════════════════════
+# MODULAR EQUIPMENT BUILDERS — split from canonical T1 combi
+# ═══════════════════════════════════════════════════════════
+
+def _merge_layers(dst, src):
+    for mat, voxels in src.items():
+        dst.setdefault(mat, set()).update(voxels)
+
+def _is_combi_glove_zone(p):
+    x, y, z = p
+    return abs(y) >= 29 and 60 <= z <= 75
+
+def _is_combi_boot_zone(p):
+    x, y, z = p
+    return z <= 7 and -10 <= y <= 10
+
+def _is_combi_helmet_brass(p):
+    x, y, z = p
+    return z >= 80 and x >= -9
+
+def _filter_combi_tier1(body_voxels, keep_fn):
+    result = {}
+    for mat, voxels in build_combi_tier1(body_voxels).items():
+        kept = {p for p in voxels if keep_fn(mat, p)}
+        if kept:
+            result[mat] = kept
+    return result
+
+def build_helmet_t1_default(body_voxels):
+    return _filter_combi_tier1(
+        body_voxels,
+        lambda mat, p: mat in (HELMET, VISOR_GLOW) or (mat == BRASS and _is_combi_helmet_brass(p)),
+    )
+
+def build_suit_t1_default(body_voxels):
+    return _filter_combi_tier1(
+        body_voxels,
+        lambda mat, p: (
+            mat in (SUIT_SHELL, LCD_GREEN)
+            or (
+                mat in (SUIT_DK, JOINT, BRASS)
+                and not _is_combi_glove_zone(p)
+                and not _is_combi_boot_zone(p)
+                and not (mat == BRASS and _is_combi_helmet_brass(p))
+            )
+        ),
+    )
+
+def build_gloves_t1_default(body_voxels):
+    return _filter_combi_tier1(
+        body_voxels,
+        lambda mat, p: mat in (SUIT_DK, JOINT, BRASS) and _is_combi_glove_zone(p),
+    )
+
+def build_boots_t1_default(body_voxels):
+    return _filter_combi_tier1(
+        body_voxels,
+        lambda mat, p: mat in (SUIT_DK, JOINT, BRASS, BOOT) and _is_combi_boot_zone(p),
+    )
+
+def _box_layer(layers, mat, x0, y0, z0, x1, y1, z1):
+    voxels = layers.setdefault(mat, set())
+    for x in range(x0, x1+1):
+        for y in range(y0, y1+1):
+            for z in range(z0, z1+1):
+                voxels.add((x, y, z))
+
+def _line_layer(layers, mat, points):
+    voxels = layers.setdefault(mat, set())
+    for p in points:
+        voxels.add(p)
+
+def _body_points(body_voxels):
+    if body_voxels is None:
+        return set()
+    if hasattr(body_voxels, 'keys'):
+        return set(body_voxels.keys())
+    return set(body_voxels)
+
+def _overlay_layer(layers, body, mat, x, y, z):
+    p = (x, y, z)
+    if p in body:
+        return
+    for voxels in layers.values():
+        voxels.discard(p)
+    layers.setdefault(mat, set()).add(p)
+
+def _box_overlay_layer(layers, body, mat, x0, y0, z0, x1, y1, z1):
+    for x in range(x0, x1+1):
+        for y in range(y0, y1+1):
+            for z in range(z0, z1+1):
+                _overlay_layer(layers, body, mat, x, y, z)
+
+def build_helmet_t1_lit(body_voxels):
+    layers = build_helmet_t1_default(body_voxels)
+    _box_layer(layers, LIGHT, 9, -10, 86, 12, -9, 89)
+    _box_layer(layers, LIGHT, 9, 9, 86, 12, 10, 89)
+    _box_layer(layers, LIGHT, 7, -3, 94, 11, 3, 96)
+    _box_layer(layers, BRASS, 8, -10, 85, 12, -9, 85)
+    _box_layer(layers, BRASS, 8, 9, 85, 12, 10, 85)
+    _box_layer(layers, BRASS, 6, -4, 93, 12, 4, 93)
+    return layers
+
+def build_helmet_t1_modular(body_voxels):
+    layers = build_helmet_t1_default(body_voxels)
+    _box_layer(layers, BRASS, 12, 6, 83, 14, 8, 91)
+    _box_layer(layers, LCD_GREEN, 10, -3, 92, 12, 3, 94)
+    _box_layer(layers, BIOLUM_C, 13, 7, 85, 14, 8, 89)
+    _box_layer(layers, BIOLUM_V, 13, -8, 85, 14, -7, 89)
+    return layers
+
+def build_helmet_t1_armored(body_voxels):
+    layers = build_helmet_t1_default(body_voxels)
+    _box_layer(layers, ARMOR, -12, -8, 81, -10, 8, 93)
+    _box_layer(layers, ARMOR, -10, -9, 84, 6, -8, 91)
+    _box_layer(layers, ARMOR, -10, 8, 84, 6, 9, 91)
+    _box_layer(layers, ARMOR, -7, -6, 95, 7, 6, 96)
+    _box_layer(layers, LIGHT, 10, -8, 82, 12, -7, 84)
+    _box_layer(layers, LIGHT, 10, 7, 82, 12, 8, 84)
+    return layers
+
+def build_helmet_t2_observer(body_voxels):
+    layers = build_helmet_t1_default(body_voxels)
+    _box_layer(layers, HELMET, -13, -8, 82, -10, 8, 94)
+    _box_layer(layers, BRASS, -14, -5, 86, -13, 5, 92)
+    _box_layer(layers, EXOSKEL, -12, -9, 80, 10, -8, 88)
+    _box_layer(layers, EXOSKEL, -12, 8, 80, 10, 9, 88)
+    _box_layer(layers, BIOLUM_C, 16, -4, 84, 17, -2, 89)
+    _box_layer(layers, BIOLUM_C, 16, 2, 84, 17, 4, 89)
+    _box_layer(layers, LIGHT, 13, -9, 82, 15, -8, 85)
+    _box_layer(layers, LIGHT, 13, 8, 82, 15, 9, 85)
+    _box_layer(layers, LCD_GREEN, 7, -2, 95, 12, 2, 96)
+    return layers
+
+def build_helmet_t2_camera(body_voxels):
+    body = _body_points(body_voxels)
+    layers = {}
+    _box_overlay_layer(layers, body, HELMET, -11, -8, 78, 9, 8, 93)
+    _box_overlay_layer(layers, body, HELMET, -13, -6, 82, -10, 6, 94)
+    _box_overlay_layer(layers, body, JOINT, -8, -8, 75, 8, 8, 78)
+    _box_overlay_layer(layers, body, ARMOR, 8, -6, 81, 13, 6, 91)
+    _box_overlay_layer(layers, body, ARMOR, 10, -7, 84, 15, -5, 89)
+    _box_overlay_layer(layers, body, ARMOR, 10, 5, 84, 15, 7, 89)
+    _box_overlay_layer(layers, body, BRASS, 14, -1, 83, 16, 1, 88)
+    _box_overlay_layer(layers, body, LIGHT, 16, -5, 85, 17, -4, 87)
+    _box_overlay_layer(layers, body, LIGHT, 16, 4, 85, 17, 5, 87)
+    _box_overlay_layer(layers, body, BIOLUM_C, 16, -1, 84, 17, 1, 89)
+    _box_overlay_layer(layers, body, LCD_GREEN, 11, -3, 92, 15, 3, 94)
+    _box_overlay_layer(layers, body, EXOSKEL, -14, -8, 86, -13, 8, 91)
+    return layers
+
+def build_helmet_t3_splitlens(body_voxels):
+    body = _body_points(body_voxels)
+    layers = {}
+    _box_overlay_layer(layers, body, HELMET, -12, -8, 78, 10, 8, 94)
+    _box_overlay_layer(layers, body, JOINT, -9, -8, 75, 9, 8, 78)
+    _box_overlay_layer(layers, body, ARMOR, -14, -7, 82, -11, 7, 95)
+    _box_overlay_layer(layers, body, ARMOR, 11, -8, 80, 14, -2, 92)
+    _box_overlay_layer(layers, body, ARMOR, 11, 2, 80, 14, 8, 92)
+    _box_overlay_layer(layers, body, ARMOR, 12, -1, 80, 15, 1, 93)
+    _box_overlay_layer(layers, body, VISOR_GLOW, 15, -6, 82, 16, -3, 90)
+    _box_overlay_layer(layers, body, VISOR_GLOW, 15, 3, 82, 16, 6, 90)
+    _box_overlay_layer(layers, body, BIOLUM_V, 16, -1, 86, 17, 1, 91)
+    _box_overlay_layer(layers, body, LIGHT, 13, -9, 84, 15, -8, 87)
+    _box_overlay_layer(layers, body, LIGHT, 13, 8, 84, 15, 9, 87)
+    _box_overlay_layer(layers, body, BRASS, -15, -4, 87, -14, 4, 94)
+    return layers
+
+def build_suit_t1_explorer(body_voxels):
+    layers = build_suit_t1_default(body_voxels)
+    _box_layer(layers, BIOLUM_C, 10, -9, 54, 11, -8, 68)
+    _box_layer(layers, BIOLUM_C, 10, 8, 54, 11, 9, 68)
+    _box_layer(layers, LCD_GREEN, 9, -4, 64, 11, 4, 68)
+    _box_layer(layers, BRASS, -16, -5, 56, -14, 5, 72)
+    _box_layer(layers, LIGHT, 8, -10, 60, 10, -9, 63)
+    _box_layer(layers, LIGHT, 8, 9, 60, 10, 10, 63)
+    return layers
+
+def build_suit_t1_mining(body_voxels):
+    layers = build_suit_t1_default(body_voxels)
+    _box_layer(layers, ACCENT, 9, -9, 52, 11, 9, 69)
+    _box_layer(layers, ACCENT, 7, -12, 43, 10, -8, 58)
+    _box_layer(layers, ACCENT, 7, 8, 43, 10, 12, 58)
+    _box_layer(layers, BRASS, -17, -7, 49, -15, -2, 74)
+    _box_layer(layers, BRASS, -17, 2, 49, -15, 7, 74)
+    _box_layer(layers, EXOSKEL, 11, -13, 45, 12, -10, 56)
+    _box_layer(layers, EXOSKEL, 11, 10, 45, 12, 13, 56)
+    return layers
+
+def build_suit_t1_combat(body_voxels):
+    layers = build_suit_t1_default(body_voxels)
+    _box_layer(layers, ARMOR, 10, -10, 52, 13, 10, 68)
+    _box_layer(layers, ARMOR, 8, -7, 42, 11, -2, 54)
+    _box_layer(layers, ARMOR, 8, 2, 42, 11, 7, 54)
+    _box_layer(layers, ARMOR, 6, -8, 24, 9, -2, 39)
+    _box_layer(layers, ARMOR, 6, 2, 24, 9, 8, 39)
+    _box_layer(layers, EXOSKEL, -14, -2, 52, -12, 2, 73)
+    _box_layer(layers, BRASS, 12, -10, 49, 13, 10, 51)
+    return layers
+
+def build_suit_t2_abyssal(body_voxels):
+    layers = build_suit_t1_default(body_voxels)
+    _box_layer(layers, SUIT_SHELL, 10, -12, 50, 13, -9, 71)
+    _box_layer(layers, SUIT_SHELL, 10, 9, 50, 13, 12, 71)
+    _box_layer(layers, ARMOR, 9, -8, 46, 12, 8, 66)
+    _box_layer(layers, EXOSKEL, -16, -8, 46, -14, -6, 76)
+    _box_layer(layers, EXOSKEL, -16, 6, 46, -14, 8, 76)
+    _box_layer(layers, BRASS, -19, -6, 48, -17, -1, 76)
+    _box_layer(layers, BRASS, -19, 1, 48, -17, 6, 76)
+    _box_layer(layers, ACCENT, 12, -10, 55, 13, -9, 69)
+    _box_layer(layers, ACCENT, 12, 9, 55, 13, 10, 69)
+    _box_layer(layers, BIOLUM_C, 14, -3, 58, 15, -2, 70)
+    _box_layer(layers, BIOLUM_C, 14, 2, 58, 15, 3, 70)
+    _box_layer(layers, LIGHT, 13, -8, 62, 15, -7, 65)
+    _box_layer(layers, LIGHT, 13, 7, 62, 15, 8, 65)
+    return layers
+
+def build_suit_t3_hadal(body_voxels):
+    layers = build_suit_t1_default(body_voxels)
+    _box_layer(layers, ARMOR, 10, -11, 47, 14, 11, 70)
+    _box_layer(layers, ARMOR, 7, -8, 24, 11, -2, 43)
+    _box_layer(layers, ARMOR, 7, 2, 24, 11, 8, 43)
+    _box_layer(layers, EXOSKEL, -18, -9, 44, -16, -7, 78)
+    _box_layer(layers, EXOSKEL, -18, 7, 44, -16, 9, 78)
+    _box_layer(layers, EXOSKEL, -18, -9, 73, 12, -7, 75)
+    _box_layer(layers, EXOSKEL, -18, 7, 73, 12, 9, 75)
+    _box_layer(layers, BRASS, -21, -4, 50, -19, 4, 76)
+    _box_layer(layers, BIOLUM_V, -22, -2, 58, -21, 2, 70)
+    _box_layer(layers, BIOLUM_C, 15, -8, 53, 16, -7, 69)
+    _box_layer(layers, BIOLUM_C, 15, 7, 53, 16, 8, 69)
+    _box_layer(layers, LCD_GREEN, 14, -4, 60, 16, 4, 65)
+    return layers
+
+def build_gloves_t1_grapple(body_voxels):
+    layers = build_gloves_t1_default(body_voxels)
+    _box_layer(layers, BRASS, 5, 33, 69, 10, 38, 74)
+    _box_layer(layers, EXOSKEL, 8, 36, 68, 14, 36, 70)
+    _line_layer(layers, EXOSKEL, [(x, 37, 72) for x in range(8, 18)])
+    _box_layer(layers, LIGHT, 14, 36, 70, 16, 38, 72)
+    return layers
+
+def build_gloves_t1_tool(body_voxels):
+    layers = build_gloves_t1_default(body_voxels)
+    _box_layer(layers, ARMOR, 5, 32, 64, 9, 38, 71)
+    _box_layer(layers, ARMOR, 5, -38, 64, 9, -32, 71)
+    _box_layer(layers, BRASS, 8, 34, 66, 10, 36, 70)
+    _box_layer(layers, BRASS, 8, -36, 66, 10, -34, 70)
+    return layers
+
+def build_gloves_t1_reinforced(body_voxels):
+    layers = build_gloves_t1_default(body_voxels)
+    _box_layer(layers, ARMOR, 4, 31, 64, 8, 39, 72)
+    _box_layer(layers, ARMOR, 4, -39, 64, 8, -31, 72)
+    _box_layer(layers, EXOSKEL, -5, 33, 64, -4, 39, 72)
+    _box_layer(layers, EXOSKEL, -5, -39, 64, -4, -33, 72)
+    return layers
+
+def build_boots_t1_propeller(body_voxels):
+    layers = build_boots_t1_default(body_voxels)
+    _box_layer(layers, BRASS, -9, 3, 1, -6, 8, 5)
+    _box_layer(layers, BRASS, -9, -8, 1, -6, -3, 5)
+    _box_layer(layers, LIGHT, -10, 4, 2, -10, 7, 4)
+    _box_layer(layers, LIGHT, -10, -7, 2, -10, -4, 4)
+    _box_layer(layers, EXOSKEL, -6, 1, 5, -4, 9, 7)
+    _box_layer(layers, EXOSKEL, -6, -9, 5, -4, -1, 7)
+    return layers
+
+def build_boots_t1_magnetic(body_voxels):
+    layers = build_boots_t1_default(body_voxels)
+    _box_layer(layers, EXOSKEL, -5, 1, -3, 8, 9, -1)
+    _box_layer(layers, EXOSKEL, -5, -9, -3, 8, -1, -1)
+    _box_layer(layers, BIOLUM_C, 4, 3, 5, 6, 7, 7)
+    _box_layer(layers, BIOLUM_C, 4, -7, 5, 6, -3, 7)
+    return layers
+
+def build_boots_t1_combat(body_voxels):
+    layers = build_boots_t1_default(body_voxels)
+    _box_layer(layers, ARMOR, 4, 1, 6, 8, 9, 18)
+    _box_layer(layers, ARMOR, 4, -9, 6, 8, -1, 18)
+    _box_layer(layers, EXOSKEL, -5, 1, -2, 9, 9, 0)
+    _box_layer(layers, EXOSKEL, -5, -9, -2, 9, -1, 0)
+    _box_layer(layers, BRASS, 8, 3, 10, 10, 7, 12)
+    _box_layer(layers, BRASS, 8, -7, 10, 10, -3, 12)
+    return layers
+
+def _item_box(layers, mat, x0, y0, z0, x1, y1, z1):
+    voxels = layers.setdefault(mat, set())
+    for x in range(x0, x1+1):
+        for y in range(y0, y1+1):
+            for z in range(z0, z1+1):
+                voxels.add((x, y, z))
+
+def _item_line(layers, mat, points):
+    voxels = layers.setdefault(mat, set())
+    for a, b in zip(points, points[1:]):
+        ax, ay, az = a
+        bx, by, bz = b
+        steps = max(abs(bx - ax), abs(by - ay), abs(bz - az), 1)
+        for i in range(steps + 1):
+            t = i / steps
+            voxels.add((
+                round(ax + (bx - ax) * t),
+                round(ay + (by - ay) * t),
+                round(az + (bz - az) * t),
+            ))
+    if points:
+        voxels.add(points[-1])
+
+def _item_tube_z(layers, mat, cx, cy, z0, z1, rx, ry):
+    voxels = layers.setdefault(mat, set())
+    for z in range(z0, z1+1):
+        for x in range(cx-rx, cx+rx+1):
+            for y in range(cy-ry, cy+ry+1):
+                if ((x - cx) / (rx + 0.25)) ** 2 + ((y - cy) / (ry + 0.25)) ** 2 <= 1.0:
+                    voxels.add((x, y, z))
+
+def _item_tube_y(layers, mat, y0, y1, cx, cz, rx, rz):
+    voxels = layers.setdefault(mat, set())
+    for y in range(y0, y1+1):
+        for x in range(cx-rx, cx+rx+1):
+            for z in range(cz-rz, cz+rz+1):
+                if ((x - cx) / (rx + 0.25)) ** 2 + ((z - cz) / (rz + 0.25)) ** 2 <= 1.0:
+                    voxels.add((x, y, z))
+
+def _layers_to_grid(layers):
+    grid = {}
+    for mat, voxels in layers.items():
+        for p in voxels:
+            grid[p] = mat
+    return grid
+
+
+# ═══════════════════════════════════════════════════════════
+# BACK MODULE BUILDERS — character-space, 2cm voxels
+# ═══════════════════════════════════════════════════════════
+
+def build_back_tank_o2_single():
+    layers = {}
+    _item_tube_z(layers, BRASS, -15, 0, 48, 76, 3, 5)
+    _item_box(layers, SUIT_DK, -18, -4, 49, -12, 4, 51)
+    _item_box(layers, SUIT_DK, -18, -4, 73, -12, 4, 75)
+    _item_box(layers, BRASS, -16, -1, 76, -14, 1, 79)
+    _item_box(layers, JOINT, -11, -7, 56, -10, 7, 58)
+    _item_box(layers, JOINT, -11, -7, 67, -10, 7, 69)
+    return layers
+
+def build_back_tank_o2_double():
+    layers = {}
+    for cy in (-4, 4):
+        _item_tube_z(layers, BRASS, -16, cy, 46, 78, 3, 3)
+        _item_box(layers, SUIT_DK, -19, cy-2, 47, -13, cy+2, 49)
+        _item_box(layers, SUIT_DK, -19, cy-2, 75, -13, cy+2, 77)
+        _item_box(layers, BRASS, -17, cy-1, 78, -15, cy+1, 80)
+    _item_box(layers, EXOSKEL, -12, -7, 55, -10, 7, 57)
+    _item_box(layers, EXOSKEL, -12, -7, 67, -10, 7, 69)
+    return layers
+
+def build_back_tank_o2_liquid_heavy():
+    layers = {}
+    _item_tube_z(layers, ARMOR, -19, 0, 42, 82, 5, 7)
+    _item_tube_z(layers, BRASS, -19, 0, 46, 78, 3, 5)
+    _item_box(layers, EXOSKEL, -25, -7, 45, -13, 7, 48)
+    _item_box(layers, EXOSKEL, -25, -7, 76, -13, 7, 79)
+    _item_box(layers, BIOLUM_C, -26, -2, 55, -25, 2, 70)
+    _item_box(layers, LCD_GREEN, -13, -4, 60, -12, 4, 66)
+    return layers
+
+def build_back_pack_co2_recycler():
+    layers = {}
+    _item_box(layers, ARMOR, -20, -7, 48, -13, 7, 73)
+    _item_box(layers, SUIT_DK, -21, -5, 51, -20, 5, 70)
+    _item_box(layers, BRASS, -12, -6, 56, -11, -2, 64)
+    _item_box(layers, BRASS, -12, 2, 56, -11, 6, 64)
+    _item_box(layers, LCD_GREEN, -12, -3, 66, -11, 3, 70)
+    _item_box(layers, BIOLUM_C, -21, -7, 53, -20, -6, 68)
+    _item_box(layers, BIOLUM_C, -21, 6, 53, -20, 7, 68)
+    return layers
+
+def build_back_pack_abyssal_battery():
+    layers = {}
+    _item_box(layers, EXOSKEL, -22, -8, 46, -14, 8, 78)
+    _item_tube_z(layers, ARMOR, -20, -4, 50, 75, 3, 3)
+    _item_tube_z(layers, ARMOR, -20, 4, 50, 75, 3, 3)
+    _item_box(layers, BIOLUM_V, -24, -2, 54, -23, 2, 72)
+    _item_box(layers, BIOLUM_C, -13, -6, 58, -12, 6, 64)
+    _item_box(layers, BRASS, -19, -9, 76, -15, 9, 79)
+    return layers
+
+
+# ═══════════════════════════════════════════════════════════
+# HANDHELD TOOL BUILDERS — display-space, 2cm voxels
+# ═══════════════════════════════════════════════════════════
+
+def build_tool_pipe_wrench():
+    layers = {}
+    _item_box(layers, JOINT, -1, -14, 1, 1, 8, 3)
+    _item_box(layers, ARMOR, -3, 7, 1, 3, 12, 5)
+    _item_box(layers, BRASS, -5, 11, 3, -2, 16, 7)
+    _item_box(layers, BRASS, 2, 11, 3, 5, 16, 7)
+    _item_box(layers, EXOSKEL, -2, 13, 0, 2, 14, 2)
+    return layers
+
+def build_tool_welder():
+    layers = {}
+    _item_box(layers, ARMOR, -3, -4, 3, 3, 7, 7)
+    _item_box(layers, JOINT, -2, -8, -1, 2, -4, 4)
+    _item_box(layers, BRASS, -1, 7, 4, 1, 14, 6)
+    _item_box(layers, LIGHT, -1, 14, 4, 1, 16, 6)
+    _item_line(layers, JOINT, [(-3, -3, 4), (-7, -6, 3), (-10, -5, 4), (-12, -2, 4)])
+    _item_tube_z(layers, BRASS, -13, -1, 0, 8, 2, 2)
+    return layers
+
+def build_tool_diagnostic():
+    layers = {}
+    _item_box(layers, SUIT_DK, -5, -7, 0, 5, 7, 8)
+    _item_box(layers, LCD_GREEN, -4, -5, 6, 4, 1, 9)
+    _item_box(layers, BRASS, -3, 3, 7, -1, 5, 9)
+    _item_box(layers, BRASS, 1, 3, 7, 3, 5, 9)
+    _item_line(layers, JOINT, [(-3, -7, 4), (-7, -10, 3), (-10, -9, 4)])
+    _item_line(layers, ACCENT, [(3, -7, 4), (7, -10, 3), (10, -9, 4)])
+    return layers
+
+def build_tool_flashlight():
+    layers = {}
+    _item_tube_y(layers, ARMOR, -12, 8, 0, 3, 2, 2)
+    _item_box(layers, JOINT, -2, -10, 1, 2, 0, 5)
+    _item_tube_y(layers, BRASS, 8, 13, 0, 3, 4, 3)
+    _item_box(layers, LIGHT, -3, 13, 1, 3, 15, 5)
+    return layers
+
+def build_tool_drill_t1():
+    layers = {}
+    _item_tube_y(layers, ARMOR, -16, 10, 0, 4, 3, 3)
+    _item_tube_y(layers, BRASS, 10, 18, 0, 4, 2, 2)
+    _item_box(layers, JOINT, -5, -10, -2, 5, -6, 2)
+    _item_box(layers, JOINT, -5, 1, -2, 5, 5, 2)
+    _item_line(layers, EXOSKEL, [(0, 18, 4), (0, 20, 4), (0, 22, 5)])
+    _item_box(layers, LIGHT, -2, 7, 7, 2, 9, 9)
+    return layers
+
+def build_tool_drill_t2_heavy():
+    layers = {}
+    _item_tube_y(layers, ARMOR, -22, 12, 0, 5, 5, 4)
+    _item_tube_y(layers, EXOSKEL, -18, 8, 0, 5, 6, 5)
+    _item_tube_y(layers, BRASS, 12, 24, 0, 5, 3, 3)
+    _item_line(layers, BRASS, [(0, 24, 5), (0, 27, 5), (0, 30, 6)])
+    _item_box(layers, JOINT, -7, -18, -2, 7, -14, 3)
+    _item_box(layers, JOINT, -7, 0, -2, 7, 4, 3)
+    _item_box(layers, BIOLUM_C, -2, -4, 9, 2, 8, 10)
+    return layers
+
+def build_tool_propulsor_onehand():
+    layers = {}
+    _item_tube_y(layers, ARMOR, -9, 9, 0, 4, 4, 3)
+    _item_tube_y(layers, BRASS, 5, 13, 0, 4, 5, 4)
+    _item_box(layers, LIGHT, -3, 13, 2, 3, 15, 6)
+    _item_box(layers, JOINT, -2, -8, -2, 2, -3, 2)
+    _item_box(layers, BIOLUM_C, -1, 1, 8, 1, 8, 9)
+    return layers
+
+def build_tool_propulsor_heavy():
+    layers = {}
+    _item_tube_y(layers, EXOSKEL, -20, 16, 0, 5, 6, 5)
+    _item_tube_y(layers, BRASS, 10, 22, 0, 5, 7, 6)
+    _item_box(layers, LIGHT, -5, 22, 1, 5, 24, 9)
+    _item_box(layers, JOINT, -8, -14, -2, 8, -10, 3)
+    _item_box(layers, JOINT, -8, 0, -2, 8, 4, 3)
+    _item_box(layers, BIOLUM_C, -2, -4, 11, 2, 12, 12)
+    return layers
+
+
+# ═══════════════════════════════════════════════════════════
+# WEAPON BUILDERS — display-space, 2cm voxels
+# ═══════════════════════════════════════════════════════════
+
+def build_weapon_harpoon_pistol():
+    layers = {}
+    _item_box(layers, ARMOR, -3, -4, 3, 3, 8, 7)
+    _item_box(layers, JOINT, -2, -8, -1, 2, -4, 4)
+    _item_tube_y(layers, BRASS, 6, 15, 0, 5, 1, 1)
+    _item_tube_y(layers, SUIT_DK, -1, 8, 0, 1, 2, 2)
+    _item_line(layers, EXOSKEL, [(0, 8, 6), (0, 16, 6), (0, 19, 7)])
+    return layers
+
+def build_weapon_board_revolver():
+    layers = {}
+    _item_box(layers, ARMOR, -3, -5, 3, 3, 5, 7)
+    _item_tube_y(layers, ARMOR, 4, 13, 0, 5, 1, 1)
+    _item_tube_y(layers, BRASS, -3, 2, 0, 5, 3, 3)
+    _item_box(layers, JOINT, -2, -9, -1, 2, -5, 4)
+    _item_box(layers, BRASS, -4, -2, 4, 4, 0, 7)
+    return layers
+
+def build_weapon_harpoon_rifle():
+    layers = {}
+    _item_tube_y(layers, ARMOR, -20, 20, 0, 5, 2, 2)
+    _item_tube_y(layers, BRASS, 12, 24, 0, 5, 1, 1)
+    _item_box(layers, JOINT, -5, -20, 2, 5, -14, 7)
+    _item_box(layers, JOINT, -3, -7, -1, 3, -3, 4)
+    _item_tube_z(layers, BRASS, -5, 3, 0, 8, 2, 2)
+    _item_line(layers, EXOSKEL, [(0, 18, 6), (0, 26, 6), (0, 30, 7)])
+    return layers
+
+def build_weapon_needle_launcher():
+    layers = {}
+    for x in (-3, 0, 3):
+        _item_tube_y(layers, ARMOR, -12, 18, x, 5, 1, 1)
+    _item_box(layers, SUIT_DK, -5, -5, 2, 5, 4, 8)
+    _item_box(layers, JOINT, -2, -10, -1, 2, -5, 4)
+    _item_box(layers, LCD_GREEN, -4, 4, 7, 4, 8, 9)
+    _item_box(layers, BRASS, -5, 11, 3, 5, 14, 7)
+    return layers
+
+def build_weapon_net_launcher():
+    layers = {}
+    _item_box(layers, ARMOR, -5, -8, 2, 5, 10, 8)
+    _item_box(layers, BRASS, -7, 10, 1, 7, 17, 9)
+    _item_box(layers, JOINT, -2, -13, -1, 2, -8, 4)
+    _item_tube_z(layers, EXOSKEL, -6, -2, 1, 8, 2, 2)
+    _item_tube_z(layers, EXOSKEL, 6, -2, 1, 8, 2, 2)
+    _item_line(layers, JOINT, [(-5, 13, 6), (-2, 16, 6), (2, 16, 6), (5, 13, 6)])
+    return layers
+
+def build_weapon_cavitation_pistol():
+    layers = {}
+    _item_box(layers, ARMOR, -4, -5, 2, 4, 7, 8)
+    _item_box(layers, JOINT, -2, -10, -2, 2, -5, 4)
+    _item_tube_y(layers, BRASS, 6, 13, 0, 5, 3, 3)
+    _item_box(layers, BIOLUM_C, -4, 12, 1, 4, 15, 9)
+    _item_box(layers, BIOLUM_V, -2, 15, 3, 2, 17, 7)
+    _item_box(layers, LCD_GREEN, -3, 1, 8, 3, 5, 10)
+    return layers
+
+def build_weapon_signal_pistol():
+    layers = {}
+    _item_box(layers, ACCENT, -3, -5, 2, 3, 6, 7)
+    _item_box(layers, JOINT, -2, -10, -2, 2, -5, 4)
+    _item_tube_y(layers, ARMOR, 4, 12, 0, 5, 2, 2)
+    _item_box(layers, BRASS, -4, 0, 7, 4, 3, 9)
+    _item_box(layers, LIGHT, -2, 12, 3, 2, 14, 7)
+    return layers
+
+def assemble_equipment_loadout(loadout, body_voxels):
+    layers = {}
+    for slot in ['helmet', 'suit', 'gloves', 'boots']:
+        module_id = loadout.get(slot)
+        if not module_id:
+            continue
+        module_defs = EQUIPMENT_MODULES[slot]
+        if module_id not in module_defs:
+            print(f"WARN: unknown {slot} module '{module_id}'")
+            continue
+        build_fn = globals()[module_defs[module_id]['build_fn']]
+        _merge_layers(layers, build_fn(body_voxels))
+    return layers
+
+
+# ═══════════════════════════════════════════════════════════
 # MESH GENERATORS
 # ═══════════════════════════════════════════════════════════
 
@@ -919,6 +2196,20 @@ def make_outfit_materials(outfit_key):
         make_mat(f"{od['label']}_Accent",  *od['accent']),
     ]
 
+def make_base_body_materials():
+    return [make_mat("BaseBody_Skin", *SKIN_COL)]
+
+def make_clothing_materials(clothing_key):
+    od = OUTFIT_DEFS[clothing_key]
+    return [
+        make_mat(f"{od['label']}_UnusedSkin", *SKIN_COL),
+        make_mat(f"{od['label']}_Cloth",      *od['suit']),
+        make_mat(f"{od['label']}_ClothDk",    *od['suit_dk']),
+        make_mat(f"{od['label']}_Boot",       *BOOT_COL),
+        make_mat(f"{od['label']}_UnusedHair", *HAIR_COL),
+        make_mat(f"{od['label']}_Accent",     *od['accent']),
+    ]
+
 def spawn_mat_mesh(grid_dict, name, materials, loc=(0,0,0), vs=2):
     verts, faces, fmats = generate_mesh_mat(grid_dict, vs)
     me = bpy.data.meshes.new(name)
@@ -937,6 +2228,45 @@ def spawn_mat_mesh(grid_dict, name, materials, loc=(0,0,0), vs=2):
     ob.select_set(False)
     return ob
 
+def spawn_body_with_fingers(body_dict, name, materials, loc=(0,0,0), fingers=True):
+    finger_grids = [build_fingers_r(), build_fingers_l()] if fingers else []
+    v, f, fm = generate_mesh_mat_multi(body_dict, finger_grids)
+    me = bpy.data.meshes.new(name)
+    me.from_pydata(v, [], f)
+    me.validate(); me.update(calc_edges=True)
+    ob = bpy.data.objects.new(name, me)
+    bpy.context.collection.objects.link(ob)
+    for m in materials:
+        ob.data.materials.append(m)
+    for i, poly in enumerate(me.polygons):
+        poly.material_index = fm[i]
+    ob.location = loc
+    bpy.context.view_layer.objects.active = ob
+    ob.select_set(True)
+    bpy.ops.object.shade_flat()
+    ob.select_set(False)
+    return ob
+
+def spawn_clothing_preview(clothing_key, y_offset):
+    od = OUTFIT_DEFS[clothing_key]
+    body_set = build_body()
+    clothing = build_clothing(clothing_key, body_set)
+    visible_body = build_visible_body_under_clothing(body_set, clothing)
+    body_ob = spawn_body_with_fingers(
+        visible_body,
+        f"{od['label']}_BaseBodyPreview",
+        make_base_body_materials(),
+        loc=(0, y_offset, 0),
+    )
+    clothing_ob = spawn_mat_mesh(
+        clothing,
+        f"Clothing_{od['label']}",
+        make_clothing_materials(clothing_key),
+        loc=(0, y_offset, 0),
+        vs=VOXEL,
+    )
+    return body_ob, clothing_ob
+
 def spawn_simple_mesh(grid_set, name, mat, loc=(0,0,0), vs=2):
     verts, faces = generate_mesh(grid_set, vs)
     me = bpy.data.meshes.new(name)
@@ -951,6 +2281,159 @@ def spawn_simple_mesh(grid_set, name, mat, loc=(0,0,0), vs=2):
     bpy.ops.object.shade_flat()
     ob.select_set(False)
     return ob
+
+
+# ═══════════════════════════════════════════════════════════
+# COMBI TIER 1 BLENDER HELPERS
+# ═══════════════════════════════════════════════════════════
+
+def _set_mat_alpha(mat, color, alpha):
+    mat.diffuse_color = (color[0], color[1], color[2], alpha)
+    mat.blend_method = 'BLEND'
+    if hasattr(mat, 'show_transparent_back'):
+        mat.show_transparent_back = True
+    bsdf = mat.node_tree.nodes.get("Principled BSDF")
+    if bsdf:
+        alpha_socket = bsdf.inputs.get("Alpha")
+        if alpha_socket is not None:
+            alpha_socket.default_value = alpha
+
+def _set_mat_emission(mat, color, strength):
+    bsdf = mat.node_tree.nodes.get("Principled BSDF")
+    if bsdf:
+        color_socket = bsdf.inputs.get("Emission Color")
+        strength_socket = bsdf.inputs.get("Emission Strength")
+        if color_socket is not None:
+            color_socket.default_value = (color[0], color[1], color[2], 1)
+        if strength_socket is not None:
+            strength_socket.default_value = strength
+
+def make_combi_tier1_materials(variant):
+    """Create material slots 0..16 for monolithic and modular pressure gear."""
+    cd = COMBI_TIER1_DEFS[variant]
+    visor = make_mat(f"{cd['label']}_VisorGlow", *VISOR_GLOW_COL, 0.0, 0.25)
+    lcd = make_mat(f"{cd['label']}_LCDGreen", *LCD_GREEN_COL, 0.0, 0.35)
+    light = make_mat(f"{cd['label']}_Light", *LIGHT_COL, 0.0, 0.25)
+    armor = make_mat(f"{cd['label']}_Armor", *ARMOR_COL, 0.35, 0.55)
+    exoskel = make_mat(f"{cd['label']}_Exoskel", *EXOSKEL_COL, 0.25, 0.8)
+    biolum_c = make_mat(f"{cd['label']}_BiolumCyan", *BIOLUM_C_COL, 0.0, 0.35)
+    biolum_v = make_mat(f"{cd['label']}_BiolumViolet", *BIOLUM_V_COL, 0.0, 0.35)
+    _set_mat_alpha(visor, VISOR_GLOW_COL, 0.26)
+    _set_mat_emission(visor, VISOR_GLOW_COL, 0.16)
+    _set_mat_emission(lcd, LCD_GREEN_COL, 0.7)
+    _set_mat_emission(light, LIGHT_COL, 0.9)
+    _set_mat_emission(biolum_c, BIOLUM_C_COL, 0.8)
+    _set_mat_emission(biolum_v, BIOLUM_V_COL, 0.8)
+    return [
+        make_mat(f"{cd['label']}_UnusedSkin", *SKIN_COL),
+        make_mat(f"{cd['label']}_UnusedSuit", *cd['shell']),
+        make_mat(f"{cd['label']}_ShellDk", *cd['shell_dk'], 0.2, 0.75),
+        make_mat(f"{cd['label']}_UnusedBoot", *BOOT_COL),
+        make_mat(f"{cd['label']}_UnusedHair", *HAIR_COL),
+        make_mat(f"{cd['label']}_SafetyAccent", *cd.get('accent', SAFETY_ACCENT_COL), 0.1, 0.65),
+        make_mat(f"{cd['label']}_Helmet", *cd['helmet'], 0.25, 0.65),
+        make_mat(f"{cd['label']}_Shell", *cd['shell'], 0.18, 0.7),
+        make_mat(f"{cd['label']}_Joint", *JOINT_COL, 0.0, 0.95),
+        make_mat(f"{cd['label']}_Brass", *cd['brass'], 0.65, 0.35),
+        visor,
+        lcd,
+        light,
+        armor,
+        exoskel,
+        biolum_c,
+        biolum_v,
+    ]
+
+def spawn_combi_tier1(variant, y_offset, x_offset=0):
+    cd = COMBI_TIER1_DEFS[variant]
+    body_set = build_body()
+    base_body = build_base_body_mat(body_set)
+    combi_layers = build_combi_tier1(body_set)
+    combi_grid = {}
+    for mat, voxels in combi_layers.items():
+        for p in voxels:
+            combi_grid[p] = mat
+
+    body_ob = spawn_body_with_fingers(
+        base_body,
+        f"{cd['label']}_BaseBody",
+        make_base_body_materials(),
+        loc=(x_offset, y_offset, 0),
+        fingers=False,
+    )
+    combi_ob = spawn_mat_mesh(
+        combi_grid,
+        cd['label'],
+        make_combi_tier1_materials(variant),
+        loc=(x_offset, y_offset, 0),
+        vs=VOXEL,
+    )
+    return body_ob, combi_ob
+
+def spawn_equipment_loadout(loadout, label, y_offset, x_offset=0):
+    body_set = build_body()
+    base_body = build_base_body_mat(body_set)
+    equipment_layers = assemble_equipment_loadout(loadout, body_set)
+    material_variant = loadout.get('material_variant', 'default')
+    equipment_grid = _layers_to_grid(equipment_layers)
+
+    body_ob = spawn_body_with_fingers(
+        base_body,
+        f"{label}_BaseBody",
+        make_base_body_materials(),
+        loc=(x_offset, y_offset, 0),
+        fingers=not loadout.get('gloves'),
+    )
+    equipment_ob = None
+    if equipment_grid:
+        equipment_ob = spawn_mat_mesh(
+            equipment_grid,
+            label,
+            make_combi_tier1_materials(material_variant),
+            loc=(x_offset, y_offset, 0),
+            vs=VOXEL,
+        )
+    return body_ob, equipment_ob
+
+def spawn_slot_preview(slot, module_id, y_offset, x_offset=0):
+    module_def = EQUIPMENT_MODULES[slot][module_id]
+    loadout = {
+        slot: module_id,
+        'material_variant': module_def.get('material_variant', 'default'),
+    }
+    return spawn_equipment_loadout(loadout, f"Preview_{module_def['label']}", y_offset, x_offset=x_offset)
+
+def spawn_back_module_preview(module_id, y_offset, x_offset=0):
+    module_def = BACK_MODULES[module_id]
+    body_set = build_body()
+    base_body = build_base_body_mat(body_set)
+    body_ob = spawn_body_with_fingers(
+        base_body,
+        f"Preview_{module_def['label']}_BaseBody",
+        make_base_body_materials(),
+        loc=(x_offset, y_offset, 0),
+        fingers=False,
+    )
+    build_fn = globals()[module_def['build_fn']]
+    module_ob = spawn_mat_mesh(
+        _layers_to_grid(build_fn()),
+        f"Preview_{module_def['label']}",
+        make_combi_tier1_materials(module_def.get('material_variant', 'default')),
+        loc=(x_offset, y_offset, 0),
+        vs=VOXEL,
+    )
+    return body_ob, module_ob
+
+def spawn_catalog_item(module_def, y_offset, x_offset=0, category="Item"):
+    build_fn = globals()[module_def['build_fn']]
+    item_ob = spawn_mat_mesh(
+        _layers_to_grid(build_fn()),
+        f"{category}_{module_def['label']}",
+        make_combi_tier1_materials(module_def.get('material_variant', 'default')),
+        loc=(x_offset, y_offset, 72),
+        vs=VOXEL,
+    )
+    return item_ob
 
 
 # ═══════════════════════════════════════════════════════════
@@ -982,16 +2465,16 @@ def main():
                     sp.clip_start = 0.1; sp.clip_end = 50000
 
     body_set = build_body()
-    fingers_r = build_fingers_r()
-    fingers_l = build_fingers_l()
+    base_body = build_base_body_mat(body_set)
 
-    # ── Dressed head for previews (skin face, hair top) ──
-    head_dressed = {k: v for k, v in dress_body(body_set, 'crew').items() if k[2] >= 74}
-    head_mats = make_outfit_materials('crew')
+    # ── Base head for previews (skin face, hair/accessories over it) ──
+    head_dressed = {k: v for k, v in base_body.items() if k[2] >= 74}
+    head_mats = make_base_body_materials()
 
     # Shared materials
     mat_beard = make_mat("M_Beard", *HAIR_COL)
     mat_equip = make_mat("M_Equip", 0.85, 0.65, 0.10)
+    mat_assembly_hair = make_mat("M_AssemblyHair", *HAIR_COL)
     # Face plate materials: indices match F_SKIN..F_SKIN2
     face_plate_mats = [
         make_mat("M_FaceSkin",   0.72, 0.55, 0.42),          # 0: F_SKIN
@@ -1005,35 +2488,169 @@ def main():
     ]
 
     HEAD_Z = 78 * 2  # World Z of head bottom (cm)
-    col = 0
+    cursor_y = 0
+
+    face_builders = [
+        face_01_stoic, face_02_worried, face_03_unhinged,
+        face_04_hardened, face_05_visor, face_06_blank,
+    ]
+    beard_builders = [
+        beard_01_stubble, beard_02_full, beard_03_mustache,
+        beard_04_goatee, beard_05_mutton,
+    ]
+    hair_builders = [
+        hair_01_bald, hair_02_buzzcut, hair_03_mohawk,
+        hair_04_curly, hair_05_sidepart, hair_06_braids,
+        hair_07_long, hair_08_ponytail, hair_09_dreads,
+        hair_10_receding, hair_11_messy,
+    ]
+
+    def spawn_identity_accessories(label, y_offset, x_offset):
+        face_dict, face_name = random.choice(face_builders)()
+        beard_grid, beard_name = random.choice(beard_builders)()
+        hair_grid, hair_name = random.choice(hair_builders)()
+        spawn_mat_mesh(face_dict, f"{label}_{face_name}", face_plate_mats, loc=(x_offset + FACE_FORWARD_CM, y_offset, HEAD_Z), vs=FACE_VS)
+        spawn_simple_mesh(beard_grid, f"{label}_{beard_name}", mat_beard, loc=(x_offset, y_offset, HEAD_Z), vs=VOXEL)
+        spawn_simple_mesh(hair_grid, f"{label}_{hair_name}", mat_assembly_hair, loc=(x_offset, y_offset, HEAD_Z), vs=VOXEL)
+        return face_name, beard_name, hair_name
+
+    def spawn_civil_assembly(y_offset, x_offset):
+        clothing_key = random.choice(CLOTHING_KEYS)
+        clothing = build_clothing(clothing_key, body_set)
+        visible_body = build_visible_body_under_clothing(body_set, clothing)
+        spawn_body_with_fingers(
+            visible_body,
+            "Assembly_Civil_BaseBody",
+            make_base_body_materials(),
+            loc=(x_offset, y_offset, 0),
+        )
+        spawn_mat_mesh(
+            clothing,
+            f"Assembly_Civil_Clothing_{OUTFIT_DEFS[clothing_key]['label']}",
+            make_clothing_materials(clothing_key),
+            loc=(x_offset, y_offset, 0),
+            vs=VOXEL,
+        )
+        face_name, beard_name, hair_name = spawn_identity_accessories("Assembly_Civil", y_offset, x_offset)
+        return clothing_key, face_name, beard_name, hair_name
+
+    def spawn_combi_assembly(y_offset, x_offset):
+        spawn_combi_tier1('default', y_offset, x_offset=x_offset)
+        face_name, beard_name, hair_name = spawn_identity_accessories("Assembly_Combi", y_offset, x_offset)
+        return face_name, beard_name, hair_name
+
+    def spawn_modular_assembly(loadout_name, loadout, y_offset, x_offset):
+        label = f"Assembly_Modular_{loadout_name}"
+        spawn_equipment_loadout(loadout, label, y_offset, x_offset=x_offset)
+        face_name, beard_name, hair_name = spawn_identity_accessories(label, y_offset, x_offset)
+        return face_name, beard_name, hair_name
 
     # ══════════════════════════════════════════════════
-    # ROW 1: DRESSED BODIES (5 outfits)
+    # ROW 1: BASE BODY (no clothing)
     # ══════════════════════════════════════════════════
-    print("\n  OUTFITS:")
-    for outfit_key in ['crew', 'engineer', 'captain', 'diver', 'medic']:
-        od = OUTFIT_DEFS[outfit_key]
-        dressed = dress_body(body_set, outfit_key)
-        mats = make_outfit_materials(outfit_key)
-        # Multi-res: body 2cm + fingers 0.67cm
-        v, f, fm = generate_mesh_mat_multi(dressed, [fingers_r, fingers_l])
-        me = bpy.data.meshes.new(od['label'])
-        me.from_pydata(v, [], f)
-        me.validate(); me.update(calc_edges=True)
-        ob = bpy.data.objects.new(od['label'], me)
-        bpy.context.collection.objects.link(ob)
-        for m in mats: ob.data.materials.append(m)
-        for i, poly in enumerate(me.polygons): poly.material_index = fm[i]
-        ob.location = (0, col*60, 0)
-        bpy.context.view_layer.objects.active = ob
-        ob.select_set(True)
-        bpy.ops.object.shade_flat()
-        ob.select_set(False)
-        print(f"    {od['label']} at Y={col*60}")
-        col += 1
+    print("\n  BASE BODY:")
+    spawn_body_with_fingers(base_body, "BaseBody_Nude", make_base_body_materials(), loc=(0, cursor_y, 0))
+    print(f"    BaseBody_Nude at Y={cursor_y}")
+    cursor_y += CHARACTER_SPACING_CM
 
-    # Gap between sections
-    col += 1
+    # ══════════════════════════════════════════════════
+    # ROW 1B: CLOTHING LIST (base body + clothing overlay)
+    # ══════════════════════════════════════════════════
+    print("\n  CLOTHING:")
+    for clothing_key in CLOTHING_KEYS:
+        od = OUTFIT_DEFS[clothing_key]
+        spawn_clothing_preview(clothing_key, cursor_y)
+        print(f"    Clothing_{od['label']} at Y={cursor_y}")
+        cursor_y += CHARACTER_SPACING_CM
+
+    cursor_y += SECTION_GAP_CM
+
+    # ══════════════════════════════════════════════════
+    # ROW 1C: MODULAR EQUIPMENT + ITEM CATALOG (back axis)
+    # ══════════════════════════════════════════════════
+    showcase_start_y = cursor_y
+
+    print("\n  HELMETS:")
+    for module_id, module_def in HELMET_MODULES.items():
+        spawn_slot_preview('helmet', module_id, cursor_y)
+        print(f"    {module_def['label']} at X=0 Y={cursor_y}")
+        cursor_y += CHARACTER_SPACING_CM
+    cursor_y += SECTION_GAP_CM
+
+    print("\n  SUITS:")
+    for module_id, module_def in SUIT_MODULES.items():
+        spawn_slot_preview('suit', module_id, cursor_y)
+        print(f"    {module_def['label']} at X=0 Y={cursor_y}")
+        cursor_y += CHARACTER_SPACING_CM
+    cursor_y += SECTION_GAP_CM
+
+    print("\n  GLOVES:")
+    for module_id, module_def in GLOVE_MODULES.items():
+        spawn_slot_preview('gloves', module_id, cursor_y)
+        print(f"    {module_def['label']} at X=0 Y={cursor_y}")
+        cursor_y += CHARACTER_SPACING_CM
+    cursor_y += SECTION_GAP_CM
+
+    print("\n  BOOTS:")
+    for module_id, module_def in BOOT_MODULES.items():
+        spawn_slot_preview('boots', module_id, cursor_y)
+        print(f"    {module_def['label']} at X=0 Y={cursor_y}")
+        cursor_y += CHARACTER_SPACING_CM
+    cursor_y += SECTION_GAP_CM
+
+    print("\n  BACK MODULES:")
+    for module_id, module_def in BACK_MODULES.items():
+        spawn_back_module_preview(module_id, cursor_y)
+        print(f"    {module_def['label']} at X=0 Y={cursor_y}")
+        cursor_y += CHARACTER_SPACING_CM
+    cursor_y += SECTION_GAP_CM
+
+    print("\n  HANDHELD TOOLS:")
+    for module_id, module_def in HANDHELD_TOOLS.items():
+        spawn_catalog_item(module_def, cursor_y, category="Tool")
+        print(f"    {module_def['label']} at X=0 Y={cursor_y}")
+        cursor_y += ITEM_SPACING_CM
+    cursor_y += SECTION_GAP_CM
+
+    print("\n  WEAPONS:")
+    for module_id, module_def in WEAPONS.items():
+        spawn_catalog_item(module_def, cursor_y, category="Weapon")
+        print(f"    {module_def['label']} at X=0 Y={cursor_y}")
+        cursor_y += ITEM_SPACING_CM
+    cursor_y += SECTION_GAP_CM
+
+    # ══════════════════════════════════════════════════
+    # ROW 1D: ASSEMBLED RANDOM PREVIEWS (advanced on X axis)
+    # ══════════════════════════════════════════════════
+    print("\n  ASSEMBLED PREVIEWS:")
+    civil_key, civil_face, civil_beard, civil_hair = spawn_civil_assembly(showcase_start_y, ASSEMBLY_X_CM)
+    print(
+        f"    Assembly_Civil at X={ASSEMBLY_X_CM} Y={showcase_start_y} "
+        f"({civil_key}, {civil_face}, {civil_beard}, {civil_hair})"
+    )
+    combi_y = showcase_start_y + CHARACTER_SPACING_CM
+    combi_face, combi_beard, combi_hair = spawn_combi_assembly(combi_y, ASSEMBLY_X_CM)
+    print(
+        f"    Assembly_Combi at X={ASSEMBLY_X_CM} Y={combi_y} "
+        f"({combi_face}, {combi_beard}, {combi_hair})"
+    )
+    modular_y = combi_y + CHARACTER_SPACING_CM
+    showcase_name, showcase_loadout = next(
+        (item for item in EQUIPMENT_LOADOUTS if item[0] == 'T2_Abyss'),
+        EQUIPMENT_LOADOUTS[0],
+    )
+    modular_face, modular_beard, modular_hair = spawn_modular_assembly(
+        showcase_name,
+        showcase_loadout,
+        modular_y,
+        ASSEMBLY_X_CM,
+    )
+    print(
+        f"    Assembly_Modular_{showcase_name} at X={ASSEMBLY_X_CM} Y={modular_y} "
+        f"({modular_face}, {modular_beard}, {modular_hair})"
+    )
+    cursor_y = max(cursor_y, modular_y + CHARACTER_SPACING_CM) + SECTION_GAP_CM
+    col = int(cursor_y / ACCESSORY_SPACING_CM)
 
     # ══════════════════════════════════════════════════
     # ROW 2: FACES (1cm voxels on head preview)
@@ -1042,11 +2659,11 @@ def main():
     for builder in [face_01_stoic, face_02_worried, face_03_unhinged,
                     face_04_hardened, face_05_visor, face_06_blank]:
         acc_dict, name = builder()
-        y_pos = col * 60
+        y_pos = col * ACCESSORY_SPACING_CM
         # Head preview (2cm) — shows hair/back of head
         spawn_mat_mesh(head_dressed, f"{name}_head", head_mats, loc=(0, y_pos, 0))
         # Face plate (0.5cm relief) — offset to head Z
-        spawn_mat_mesh(acc_dict, name, face_plate_mats, loc=(0, y_pos, HEAD_Z), vs=FACE_VS)
+        spawn_mat_mesh(acc_dict, name, face_plate_mats, loc=(FACE_FORWARD_CM, y_pos, HEAD_Z), vs=FACE_VS)
         print(f"    {name} at Y={y_pos}")
         col += 1
 
@@ -1059,7 +2676,7 @@ def main():
     for builder in [beard_01_stubble, beard_02_full, beard_03_mustache,
                     beard_04_goatee, beard_05_mutton]:
         acc_grid, name = builder()
-        y_pos = col * 60
+        y_pos = col * ACCESSORY_SPACING_CM
         spawn_mat_mesh(head_dressed, f"{name}_head", head_mats, loc=(0, y_pos, 0))
         spawn_simple_mesh(acc_grid, name, mat_beard, loc=(0, y_pos, HEAD_Z), vs=2)
         print(f"    {name} at Y={y_pos}")
@@ -1074,7 +2691,7 @@ def main():
     for builder in [equip_01_hardhat, equip_02_headlamp, equip_03_beanie,
                     equip_04_headset, equip_05_gasmask]:
         acc_grid, name = builder()
-        y_pos = col * 60
+        y_pos = col * ACCESSORY_SPACING_CM
         spawn_mat_mesh(head_dressed, f"{name}_head", head_mats, loc=(0, y_pos, 0))
         spawn_simple_mesh(acc_grid, name, mat_equip, loc=(0, y_pos, HEAD_Z), vs=2)
         print(f"    {name} at Y={y_pos}")
@@ -1092,7 +2709,7 @@ def main():
                     hair_07_long, hair_08_ponytail, hair_09_dreads,
                     hair_10_receding, hair_11_messy]:
         acc_grid, name = builder()
-        y_pos = col * 60
+        y_pos = col * ACCESSORY_SPACING_CM
         spawn_mat_mesh(head_dressed, f"{name}_head", head_mats, loc=(0, y_pos, 0))
         spawn_simple_mesh(acc_grid, name, mat_hair_acc, loc=(0, y_pos, HEAD_Z), vs=2)
         print(f"    {name} at Y={y_pos}")
@@ -1109,7 +2726,7 @@ def main():
                     sp.shading.type = 'MATERIAL'
             break
 
-    print(f"\n  Total columns: {col}")
+    print(f"\n  Total preview slots: {col}")
     print("=" * 60)
     print("""
   ╔══════════════════════════════════════════════════════╗
@@ -1118,19 +2735,17 @@ def main():
 
   STRUCTURE DES FICHIERS A EXPORTER:
   ──────────────────────────────────
-  SK_Crew_Basic.fbx      ← Body complet (outfit Crew)
-  SK_Crew_Engineer.fbx   ← Body complet (outfit Engineer)
-  SK_Crew_Captain.fbx    ← Body complet (outfit Captain)
-  SK_Crew_Diver.fbx      ← Body complet (outfit Diver)
-  SK_Crew_Medic.fbx      ← Body complet (outfit Medic)
-  SM_Face_01..05.fbx     ← Visages (overlay pieces)
-  SM_Beard_01..05.fbx    ← Barbes
-  SM_Equip_01..05.fbx    ← Equipements tete
+  SK_BaseBody_Nude.fbx       ← Corps nu commun
+  SM_Clothing_*.fbx          ← Vetements modulaires
+  SM_Combi_T1_Default.fbx    ← Combinaison Tier 1 normalisee
+  SM_Face_01..05.fbx         ← Visages (overlay pieces)
+  SM_Beard_01..05.fbx        ← Barbes
+  SM_Equip_01..05.fbx        ← Equipements tete
 
   ETAPE 1 — EXPORT DEPUIS BLENDER:
   ─────────────────────────────────
-  Pour chaque objet body:
-    1. Selectionner UNIQUEMENT l'objet (ex: Crew_Basic)
+  Pour le body et chaque vetement/combi/accessoire:
+    1. Selectionner UNIQUEMENT l'objet (ex: BaseBody_Nude)
     2. File > Export > FBX (.fbx)
     3. Settings:
        - Selected Objects: ON

@@ -43,6 +43,11 @@
 			"Name": "Sub3DWaterProto",
 			"Type": "Runtime",
 			"LoadingPhase": "Default"
+		},
+		{
+			"Name": "Sub3DWaterBake",
+			"Type": "Editor",
+			"LoadingPhase": "Default"
 		}
 	],
 	"Plugins": [
