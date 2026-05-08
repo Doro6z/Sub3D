@@ -7,6 +7,7 @@
 #include "SubFloodComponent.h"
 #include "SubHullComponent.h"
 #include "SubmarineSystemsComponent.h"
+#include "Debug/CrewAnimDebugComponent.h"
 #include "SubmarineCompartmentComponent.h"
 #include "SubMovementComponent.h"
 #include "SubCrewCharacter.h"
@@ -1008,6 +1009,72 @@ void ASubPlayerController::Server_DevCheat_CreateBreach_Implementation(FName Com
 		*Sub->GetName(), *CompartmentId.ToString(), RateLps);
 }
 
+void ASubPlayerController::DevCheat_CreateBreachAtCrew(float RateLps)
+{
+	const ASubCrewCharacter* Crew = Cast<ASubCrewCharacter>(GetPawn());
+	if (!Crew)
+	{
+		UE_LOG(LogSubController, Warning,
+			TEXT("[DevCheat_CreateBreachAtCrew] No SubCrew possessed — cannot resolve compartment / position."));
+		return;
+	}
+
+	const FName CompId = Crew->CurrentCompartmentId;
+	if (CompId.IsNone())
+	{
+		UE_LOG(LogSubController, Warning,
+			TEXT("[DevCheat_CreateBreachAtCrew] Crew is outside any compartment (CurrentCompartmentId=None) — no-op."));
+		return;
+	}
+
+	ASubmarineBase* Sub = ResolveCurrentSubmarine();
+	if (!Sub)
+	{
+		UE_LOG(LogSubController, Warning, TEXT("[DevCheat_CreateBreachAtCrew] No submarine resolved."));
+		return;
+	}
+	const USceneComponent* SubRoot = Sub->GetRootComponent();
+	if (!SubRoot)
+	{
+		return;
+	}
+
+	const FVector CrewWorld = Crew->GetActorLocation();
+	const FVector LocalCenter = SubRoot->GetComponentTransform().InverseTransformPosition(CrewWorld);
+
+	if (!HasAuthority())
+	{
+		Server_DevCheat_CreateBreachAtCrew(CompId, LocalCenter, RateLps);
+		UE_LOG(LogSubController, Log,
+			TEXT("[DevCheat_CreateBreachAtCrew] Routed to server | Comp=%s | Local=%s | %.1f L/s"),
+			*CompId.ToString(), *LocalCenter.ToString(), RateLps);
+		return;
+	}
+
+	if (Sub->SubFlood)
+	{
+		Sub->SubFlood->CreateBreach(CompId, RateLps, LocalCenter);
+		UE_LOG(LogSubController, Log,
+			TEXT("[DevCheat_CreateBreachAtCrew] %s: breach @crew | Comp=%s | Local=%s | %.1f L/s"),
+			*Sub->GetName(), *CompId.ToString(), *LocalCenter.ToString(), RateLps);
+	}
+}
+
+void ASubPlayerController::Server_DevCheat_CreateBreachAtCrew_Implementation(FName CompartmentId, FVector LocalCenter, float RateLps)
+{
+	ASubmarineBase* Sub = ResolveSubmarineForDevCheat();
+	if (!Sub || !Sub->SubFlood)
+	{
+		UE_LOG(LogSubController, Warning, TEXT("[Server_DevCheat_CreateBreachAtCrew] No submarine or SubFlood resolved."));
+		return;
+	}
+
+	Sub->SubFlood->CreateBreach(CompartmentId, RateLps, LocalCenter);
+	UE_LOG(LogSubController, Log,
+		TEXT("[Server_DevCheat_CreateBreachAtCrew] %s: breach @crew | Comp=%s | Local=%s | %.1f L/s"),
+		*Sub->GetName(), *CompartmentId.ToString(), *LocalCenter.ToString(), RateLps);
+}
+
 void ASubPlayerController::DevCheat_SetDoorClosed(FName ConnectionId, bool bClosed)
 {
 	ASubmarineBase* Sub = ResolveCurrentSubmarine();
@@ -1232,4 +1299,23 @@ void ASubPlayerController::AnimList()
 	UE_LOG(LogSubController, Log, TEXT("  breathamp %.1f  breathrate %.2f"), AI->BreathingAmplitudeDeg, AI->BreathingRate);
 	UE_LOG(LogSubController, Log, TEXT("  sublean %.2f  substumble %.3f"), AI->SubLeanMultiplier, AI->SubStumbleMultiplier);
 	UE_LOG(LogSubController, Log, TEXT("Usage: Anim <param> <value>  (e.g. Anim armrestr_r -85)"));
+}
+
+void ASubPlayerController::CrewAnimDump()
+{
+	ASubCrewCharacter* Crew = Cast<ASubCrewCharacter>(GetPawn());
+	if (!Crew)
+	{
+		UE_LOG(LogSubController, Warning, TEXT("CrewAnimDump: possessed pawn is not ASubCrewCharacter"));
+		return;
+	}
+
+	UCrewAnimDebugComponent* DebugComponent = Crew->FindComponentByClass<UCrewAnimDebugComponent>();
+	if (!DebugComponent)
+	{
+		UE_LOG(LogSubController, Warning, TEXT("CrewAnimDump: no UCrewAnimDebugComponent on %s"), *GetNameSafe(Crew));
+		return;
+	}
+
+	DebugComponent->DumpSnapshotToLog();
 }

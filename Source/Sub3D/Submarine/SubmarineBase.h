@@ -193,6 +193,17 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Submarine")
 	void ClearPilot();
 
+	/**
+	 * Inject a water perturbation at a world-space point. Iterates every UFloodWaterPlaneComponent
+	 * on this sub and forwards the call — each plane's InjectAtWorldPoint self-filters to its own
+	 * compartment bounds. Returns true if any plane accepted the inject.
+	 *
+	 * BP-friendly entry for crew interaction: e.g. UInteractionComponent traces from view → hit ImpactPoint
+	 * → call InjectWaterAtWorldPoint(Hit.ImpactPoint).
+	 */
+	UFUNCTION(BlueprintCallable, Category = "Submarine|Water")
+	bool InjectWaterAtWorldPoint(FVector WorldPos, float Force = 30.f, float Radius = 80.f);
+
 	// ── Flood Visuals (Water Planes) ─────────────────────────────────────
 	// Defaults applied to every UFloodWaterPlaneComponent spawned at bootstrap
 	// (one per logical CompartmentId selected from the placed volume components).
@@ -207,6 +218,11 @@ public:
 
 	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "Submarine|FloodVisuals", meta = (ClampMin = "100.0"))
 	float DefaultWaterPlaneWorldSizeCm = 8000.f;
+
+	/** Niagara system spawned at the breach point on first detection by every UFloodWaterPlaneComponent.
+	 *  Propagated to each plane at spawn time; the plane's per-instance BreachWaterImpactVfx wins if set. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "Submarine|FloodVisuals")
+	TObjectPtr<class UNiagaraSystem> DefaultBreachWaterImpactVfx = nullptr;
 
 	// ── Hull damage (Proto 02) ──────────────────────────────────────────
 

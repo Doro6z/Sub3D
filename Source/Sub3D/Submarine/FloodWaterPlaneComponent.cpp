@@ -5,18 +5,107 @@
 #include "Debug/Sub3DDebugSettings.h"
 #include "DrawDebugHelpers.h"
 #include "Engine/StaticMesh.h"
+#include "Engine/Texture2D.h"
 #include "Engine/World.h"
 #include "GameFramework/Actor.h"
 #include "Generator/SubmarineDefinition.h"
 #include "Materials/Material.h"
 #include "Materials/MaterialInstanceDynamic.h"
 #include "Materials/MaterialInterface.h"
+#include "NiagaraComponent.h"
+#include "NiagaraFunctionLibrary.h"
+#include "NiagaraSystem.h"
 #include "ProceduralMeshComponent.h"
+#include "SubFloodComponent.h"
 #include "SubmarineBase.h"
 #include "Types/CompartmentWaterBake.h"
 #include "UObject/ConstructorHelpers.h"
 
 DEFINE_LOG_CATEGORY_STATIC(LogFloodWaterPlane, Log, All);
+
+namespace
+{
+/**
+ * 1→4 mesh subdivision: each input triangle is split into 4 by inserting a vertex at each edge
+ * midpoint. Edge midpoints are SHARED between adjacent triangles via a hash map keyed on the
+ * sorted (lo, hi) vertex index pair — so the result has no cracks and stays topologically sound.
+ *
+ * UVs and normals are linearly interpolated for the new midpoint vertices (and re-normalized for
+ * normals). Repeat call to densify further: 1 level = 4× tris, 2 levels = 16×, 3 levels = 64×.
+ *
+ * Used to repair the bake's fan-triangulated cap mesh, which has one center vertex shared by all
+ * triangles. With WPO heightfield deformation, that center forms a visible spike; subdividing
+ * adds interior points that sample the heightfield independently and smooth the surface.
+ */
+void SubdivideMesh1to4(TArray<FVector>& Vertices, TArray<int32>& Triangles, TArray<FVector>& Normals, TArray<FVector2D>& UV0)
+{
+	const int32 OldVertCount = Vertices.Num();
+	const int32 OldTriCount = Triangles.Num() / 3;
+	if (OldTriCount == 0) return;
+
+	const bool bHasNormals = (Normals.Num() == OldVertCount);
+	const bool bHasUVs = (UV0.Num() == OldVertCount);
+
+	// Reserve approx capacity (vertex count grows by ~OldTriCount * 1.5; tri count quadruples).
+	Vertices.Reserve(OldVertCount + OldTriCount * 2);
+	if (bHasNormals) Normals.Reserve(OldVertCount + OldTriCount * 2);
+	if (bHasUVs) UV0.Reserve(OldVertCount + OldTriCount * 2);
+
+	// Edge → midpoint vertex index. Key is sorted (lo, hi) so lookup is undirected.
+	TMap<TPair<int32, int32>, int32> MidpointCache;
+	MidpointCache.Reserve(OldTriCount * 3);
+
+	auto GetOrCreateMid = [&](int32 A, int32 B) -> int32
+	{
+		const TPair<int32, int32> Key(FMath::Min(A, B), FMath::Max(A, B));
+		if (const int32* Found = MidpointCache.Find(Key))
+		{
+			return *Found;
+		}
+		const int32 NewIdx = Vertices.Add((Vertices[A] + Vertices[B]) * 0.5f);
+		if (bHasNormals)
+		{
+			const FVector NMid = ((Normals[A] + Normals[B]) * 0.5f).GetSafeNormal();
+			Normals.Add(NMid.IsNearlyZero() ? FVector::UpVector : NMid);
+		}
+		if (bHasUVs)
+		{
+			UV0.Add((UV0[A] + UV0[B]) * 0.5f);
+		}
+		MidpointCache.Add(Key, NewIdx);
+		return NewIdx;
+	};
+
+	TArray<int32> NewTriangles;
+	NewTriangles.Reserve(OldTriCount * 12); // 4 tris × 3 indices
+
+	for (int32 t = 0; t < OldTriCount; ++t)
+	{
+		const int32 V0 = Triangles[t * 3 + 0];
+		const int32 V1 = Triangles[t * 3 + 1];
+		const int32 V2 = Triangles[t * 3 + 2];
+		const int32 M01 = GetOrCreateMid(V0, V1);
+		const int32 M12 = GetOrCreateMid(V1, V2);
+		const int32 M20 = GetOrCreateMid(V2, V0);
+		NewTriangles.Append({V0, M01, M20});
+		NewTriangles.Append({M01, V1, M12});
+		NewTriangles.Append({M20, M12, V2});
+		NewTriangles.Append({M01, M12, M20});
+	}
+
+	Triangles = MoveTemp(NewTriangles);
+}
+
+/** Reverse triangle winding in-place: (V0, V1, V2) → (V0, V2, V1). Flips visible face direction. */
+void FlipTriangleWinding(TArray<int32>& Triangles)
+{
+	const int32 NumTris = Triangles.Num() / 3;
+	for (int32 t = 0; t < NumTris; ++t)
+	{
+		Swap(Triangles[t * 3 + 1], Triangles[t * 3 + 2]);
+	}
+}
+} // namespace
 
 UFloodWaterPlaneComponent::UFloodWaterPlaneComponent()
 {
@@ -88,6 +177,48 @@ void UFloodWaterPlaneComponent::RefreshFromFlood()
 			BakeCapMID->SetScalarParameterValue(TEXT("WaterLevel01"), Level01);
 			BakeCapMID->SetScalarParameterValue(TEXT("WaterHeightCm"), HeightCm);
 		}
+
+		// ── Heightfield (P3.4) ────────────────────────────────────────────────
+		// Active only on the bake path: requires CachedBake's LocalBounds for grid mapping
+		// and the BakeCapMID for parameter binding.
+		if (bEnableHeightfield)
+		{
+			EnsureHeightfieldInitialized();
+			if (bHeightfieldInitialized)
+			{
+				const float World = GetWorld() ? GetWorld()->GetDeltaSeconds() : 0.f;
+				HeightfieldAccum += World;
+				const float StepDt = 1.f / FMath::Max(1.f, HeightfieldUpdateHz);
+				int32 StepsThisFrame = 0;
+				constexpr int32 MaxStepsPerFrame = 4; // safety cap on hitches
+				while (HeightfieldAccum >= StepDt && StepsThisFrame < MaxStepsPerFrame)
+				{
+					TickHeightfieldStep();
+					HeightfieldAccum -= StepDt;
+					++StepsThisFrame;
+				}
+				// If we still have accumulated dt past the cap (huge hitch), drop it to avoid
+				// spiral of death — the field absorbs the loss as residual damping.
+				if (StepsThisFrame == MaxStepsPerFrame)
+				{
+					HeightfieldAccum = 0.f;
+				}
+				if (StepsThisFrame > 0)
+				{
+					PushHeightfieldToTexture();
+				}
+				if (BakeCapMID)
+				{
+					BakeCapMID->SetScalarParameterValue(TEXT("HeightfieldAmplitudeCm"), HeightfieldAmplitudeCm);
+				}
+			}
+		}
+
+		// ── Breach reaction (P3.5) ────────────────────────────────────────────
+		// One-shot inject + Niagara on first detection of a replicated breach for this
+		// compartment, plus optional recurring inject pulses while it stays active.
+		RefreshBreachReaction();
+
 		// Level change event.
 		if (FMath::Abs(Level01 - LastLevel01) > LevelChangeEventThreshold01)
 		{
@@ -226,16 +357,44 @@ bool UFloodWaterPlaneComponent::RefreshBakeCapMesh(float WaterHeightLocalCm)
 		}
 		else
 		{
+			// Copy bake-source arrays so subdivision + winding flip don't mutate the asset.
+			TArray<FVector> WorkVerts = CapMesh->Vertices;
+			TArray<int32> WorkTris = CapMesh->Triangles;
+			TArray<FVector> WorkNormals = CapMesh->Normals;
+			TArray<FVector2D> WorkUV0 = CapMesh->UV0;
+
+			// Repair bake fan-topology: subdivide so heightfield WPO has interior sample points
+			// instead of one shared center vertex producing a spike under wave displacement.
+			const int32 SubLevels = FMath::Clamp(CapMeshSubdivisionLevels, 0, 4);
+			for (int32 Lvl = 0; Lvl < SubLevels; ++Lvl)
+			{
+				SubdivideMesh1to4(WorkVerts, WorkTris, WorkNormals, WorkUV0);
+			}
+
+			// Optional winding flip: bake's fan triangulation may produce a downward-facing mesh
+			// depending on the contour winding. EditAnywhere bool lets the artist correct without
+			// re-baking. Default true based on observed Craniata bake.
+			if (bFlipCapMeshWinding)
+			{
+				FlipTriangleWinding(WorkTris);
+			}
+
 			TArray<FVector2D> EmptyUV1;
 			TArray<FColor> EmptyColors;
 			TArray<FProcMeshTangent> EmptyTangents;
 			BakeCapMeshComp->CreateMeshSection(0,
-				CapMesh->Vertices, CapMesh->Triangles, CapMesh->Normals,
-				CapMesh->UV0, EmptyColors, EmptyTangents, /*bCreateCollision*/ false);
+				WorkVerts, WorkTris, WorkNormals,
+				WorkUV0, EmptyColors, EmptyTangents, /*bCreateCollision*/ false);
 			if (BakeCapMID)
 			{
 				BakeCapMeshComp->SetMaterial(0, BakeCapMID);
 			}
+
+			UE_LOG(LogFloodWaterPlane, Display,
+				TEXT("Cap mesh built | Comp=%s | SubLevels=%d | Verts=%d | Tris=%d | Flipped=%s"),
+				SourceVolume.IsValid() ? *SourceVolume->CompartmentId.ToString() : TEXT("?"),
+				SubLevels, WorkVerts.Num(), WorkTris.Num() / 3,
+				bFlipCapMeshWinding ? TEXT("yes") : TEXT("no"));
 		}
 		LastSliceIndex = BestIdx;
 	}
@@ -432,5 +591,388 @@ void UFloodWaterPlaneComponent::ApplyWaterState(float NewLevel01, float NewHeigh
 	{
 		LastLevel01 = NewLevel01;
 		BP_OnWaterLevelChanged(NewLevel01, NewHeightCm);
+	}
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  Heightfield CPU 2D (P3.4 — port from Sub3DWaterProto::URoomWaterRenderer)
+// ─────────────────────────────────────────────────────────────────────────────
+
+void UFloodWaterPlaneComponent::EnsureHeightfieldInitialized()
+{
+	if (bHeightfieldInitialized)
+	{
+		return;
+	}
+	if (!CachedBake || !BakeCapMID)
+	{
+		return; // bake not resolved yet, or MID not created — RefreshBakeCapMesh will trigger us next tick
+	}
+
+	const int32 W = FMath::Max(16, HeightfieldGridX);
+	const int32 H = FMath::Max(16, HeightfieldGridY);
+	const int32 Total = W * H;
+
+	Heights.SetNumZeroed(Total);
+	Velocities.SetNumZeroed(Total);
+
+	HeightfieldTex = UTexture2D::CreateTransient(W, H, PF_R32_FLOAT);
+	if (HeightfieldTex)
+	{
+		HeightfieldTex->Filter = TF_Bilinear;
+		HeightfieldTex->AddressX = TA_Clamp;
+		HeightfieldTex->AddressY = TA_Clamp;
+		HeightfieldTex->UpdateResource();
+
+		BakeCapMID->SetTextureParameterValue(HeightfieldTextureParamName, HeightfieldTex);
+		BakeCapMID->SetVectorParameterValue(LocalBoundsMinParamName, FLinearColor(CachedBake->LocalBoundsMin));
+		BakeCapMID->SetVectorParameterValue(LocalBoundsMaxParamName, FLinearColor(CachedBake->LocalBoundsMax));
+		BakeCapMID->SetScalarParameterValue(HeightfieldAmplitudeParamName, HeightfieldAmplitudeCm);
+
+		UE_LOG(LogFloodWaterPlane, Display,
+			TEXT("Heightfield material params bound | Comp=%s | TexParam=%s | AmplitudeParam=%s | BoundsMin=%s/%s BoundsMax=%s/%s"),
+			SourceVolume.IsValid() ? *SourceVolume->CompartmentId.ToString() : TEXT("?"),
+			*HeightfieldTextureParamName.ToString(),
+			*HeightfieldAmplitudeParamName.ToString(),
+			*LocalBoundsMinParamName.ToString(), *CachedBake->LocalBoundsMin.ToString(),
+			*LocalBoundsMaxParamName.ToString(), *CachedBake->LocalBoundsMax.ToString());
+	}
+
+	bHeightfieldInitialized = true;
+
+	UE_LOG(LogFloodWaterPlane, Display,
+		TEXT("Heightfield initialized | Comp=%s | Grid=%dx%d | Bounds=[%s..%s]"),
+		SourceVolume.IsValid() ? *SourceVolume->CompartmentId.ToString() : TEXT("?"),
+		W, H,
+		*CachedBake->LocalBoundsMin.ToString(),
+		*CachedBake->LocalBoundsMax.ToString());
+}
+
+void UFloodWaterPlaneComponent::TickHeightfieldStep()
+{
+	const int32 W = HeightfieldGridX;
+	const int32 H = HeightfieldGridY;
+	if (Heights.Num() != W * H || Velocities.Num() != W * H)
+	{
+		return;
+	}
+
+	// Neumann reflective BC on all cells (incl. boundary): out-of-grid neighbor mirrors center.
+	// Critical: external systems (Phase 4 boundary-sync at doors) write to boundary cells; without
+	// BC the boundary loop, those values stick forever and feed the interior as a permanent source.
+	const float StepDt = 1.f / FMath::Max(1.f, HeightfieldUpdateHz);
+
+	TArray<float> NewHeights;
+	NewHeights.SetNumUninitialized(W * H);
+
+	for (int32 y = 0; y < H; ++y)
+	{
+		for (int32 x = 0; x < W; ++x)
+		{
+			const int32 idx = y * W + x;
+			const float h_center = Heights[idx];
+
+			const float h_left  = (x > 0)     ? Heights[idx - 1] : h_center;
+			const float h_right = (x < W - 1) ? Heights[idx + 1] : h_center;
+			const float h_top   = (y > 0)     ? Heights[idx - W] : h_center;
+			const float h_bot   = (y < H - 1) ? Heights[idx + W] : h_center;
+
+			const float h_avg = (h_left + h_right + h_top + h_bot) * 0.25f;
+			const float laplacian = h_avg - h_center;
+
+			Velocities[idx] += laplacian * WaveSpeed * StepDt;
+			Velocities[idx] *= Damping;
+			NewHeights[idx] = h_center + Velocities[idx] * StepDt;
+		}
+	}
+
+	Heights = MoveTemp(NewHeights);
+}
+
+void UFloodWaterPlaneComponent::PushHeightfieldToTexture()
+{
+	if (!HeightfieldTex || Heights.Num() == 0)
+	{
+		return;
+	}
+
+	struct FUpdateData
+	{
+		FUpdateTextureRegion2D Region;
+		uint32 SrcPitch = 0;
+		TArray<float> Buffer;
+	};
+
+	FUpdateData* Data = new FUpdateData();
+	Data->Region = FUpdateTextureRegion2D(0, 0, 0, 0, HeightfieldGridX, HeightfieldGridY);
+	Data->SrcPitch = HeightfieldGridX * sizeof(float);
+	Data->Buffer = Heights; // copy — async cleanup deletes Data only after upload finishes
+
+	HeightfieldTex->UpdateTextureRegions(
+		/*MipIndex*/   0,
+		/*NumRegions*/ 1,
+		/*Regions*/    &Data->Region,
+		/*SrcPitch*/   Data->SrcPitch,
+		/*SrcBpp*/     sizeof(float),
+		/*SrcData*/    reinterpret_cast<uint8*>(Data->Buffer.GetData()),
+		/*Cleanup*/    [Data](uint8*, const FUpdateTextureRegion2D*) { delete Data; });
+}
+
+void UFloodWaterPlaneComponent::InjectAt(FVector2D LocalPosXY, float Force, float Radius)
+{
+	if (!bEnableHeightfield || !bHeightfieldInitialized || Heights.Num() == 0 || !CachedBake)
+	{
+		// Loud signal so the user sees why the inject did nothing instead of silent no-op.
+		UE_LOG(LogFloodWaterPlane, Warning,
+			TEXT("InjectAt skipped | Comp=%s | Reason=%s"),
+			SourceVolume.IsValid() ? *SourceVolume->CompartmentId.ToString() : TEXT("?"),
+			!bEnableHeightfield ? TEXT("HeightfieldDisabled")
+				: !bHeightfieldInitialized ? TEXT("NotInitialized (cap mesh not yet rendered — fill compartment first)")
+				: Heights.Num() == 0 ? TEXT("HeightsEmpty")
+				: TEXT("NoBake"));
+#if !UE_BUILD_SHIPPING
+		// Still draw the marker even on skip, so the user can see WHERE they tried to inject.
+		if (const USub3DDebugSettings* Settings = GetDefault<USub3DDebugSettings>())
+		{
+			if (Settings->bDrawWaterInjectMarkers)
+			{
+				if (UWorld* World = GetWorld())
+				{
+					if (const ASubmarineBase* Sub = Cast<ASubmarineBase>(GetOwner()))
+					{
+						if (const USceneComponent* SubRoot = Sub->GetRootComponent())
+						{
+							const FVector LocalPos3D(LocalPosXY.X, LocalPosXY.Y, 0.f);
+							const FVector WorldPos = SubRoot->GetComponentTransform().TransformPosition(LocalPos3D);
+							DrawDebugSphere(World, WorldPos, FMath::Max(8.f, Radius * 0.25f), 12, FColor::Yellow, false, Settings->WaterInjectMarkerLifetime);
+							DrawDebugString(World, WorldPos + FVector(0, 0, 30.f),
+								TEXT("[InjectAt SKIPPED — fill compartment first]"),
+								nullptr, FColor::Yellow, Settings->WaterInjectMarkerLifetime, true, 1.f);
+						}
+					}
+				}
+			}
+		}
+#endif
+		return;
+	}
+
+	const int32 W = HeightfieldGridX;
+	const int32 H = HeightfieldGridY;
+
+	const FVector& Min = CachedBake->LocalBoundsMin;
+	const FVector& Max = CachedBake->LocalBoundsMax;
+	const float SpanX = Max.X - Min.X;
+	const float SpanY = Max.Y - Min.Y;
+	if (SpanX <= 0.f || SpanY <= 0.f)
+	{
+		return;
+	}
+
+	const float u = (LocalPosXY.X - Min.X) / SpanX;
+	const float v = (LocalPosXY.Y - Min.Y) / SpanY;
+	const int32 cx = FMath::Clamp(static_cast<int32>(u * W), 0, W - 1);
+	const int32 cy = FMath::Clamp(static_cast<int32>(v * H), 0, H - 1);
+
+	const float CellWorldSize = SpanX / static_cast<float>(W);
+	const int32 RadiusCells = FMath::Max(1, FMath::CeilToInt(Radius / CellWorldSize));
+
+	for (int32 dy = -RadiusCells; dy <= RadiusCells; ++dy)
+	{
+		for (int32 dx = -RadiusCells; dx <= RadiusCells; ++dx)
+		{
+			const int32 nx = cx + dx;
+			const int32 ny = cy + dy;
+			if (nx < 0 || nx >= W || ny < 0 || ny >= H)
+			{
+				continue;
+			}
+			const float dist = FMath::Sqrt(static_cast<float>(dx * dx + dy * dy));
+			const float falloff = FMath::Max(0.f, 1.0f - dist / static_cast<float>(RadiusCells));
+			Heights[ny * W + nx] += Force * falloff;
+		}
+	}
+
+#if !UE_BUILD_SHIPPING
+	// Visible debug sphere + radius circle at the inject point so the artist sees WHERE the
+	// inject happened (independent from the cap mesh, which is hidden when the compartment is
+	// empty). Plus a one-line log.
+	if (const USub3DDebugSettings* Settings = GetDefault<USub3DDebugSettings>())
+	{
+		if (Settings->bDrawWaterInjectMarkers)
+		{
+			if (UWorld* World = GetWorld())
+			{
+				if (const ASubmarineBase* Sub = Cast<ASubmarineBase>(GetOwner()))
+				{
+					if (const USceneComponent* SubRoot = Sub->GetRootComponent())
+					{
+						// Place the marker at the cap mesh Z (water surface) if the cap is rendered,
+						// else at the compartment volume center Z. Either way the X/Y is the inject XY.
+						float MarkerZ_Local = 0.f;
+						if (BakeCapMeshComp)
+						{
+							MarkerZ_Local = BakeCapMeshComp->GetRelativeLocation().Z;
+						}
+						const FVector LocalPos3D(LocalPosXY.X, LocalPosXY.Y, MarkerZ_Local);
+						const FVector WorldPos = SubRoot->GetComponentTransform().TransformPosition(LocalPos3D);
+						const float Lifetime = Settings->WaterInjectMarkerLifetime;
+						const FColor Color = Force >= 0.f ? FColor::Cyan : FColor::Magenta;
+						DrawDebugSphere(World, WorldPos, FMath::Max(8.f, Radius * 0.18f), 12, Color, false, Lifetime, SDPG_World, 2.f);
+						// Radius circle (horizontal disc) for the falloff extent.
+						DrawDebugCircle(World, WorldPos, Radius, 32, Color, false, Lifetime, SDPG_World, 2.f,
+							FVector(1, 0, 0), FVector(0, 1, 0), false);
+						DrawDebugString(World, WorldPos + FVector(0, 0, 25.f),
+							FString::Printf(TEXT("[InjectAt] F=%.1f R=%.0fcm"), Force, Radius),
+							nullptr, Color, Lifetime, true, 1.f);
+					}
+				}
+			}
+		}
+	}
+
+	UE_LOG(LogFloodWaterPlane, Verbose,
+		TEXT("InjectAt | Comp=%s | LocalXY=(%.1f, %.1f) | Force=%.2f | Radius=%.1fcm | Cells affected=%d"),
+		SourceVolume.IsValid() ? *SourceVolume->CompartmentId.ToString() : TEXT("?"),
+		LocalPosXY.X, LocalPosXY.Y, Force, Radius, (RadiusCells * 2 + 1) * (RadiusCells * 2 + 1));
+#endif
+}
+
+bool UFloodWaterPlaneComponent::InjectAtWorldPoint(FVector WorldPos, float Force, float Radius)
+{
+	if (!CachedBake)
+	{
+		return false;
+	}
+	const ASubmarineBase* Sub = Cast<ASubmarineBase>(GetOwner());
+	if (!Sub)
+	{
+		return false;
+	}
+
+	// World → sub-local. The bake's LocalBoundsMin/Max are in sub-local frame, so we need the
+	// inverse of the submarine root transform.
+	const USceneComponent* SubRoot = Sub->GetRootComponent();
+	if (!SubRoot)
+	{
+		return false;
+	}
+	const FVector LocalPos3D = SubRoot->GetComponentTransform().InverseTransformPosition(WorldPos);
+
+	const FVector& Min = CachedBake->LocalBoundsMin;
+	const FVector& Max = CachedBake->LocalBoundsMax;
+	if (LocalPos3D.X < Min.X - Radius || LocalPos3D.X > Max.X + Radius ||
+		LocalPos3D.Y < Min.Y - Radius || LocalPos3D.Y > Max.Y + Radius)
+	{
+		return false;
+	}
+
+	InjectAt(FVector2D(LocalPos3D.X, LocalPos3D.Y), Force, Radius);
+	return true;
+}
+
+void UFloodWaterPlaneComponent::ResetHeightfield()
+{
+	if (Heights.Num() > 0)
+	{
+		FMemory::Memzero(Heights.GetData(), Heights.Num() * sizeof(float));
+	}
+	if (Velocities.Num() > 0)
+	{
+		FMemory::Memzero(Velocities.GetData(), Velocities.Num() * sizeof(float));
+	}
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  Breach reaction (P3.5)
+// ─────────────────────────────────────────────────────────────────────────────
+
+void UFloodWaterPlaneComponent::RefreshBreachReaction()
+{
+	const UCompartmentVolumeComponent* Source = SourceVolume.Get();
+	if (!Source || Source->CompartmentId.IsNone())
+	{
+		return;
+	}
+	const ASubmarineBase* Sub = Cast<ASubmarineBase>(GetOwner());
+	if (!Sub)
+	{
+		return;
+	}
+	const USubFloodComponent* Flood = Sub->FindComponentByClass<USubFloodComponent>();
+	if (!Flood)
+	{
+		return;
+	}
+
+	// Find the breach record for this compartment, if any. Replicated → identical on server + clients.
+	const FCompartmentBreachState* BreachForUs = Flood->GetBreaches().FindByPredicate(
+		[&](const FCompartmentBreachState& B)
+		{
+			return B.CompartmentId == Source->CompartmentId && B.bBreached && B.InflowRateLitersPerSec > 0.f;
+		});
+
+	const bool bNowBreached = (BreachForUs != nullptr);
+
+	// State transition: not breached → breached. One-shot impulse + Niagara spawn.
+	if (bNowBreached && !bBreachActive)
+	{
+		bBreachActive = true;
+		LastBreachLocalCenter = BreachForUs->BreachLocalCenter;
+		BreachInjectAccum = 0.f;
+
+		// Initial impulse into the heightfield.
+		InjectAt(FVector2D(LastBreachLocalCenter.X, LastBreachLocalCenter.Y),
+			BreachInjectForce, BreachInjectRadiusCm);
+
+		// Spawn Niagara at world location (sub-local → world via root).
+		if (BreachWaterImpactVfx)
+		{
+			if (USceneComponent* SubRoot = Sub->GetRootComponent())
+			{
+				const FVector WorldLoc = SubRoot->GetComponentTransform().TransformPosition(LastBreachLocalCenter);
+				BreachVfxInstance = UNiagaraFunctionLibrary::SpawnSystemAttached(
+					BreachWaterImpactVfx,
+					SubRoot,
+					NAME_None,
+					WorldLoc,
+					FRotator::ZeroRotator,
+					EAttachLocation::KeepWorldPosition,
+					/*bAutoDestroy*/ false);
+			}
+		}
+
+		UE_LOG(LogFloodWaterPlane, Display,
+			TEXT("Breach reaction | Comp=%s | LocalCenter=%s | Inflow=%.1f L/s"),
+			*Source->CompartmentId.ToString(),
+			*LastBreachLocalCenter.ToString(),
+			BreachForUs->InflowRateLitersPerSec);
+	}
+	// State transition: breached → no longer breached. Stop Niagara, reset state.
+	else if (!bNowBreached && bBreachActive)
+	{
+		bBreachActive = false;
+		LastBreachLocalCenter = FVector::ZeroVector;
+		BreachInjectAccum = 0.f;
+
+		if (BreachVfxInstance)
+		{
+			BreachVfxInstance->Deactivate();
+			BreachVfxInstance->DestroyComponent();
+			BreachVfxInstance = nullptr;
+		}
+	}
+	// Continuous: while breached, optionally re-inject smaller pulses to keep ripples alive.
+	else if (bNowBreached && bBreachActive && BreachRecurringInjectHz > 0.f)
+	{
+		const float Dt = GetWorld() ? GetWorld()->GetDeltaSeconds() : 0.f;
+		BreachInjectAccum += Dt;
+		const float Period = 1.f / FMath::Max(0.01f, BreachRecurringInjectHz);
+		if (BreachInjectAccum >= Period)
+		{
+			BreachInjectAccum = 0.f;
+			InjectAt(FVector2D(LastBreachLocalCenter.X, LastBreachLocalCenter.Y),
+				BreachRecurringInjectForce, BreachInjectRadiusCm * 0.5f);
+		}
 	}
 }

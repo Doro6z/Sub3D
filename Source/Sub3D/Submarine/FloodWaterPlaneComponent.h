@@ -11,6 +11,9 @@ class UStaticMeshComponent;
 class UProceduralMeshComponent;
 class UMaterialInterface;
 class UMaterialInstanceDynamic;
+class UTexture2D;
+class UNiagaraSystem;
+class UNiagaraComponent;
 
 /**
  * Visual water plane driven by a single UCompartmentVolumeComponent. 100% passive C++:
@@ -81,6 +84,122 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Flood|Water")
 	float GetCurrentWaterLevel01() const { return LastLevel01; }
 
+	// ── Heightfield (P3.4 — surface vivante) ────────────────────────────────
+	// Wave equation 2D CPU + texture R32F push-to-material. Active only when the bake path
+	// is rendering (cap mesh present). Material reads `WaterHeightTex` and offsets WPO by
+	// `HeightfieldAmplitudeCm * sampledValue` to deform the cap surface.
+	//
+	// Coordinate system: heightfield grid spans the bake's LocalBoundsMin/Max XY. UV (0,0)
+	// = LocalBoundsMin, UV (1,1) = LocalBoundsMax. Material binds the same bounds via
+	// `LocalBoundsMin` / `LocalBoundsMax` parameters.
+
+	/** Master toggle. False = no heightfield sim, no texture push, no MID param set. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Flood|Water|Heightfield")
+	bool bEnableHeightfield = true;
+
+	/** Grid resolution X. Texture R32F is created at this resolution × HeightfieldGridY. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Flood|Water|Heightfield", meta = (ClampMin = "16", ClampMax = "256"))
+	int32 HeightfieldGridX = 64;
+
+	/** Grid resolution Y. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Flood|Water|Heightfield", meta = (ClampMin = "16", ClampMax = "256"))
+	int32 HeightfieldGridY = 64;
+
+	/** Wave equation propagation speed. Higher = faster ripple spread. Practical range 50–1500. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Flood|Water|Heightfield", meta = (ClampMin = "0.1"))
+	float WaveSpeed = 200.0f;
+
+	/** Per-step velocity damping. 0.995 = ~0.5% energy loss per step. Lower = faster decay. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Flood|Water|Heightfield", meta = (ClampMin = "0.9", ClampMax = "1.0"))
+	float Damping = 0.995f;
+
+	/** Fixed-step rate of the wave equation. Independent of frame rate; accumulator drains dt into ticks. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Flood|Water|Heightfield", meta = (ClampMin = "10.0", ClampMax = "240.0"))
+	float HeightfieldUpdateHz = 60.f;
+
+	/** Vertical amplitude in cm passed to the material's amplitude scalar. Material multiplies sampled R32F by this. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Flood|Water|Heightfield", meta = (ClampMin = "0.0"))
+	float HeightfieldAmplitudeCm = 10.f;
+
+	/** Material texture parameter name receiving the R32F heightfield. Must match the
+	 *  Texture Sample node name in the cap material. M_Phase0_Test uses "HeightFieldTex". */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Flood|Water|Heightfield|MaterialParams")
+	FName HeightfieldTextureParamName = TEXT("HeightFieldTex");
+
+	/** Material scalar parameter name receiving HeightfieldAmplitudeCm. M_Phase0_Test uses "HeightfieldAmplitude". */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Flood|Water|Heightfield|MaterialParams")
+	FName HeightfieldAmplitudeParamName = TEXT("HeightfieldAmplitude");
+
+	/** Material vector parameter name receiving CachedBake->LocalBoundsMin (sub-local cm). */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Flood|Water|Heightfield|MaterialParams")
+	FName LocalBoundsMinParamName = TEXT("LocalBoundsMin");
+
+	/** Material vector parameter name receiving CachedBake->LocalBoundsMax (sub-local cm). */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Flood|Water|Heightfield|MaterialParams")
+	FName LocalBoundsMaxParamName = TEXT("LocalBoundsMax");
+
+	// ── Cap mesh topology (P3.4 polish) ─────────────────────────────────────
+	// The bake produces a fan-triangulated polygon (one center vertex, N perimeter vertices).
+	// That topology has TWO drawbacks for heightfield WPO:
+	//   1. The center vertex displaces independently of the perimeter, creating a visible spike.
+	//   2. Triangle density is uneven — perimeter has fine sampling, interior has none.
+	// Subdivision 1→4 (each triangle splits into 4 via mid-edge vertices) repairs both at runtime.
+
+	/** Number of 1→4 subdivisions applied to the bake cap mesh before submission to the PMC.
+	 *  0 = use bake topology as-is (fan with center spike when waves hit). 2 = 16x triangle count. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Flood|Water|CapMesh", meta = (ClampMin = "0", ClampMax = "4"))
+	int32 CapMeshSubdivisionLevels = 2;
+
+	/** Reverse triangle winding when submitting cap mesh to PMC. Use when the bake produced a mesh
+	 *  facing down (visible only from below) — toggling this flips it without re-baking. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Flood|Water|CapMesh")
+	bool bFlipCapMeshWinding = true;
+
+	/**
+	 * Inject a radial perturbation into the heightfield at the given local-space XY (sub-local frame).
+	 * Force is added to Heights with a linear falloff over Radius cm. Has no effect if heightfield
+	 * is not initialized or `bEnableHeightfield = false`.
+	 */
+	UFUNCTION(BlueprintCallable, Category = "Flood|Water|Heightfield")
+	void InjectAt(FVector2D LocalPosXY, float Force, float Radius = 50.f);
+
+	/** Helper: convert world-space hit to sub-local XY and call InjectAt. Returns false if the point
+	 *  is outside the bake's LocalBounds (with Radius tolerance) — avoids polluting the field with stray clicks. */
+	UFUNCTION(BlueprintCallable, Category = "Flood|Water|Heightfield")
+	bool InjectAtWorldPoint(FVector WorldPos, float Force, float Radius = 50.f);
+
+	/** Zero out Heights and Velocities arrays. */
+	UFUNCTION(BlueprintCallable, Category = "Flood|Water|Heightfield")
+	void ResetHeightfield();
+
+	// ── Breach reaction (P3.5) ──────────────────────────────────────────────
+	// On first detection of a replicated breach for this compartment, inject a wave at the
+	// breach point and spawn a Niagara system. Both run on every client (heightfield is
+	// client-side cosmetic, breach state replicates via USubFloodComponent::Breaches).
+
+	/** Niagara system spawned at the breach point on first detection. Slot is left empty by default
+	 *  — assign a "water gushing in" effect on the BP_Submarine_Craniata's UFloodWaterPlaneComponent
+	 *  defaults, or via DefaultBreachWaterImpactVfx on ASubmarineBase (propagated). */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Flood|Water|Breach")
+	TObjectPtr<UNiagaraSystem> BreachWaterImpactVfx = nullptr;
+
+	/** Force injected into the heightfield on breach detection. Higher = bigger initial splash. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Flood|Water|Breach", meta = (ClampMin = "0.0"))
+	float BreachInjectForce = 30.f;
+
+	/** Falloff radius (cm) of the breach wave injection. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Flood|Water|Breach", meta = (ClampMin = "1.0"))
+	float BreachInjectRadiusCm = 80.f;
+
+	/** Hertz at which a residual jet keeps perturbing the surface while the breach is still
+	 *  flowing. 0 = no recurring inject (one-shot only). */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Flood|Water|Breach", meta = (ClampMin = "0.0", ClampMax = "60.0"))
+	float BreachRecurringInjectHz = 4.f;
+
+	/** Force per recurring inject pulse (much smaller than the initial impact). */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Flood|Water|Breach", meta = (ClampMin = "0.0"))
+	float BreachRecurringInjectForce = 4.f;
+
 private:
 	/** Creates the PlaneMeshComponent child and assigns the mesh/material. */
 	void EnsurePlaneMesh();
@@ -115,4 +234,35 @@ private:
 	float LastLevel01 = -1.f;
 	bool bLastVisible = false;
 	bool bBakeResolveAttempted = false;
+
+	// ── Heightfield runtime state (P3.4) ────────────────────────────────────
+
+	/** Lazy init: creates buffers + texture sized to HeightfieldGridX × HeightfieldGridY,
+	 *  binds `WaterHeightTex` / `LocalBoundsMin` / `LocalBoundsMax` / `HeightfieldAmplitudeCm`
+	 *  on BakeCapMID. Idempotent. Requires CachedBake to be resolved. */
+	void EnsureHeightfieldInitialized();
+
+	/** Wave equation update — Neumann reflective BC on all cells (incl. boundary). One step. */
+	void TickHeightfieldStep();
+
+	/** Push Heights (R32F) → HeightfieldTex via UpdateTextureRegions (async). */
+	void PushHeightfieldToTexture();
+
+	UPROPERTY(Transient)
+	TObjectPtr<UTexture2D> HeightfieldTex = nullptr;
+
+	TArray<float> Heights;
+	TArray<float> Velocities;
+	float HeightfieldAccum = 0.f;
+	bool bHeightfieldInitialized = false;
+
+	// ── Breach state tracking (P3.5) ────────────────────────────────────────
+	void RefreshBreachReaction();
+
+	UPROPERTY(Transient)
+	TObjectPtr<UNiagaraComponent> BreachVfxInstance = nullptr;
+
+	bool bBreachActive = false;
+	FVector LastBreachLocalCenter = FVector::ZeroVector;
+	float BreachInjectAccum = 0.f;
 };

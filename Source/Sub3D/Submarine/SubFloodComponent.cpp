@@ -2,6 +2,8 @@
 
 #include "CompartmentVolumeComponent.h"
 #include "Components/SceneComponent.h"
+#include "DrawDebugHelpers.h"
+#include "Engine/World.h"
 #include "Net/UnrealNetwork.h"
 #include "Sub3DDebugSettings.h"
 #include "SubHullBoundaryComponent.h"
@@ -254,6 +256,39 @@ void USubFloodComponent::InitializeFromLayout(const USubmarineLayoutAsset* Layou
 void USubFloodComponent::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
 {
 	Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
+
+#if !UE_BUILD_SHIPPING
+	// Breach markers — drawn on ALL net roles (Breaches is replicated). Outside the authority
+	// guard below so clients also visualise. Disabled by default; toggle in Project Settings >
+	// Game > Sub3D Debug > Submarine|Flood > Draw Breach Markers.
+	if (const USub3DDebugSettings* Settings = GetDefault<USub3DDebugSettings>())
+	{
+		if (Settings->bDrawBreachMarkers && Breaches.Num() > 0)
+		{
+			if (UWorld* World = GetWorld())
+			{
+				if (const AActor* Owner = GetOwner())
+				{
+					const FTransform SubXf = Owner->GetActorTransform();
+					const FVector Extent(Settings->BreachMarkerHalfExtentCm);
+					for (const FCompartmentBreachState& B : Breaches)
+					{
+						if (!B.bBreached) continue;
+						const FVector WorldPos = SubXf.TransformPosition(B.BreachLocalCenter);
+						DrawDebugSolidBox(World, WorldPos, Extent, FColor::Red, false, -1.f, SDPG_World);
+						DrawDebugBox(World, WorldPos, Extent, FColor::Black, false, -1.f, SDPG_World, 1.5f);
+						const FString Label = FString::Printf(
+							TEXT("[BREACH] %s  %.1f L/s"),
+							*B.CompartmentId.ToString(),
+							B.InflowRateLitersPerSec);
+						DrawDebugString(World, WorldPos + FVector(0.f, 0.f, Settings->BreachMarkerHalfExtentCm + 20.f),
+							Label, nullptr, FColor::Red, 0.f, true, 1.f);
+					}
+				}
+			}
+		}
+	}
+#endif
 
 	if (!HasAuthority(this) || CompartmentStates.Num() == 0)
 	{

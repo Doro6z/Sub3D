@@ -69,6 +69,37 @@ public:
 	UPROPERTY(Config, EditAnywhere, Category = "Crew", meta = (ClampMin = "10.0"))
 	float CrewJitterWarnVelocityCmPerSec = 1200.f;
 
+	// Crew animation debug: validation layer for movement state, water contact, procedural pose, and IK.
+	UPROPERTY(Config, EditAnywhere, Category = "Crew|AnimationDebug")
+	bool bLogCrewAnimWarnings = false;
+
+	UPROPERTY(Config, EditAnywhere, Category = "Crew|AnimationDebug")
+	bool bDrawCrewAnimDebug = false;
+
+	UPROPERTY(Config, EditAnywhere, Category = "Crew|AnimationDebug")
+	bool bShowCrewAnimDebugPanel = false;
+
+	UPROPERTY(Config, EditAnywhere, Category = "Crew|AnimationDebug")
+	bool bCaptureCrewAnimContributions = false;
+
+	UPROPERTY(Config, EditAnywhere, Category = "Crew|AnimationDebug")
+	bool bDrawCrewAnimBones = false;
+
+	UPROPERTY(Config, EditAnywhere, Category = "Crew|AnimationDebug")
+	bool bDrawCrewAnimIK = false;
+
+	UPROPERTY(Config, EditAnywhere, Category = "Crew|AnimationDebug")
+	bool bDrawCrewAnimFrameAxes = false;
+
+	UPROPERTY(Config, EditAnywhere, Category = "Crew|AnimationDebug", meta = (ClampMin = "0.01", ClampMax = "5.0"))
+	float CrewAnimDebugSampleIntervalSeconds = 0.1f;
+
+	UPROPERTY(Config, EditAnywhere, Category = "Crew|AnimationDebug", meta = (ClampMin = "1", ClampMax = "600"))
+	int32 CrewAnimDebugRecentSnapshotCount = 600;
+
+	UPROPERTY(Config, EditAnywhere, Category = "Crew|AnimationDebug", meta = (ClampMin = "1.0", ClampMax = "180.0"))
+	float CrewAnimArmRestWarningDeg = 60.f;
+
 	// ── Submarine | Movement ──────────────────────────────────
 	UPROPERTY(Config, EditAnywhere, Category = "Submarine|Movement")
 	bool bLogSubMovement = false;
@@ -109,6 +140,25 @@ public:
 	/** Diagnostic kill-switch: do not spawn USubHullBoundaryComponent for active breaches. Flood sim still runs. */
 	UPROPERTY(Config, EditAnywhere, Category = "Submarine|Flood")
 	bool bDisableBreachBoundaries = false;
+
+	/** Draw a red solid box at every active breach's world position + label with CompartmentId
+	 *  and inflow rate. Editor + PIE; compiled out in Shipping. */
+	UPROPERTY(Config, EditAnywhere, Category = "Submarine|Flood")
+	bool bDrawBreachMarkers = false;
+
+	/** Half-extent (cm) of the breach marker red box. */
+	UPROPERTY(Config, EditAnywhere, Category = "Submarine|Flood", meta = (ClampMin = "1.0"))
+	float BreachMarkerHalfExtentCm = 25.f;
+
+	/** Draw a debug sphere + circle at every UFloodWaterPlaneComponent::InjectAt call site.
+	 *  Independent from the cap mesh (which is hidden when the compartment is empty), so injects
+	 *  are observable even when no water is rendered. Editor + PIE; compiled out in Shipping. */
+	UPROPERTY(Config, EditAnywhere, Category = "Submarine|Flood")
+	bool bDrawWaterInjectMarkers = true;
+
+	/** How long the inject debug marker stays on screen (seconds). */
+	UPROPERTY(Config, EditAnywhere, Category = "Submarine|Flood", meta = (ClampMin = "0.05", ClampMax = "10.0"))
+	float WaterInjectMarkerLifetime = 1.5f;
 
 	// ── Submarine | Hull ──────────────────────────────────────
 	UPROPERTY(Config, EditAnywhere, Category = "Submarine|Hull")

@@ -4,6 +4,7 @@
 #include "Sub3DDebugPanelCommands.h"
 #include "Sub3DDebugPanelStyle.h"
 #include "SSub3DDebugPanelWidget.h"
+#include "SSub3DWaterDebugPanelWidget.h"
 #include "Styling/AppStyle.h"
 #include "ToolMenus.h"
 #include "Widgets/Docking/SDockTab.h"
@@ -11,6 +12,7 @@
 #include "WorkspaceMenuStructureModule.h"
 
 static const FName Sub3DDebugPanelTabName("Sub3DDebugPanel");
+static const FName Sub3DWaterDebugPanelTabName("Sub3DWaterDebugPanel");
 
 #define LOCTEXT_NAMESPACE "FSub3DDebugPanelModule"
 
@@ -37,6 +39,16 @@ void FSub3DDebugPanelModule::StartupModule()
 		.SetIcon(FSlateIcon(FAppStyle::GetAppStyleSetName(), "Icons.Debug"))
 		.SetMenuType(ETabSpawnerMenuType::Enabled);
 
+	FGlobalTabmanager::Get()
+		->RegisterNomadTabSpawner(
+			Sub3DWaterDebugPanelTabName,
+			FOnSpawnTab::CreateRaw(this, &FSub3DDebugPanelModule::OnSpawnWaterDebugTab))
+		.SetDisplayName(LOCTEXT("WaterTabDisplayName", "Sub3D Water Debug"))
+		.SetTooltipText(LOCTEXT("WaterTabTooltip", "Water heightfield + breach test commands per compartment."))
+		.SetGroup(WorkspaceMenu::GetMenuStructure().GetLevelEditorCategory())
+		.SetIcon(FSlateIcon(FAppStyle::GetAppStyleSetName(), "Icons.Visibility"))
+		.SetMenuType(ETabSpawnerMenuType::Enabled);
+
 	UToolMenus::RegisterStartupCallback(
 		FSimpleMulticastDelegate::FDelegate::CreateRaw(this, &FSub3DDebugPanelModule::RegisterMenus));
 }
@@ -49,6 +61,7 @@ void FSub3DDebugPanelModule::ShutdownModule()
 	FSub3DDebugPanelCommands::Unregister();
 
 	FGlobalTabmanager::Get()->UnregisterNomadTabSpawner(Sub3DDebugPanelTabName);
+	FGlobalTabmanager::Get()->UnregisterNomadTabSpawner(Sub3DWaterDebugPanelTabName);
 }
 
 TSharedRef<SDockTab> FSub3DDebugPanelModule::OnSpawnPluginTab(const FSpawnTabArgs& SpawnTabArgs)
@@ -59,6 +72,21 @@ TSharedRef<SDockTab> FSub3DDebugPanelModule::OnSpawnPluginTab(const FSpawnTabArg
 		[
 			SNew(SSub3DDebugPanelWidget)
 		];
+}
+
+TSharedRef<SDockTab> FSub3DDebugPanelModule::OnSpawnWaterDebugTab(const FSpawnTabArgs& SpawnTabArgs)
+{
+	return SNew(SDockTab)
+		.TabRole(ETabRole::NomadTab)
+		.Label(LOCTEXT("WaterDockTabLabel", "Sub3D Water Debug"))
+		[
+			SNew(SSub3DWaterDebugPanelWidget)
+		];
+}
+
+void FSub3DDebugPanelModule::WaterDebugButtonClicked()
+{
+	FGlobalTabmanager::Get()->TryInvokeTab(Sub3DWaterDebugPanelTabName);
 }
 
 void FSub3DDebugPanelModule::RegisterMenus()
@@ -76,6 +104,15 @@ void FSub3DDebugPanelModule::RegisterMenus()
 		FSlateIcon(FAppStyle::GetAppStyleSetName(), "Icons.Debug"));
 	ToolbarEntry.StyleNameOverride = "AssetEditorToolbar";
 	ToolbarSection.AddEntry(ToolbarEntry);
+
+	FToolMenuEntry WaterToolbarEntry = FToolMenuEntry::InitToolBarButton(
+		"Sub3DWaterDebugPanelToolbar",
+		FUIAction(FExecuteAction::CreateRaw(this, &FSub3DDebugPanelModule::WaterDebugButtonClicked)),
+		LOCTEXT("WaterToolbarButtonLabel", "Water Debug"),
+		LOCTEXT("WaterToolbarButtonTooltip", "Open the Sub3D Water Debug Panel"),
+		FSlateIcon(FAppStyle::GetAppStyleSetName(), "Icons.Visibility"));
+	WaterToolbarEntry.StyleNameOverride = "AssetEditorToolbar";
+	ToolbarSection.AddEntry(WaterToolbarEntry);
 }
 
 void FSub3DDebugPanelModule::PluginButtonClicked()

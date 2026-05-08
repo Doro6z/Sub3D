@@ -242,6 +242,16 @@ public:
 	UFUNCTION(Server, Reliable, Category = "Debug|Submarine")
 	void Server_DevCheat_CreateBreach(FName CompartmentId, float RateLps);
 
+	/** Create a breach AT the controlled crew's current position. Auto-resolves CompartmentId from
+	 *  ASubCrewCharacter::CurrentCompartmentId, converts crew world location to sub-local, and uses
+	 *  it as the breach center — so the visual marker (red cube) and the heightfield InjectAt land
+	 *  exactly where the crew stands. Reproduces the proto's "InjectAt at SubCrew" workflow. */
+	UFUNCTION(Exec, Category = "Debug|Submarine")
+	void DevCheat_CreateBreachAtCrew(float RateLps);
+
+	UFUNCTION(Server, Reliable, Category = "Debug|Submarine")
+	void Server_DevCheat_CreateBreachAtCrew(FName CompartmentId, FVector LocalCenter, float RateLps);
+
 	/** Force a door/hatch connection state via its ConnectionId. */
 	UFUNCTION(Exec, Category = "Debug|Submarine")
 	void DevCheat_SetDoorClosed(FName ConnectionId, bool bClosed);
@@ -269,4 +279,8 @@ public:
 	/** Print all crew anim parameters */
 	UFUNCTION(Exec, Category = "Debug|Crew")
 	void AnimList();
+
+	/** Print the current crew animation debug snapshot to the log. */
+	UFUNCTION(Exec, Category = "Debug|Crew")
+	void CrewAnimDump();
 };

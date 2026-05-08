@@ -7,6 +7,8 @@
 #include "DoorFloodVfxComponent.h"
 #include "GeneratedGeometry/SubmarineGeneratedGeometryComponent.h"
 #include "ProceduralMeshComponent.h"
+#include "Components/BoxReflectionCaptureComponent.h"
+#include "Components/PostProcessComponent.h"
 #include "Generator/SubmarineDefinition.h"
 #include "Generator/SubmarineGenerator.h"
 #include "Generator/SubmarineGeneratorSpec.h"
@@ -451,8 +453,56 @@ void ASubmarineBase::BeginPlay()
 					Plane->PlaneMesh = DefaultWaterPlaneMesh;
 				}
 				Plane->PlaneWorldSizeCm = DefaultWaterPlaneWorldSizeCm;
+				if (DefaultBreachWaterImpactVfx && !Plane->BreachWaterImpactVfx)
+				{
+					Plane->BreachWaterImpactVfx = DefaultBreachWaterImpactVfx;
+				}
 				Plane->SetupAttachment(Vol);
 				Plane->RegisterComponent();
+
+				// ── Per-compartment Box Reflection Capture ─────────────────
+				// Box-projected reflection capture sized from the compartment volume.
+				// Critical for Sub3D abyssal setting: no SkyAtmosphere/SkyLight cubemap
+				// fallback exists, so the cap mesh translucent material relies on this
+				// to reflect interior geometry and lights.
+				//
+				// Scale convention: UBoxReflectionCaptureComponent's influence half-extent
+				// is 1000 cm * RelativeScale3D (engine default PreviewInfluenceBox extent).
+				// Attached to Vol, the world half-extent equals VolUnscaledExtent because
+				// Vol's parent scale cancels via attachment. So Refl relative scale =
+				// Vol unscaled box extent / 1000.
+				UBoxReflectionCaptureComponent* Refl = NewObject<UBoxReflectionCaptureComponent>(this);
+				if (Refl)
+				{
+					// Reflection capture defaults to Static; the submarine is Movable, so the
+					// volume parent is Movable too. UE forbids Static-attached-to-Movable.
+					Refl->SetMobility(EComponentMobility::Movable);
+					Refl->Brightness = 1.0f;
+					Refl->ReflectionSourceType = EReflectionSourceType::CapturedScene;
+					Refl->BoxTransitionDistance = 25.f;
+					Refl->SetupAttachment(Vol);
+					Refl->SetRelativeLocation(FVector::ZeroVector);
+					Refl->SetRelativeRotation(FRotator::ZeroRotator);
+					const FVector VolHalfExtentCm = Vol->GetUnscaledBoxExtent();
+					Refl->SetRelativeScale3D(VolHalfExtentCm / 1000.f);
+					Refl->RegisterComponent();
+					Refl->MarkDirtyForRecaptureOrUpload();
+				}
+
+				// ── Per-compartment Post-Process (FP: empty settings) ──────
+				// Reserved for post-FP per-compartment tint/exposure tweaks. In FP we
+				// register the component empty so the structure exists; settings stay
+				// inherited from the master PostProcessVolume.
+				UPostProcessComponent* PP = NewObject<UPostProcessComponent>(this);
+				if (PP)
+				{
+					PP->bUnbound = false;
+					PP->BlendRadius = 50.f;
+					PP->BlendWeight = 1.f;
+					PP->Priority = 1.f;
+					PP->SetupAttachment(Vol);
+					PP->RegisterComponent();
+				}
 			}
 		}
 	}
@@ -1069,6 +1119,22 @@ void ASubmarineBase::ClearPilot()
 	{
 		CurrentPilot = nullptr;
 	}
+}
+
+bool ASubmarineBase::InjectWaterAtWorldPoint(FVector WorldPos, float Force, float Radius)
+{
+	TArray<UFloodWaterPlaneComponent*> Planes;
+	GetComponents<UFloodWaterPlaneComponent>(Planes);
+	bool bAnyAccepted = false;
+	for (UFloodWaterPlaneComponent* Plane : Planes)
+	{
+		if (!Plane) continue;
+		if (Plane->InjectAtWorldPoint(WorldPos, Force, Radius))
+		{
+			bAnyAccepted = true;
+		}
+	}
+	return bAnyAccepted;
 }
 
 void ASubmarineBase::OnHullHit(
