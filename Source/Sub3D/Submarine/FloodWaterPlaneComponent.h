@@ -84,10 +84,16 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Flood|Water")
 	float GetCurrentWaterLevel01() const { return LastLevel01; }
 
+	/** Inspector access to the cap mesh's runtime MID for parameter dump / debugging. */
+	UMaterialInstanceDynamic* GetBakeCapMID() const { return BakeCapMID; }
+
+	/** Inspector access to the R32F heightfield texture for previewing in the editor. */
+	UTexture2D* GetHeightfieldTexture() const { return HeightfieldTex; }
+
 	// ── Heightfield (P3.4 — surface vivante) ────────────────────────────────
 	// Wave equation 2D CPU + texture R32F push-to-material. Active only when the bake path
-	// is rendering (cap mesh present). Material reads `WaterHeightTex` and offsets WPO by
-	// `HeightfieldAmplitudeCm * sampledValue` to deform the cap surface.
+	// is rendering (cap mesh present). Material reads HeightfieldTextureParamName and offsets
+	// WPO by HeightfieldAmplitudeParamName * sampledValue to deform the cap surface.
 	//
 	// Coordinate system: heightfield grid spans the bake's LocalBoundsMin/Max XY. UV (0,0)
 	// = LocalBoundsMin, UV (1,1) = LocalBoundsMax. Material binds the same bounds via
@@ -154,6 +160,44 @@ public:
 	 *  facing down (visible only from below) — toggling this flips it without re-baking. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Flood|Water|CapMesh")
 	bool bFlipCapMeshWinding = true;
+
+	// ── Slosh modal (P3.6) ──────────────────────────────────────────────────
+	// Spring-damper that pushes the cap mesh's vertical offset + tilt in response to the sub's
+	// linear accel (sub-local frame). Forward accel → water tilts rear, lateral accel → water rolls,
+	// vertical accel → water bounces. Pure visual; does not feed back into the heightfield.
+
+	/** Master toggle for the slosh modal effect. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Flood|Water|Slosh")
+	bool bEnableSlosh = true;
+
+	/** Natural oscillation frequency in Hz. Lower = slower, larger swings. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Flood|Water|Slosh", meta = (ClampMin = "0.1", ClampMax = "5.0"))
+	float SloshNaturalFreqHz = 0.8f;
+
+	/** Damping ratio. 0 = undamped, 1 = critical, >1 = overdamped. 0.15-0.25 = visible swing without ringing. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Flood|Water|Slosh", meta = (ClampMin = "0.0", ClampMax = "1.5"))
+	float SloshDampingRatio = 0.15f;
+
+	/** Sub-local Z accel → vertical offset velocity gain. Higher = more vertical bounce. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Flood|Water|Slosh", meta = (ClampMin = "0.0"))
+	float SloshOffsetGain = 0.05f;
+
+	/** Sub-local horizontal accel → tilt velocity gain. Higher = stronger tilt response. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Flood|Water|Slosh", meta = (ClampMin = "0.0"))
+	float SloshTiltGain = 0.0008f;
+
+	/** Maximum tilt magnitude (degrees). Tilt is clamped to ±this on each axis. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Flood|Water|Slosh", meta = (ClampMin = "0.0", ClampMax = "20.0"))
+	float MaxSloshTiltDeg = 3.0f;
+
+	/** Maximum vertical offset magnitude (cm). OffsetZ clamped to ±this. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Flood|Water|Slosh", meta = (ClampMin = "0.0"))
+	float MaxSloshOffsetCm = 8.0f;
+
+	// Crew wakes & sub inertia wave injections were rolled back 2026-05-09.
+	// They were quickwin point-injects on a scalar wave equation that didn't constitute a
+	// system. A proper design (stamps + momentum field, or Saint-Venant lite) is deferred to
+	// a "P3.10 Water momentum" jalon — see TODO post-Phase-3.
 
 	/**
 	 * Inject a radial perturbation into the heightfield at the given local-space XY (sub-local frame).
@@ -238,7 +282,8 @@ private:
 	// ── Heightfield runtime state (P3.4) ────────────────────────────────────
 
 	/** Lazy init: creates buffers + texture sized to HeightfieldGridX × HeightfieldGridY,
-	 *  binds `WaterHeightTex` / `LocalBoundsMin` / `LocalBoundsMax` / `HeightfieldAmplitudeCm`
+	 *  binds HeightfieldTextureParamName / LocalBoundsMinParamName / LocalBoundsMaxParamName
+	 *  / HeightfieldAmplitudeParamName
 	 *  on BakeCapMID. Idempotent. Requires CachedBake to be resolved. */
 	void EnsureHeightfieldInitialized();
 
@@ -265,4 +310,16 @@ private:
 	bool bBreachActive = false;
 	FVector LastBreachLocalCenter = FVector::ZeroVector;
 	float BreachInjectAccum = 0.f;
+
+	// ── Slosh modal state (P3.6) ────────────────────────────────────────────
+	void UpdateSloshModal(float Dt);
+	void ApplyCapMeshTransformWithSlosh();
+
+	float SloshOffsetZ = 0.f;
+	float SloshOffsetVelZ = 0.f;
+	FVector2D SloshTilt = FVector2D::ZeroVector;     // X = pitch fraction, Y = roll fraction
+	FVector2D SloshTiltVel = FVector2D::ZeroVector;
+	FVector LastSubWorldVelocity = FVector::ZeroVector;
+	bool bSloshSeeded = false;
+	float CurrentBaseWaterZLocal = 0.f;
 };

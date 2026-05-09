@@ -59,6 +59,8 @@ private:
 	FReply OnResetHeightfield(UFloodWaterPlaneComponent* Plane);
 	FReply OnFillCompartment(UFloodWaterPlaneComponent* Plane, float Level01);
 	FReply OnDrainCompartment(UFloodWaterPlaneComponent* Plane);
+	FReply OnDumpMIDParams(UFloodWaterPlaneComponent* Plane);
+	FReply OnOpenHeightfieldTexture(UFloodWaterPlaneComponent* Plane);
 
 	// ── Selection / viewport highlight ───────────────────────────────────────
 	TSet<FName> ExpandedCompartments;
@@ -69,6 +71,7 @@ private:
 	float GlobalWaveSpeed = 200.f;
 	float GlobalDamping = 0.995f;
 	float GlobalHeightfieldAmplitudeCm = 10.f;
+	float GlobalHeightfieldUpdateHz = 60.f;
 
 	void OnGlobalWaveSpeedChanged(float NewValue);
 	void OnGlobalDampingChanged(float NewValue);

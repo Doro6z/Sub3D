@@ -18,6 +18,7 @@
 #include "ProceduralMeshComponent.h"
 #include "SubFloodComponent.h"
 #include "SubmarineBase.h"
+#include "SubMovementComponent.h"
 #include "Types/CompartmentWaterBake.h"
 #include "UObject/ConstructorHelpers.h"
 
@@ -128,6 +129,18 @@ UFloodWaterPlaneComponent::UFloodWaterPlaneComponent()
 void UFloodWaterPlaneComponent::BeginPlay()
 {
 	Super::BeginPlay();
+
+	// Tick prereq: must run AFTER the sub's movement tick so we read its CURRENT-frame
+	// position when computing cap mesh world transform. Without this, the cap can lag
+	// one frame behind the sub when the sub is moving — visible as wobble/jitter.
+	if (const ASubmarineBase* Sub = Cast<ASubmarineBase>(GetOwner()))
+	{
+		if (Sub->SubMovement)
+		{
+			AddTickPrerequisiteComponent(Sub->SubMovement);
+		}
+	}
+
 	EnsurePlaneMesh();
 	RefreshFromFlood();
 }
@@ -209,7 +222,7 @@ void UFloodWaterPlaneComponent::RefreshFromFlood()
 				}
 				if (BakeCapMID)
 				{
-					BakeCapMID->SetScalarParameterValue(TEXT("HeightfieldAmplitudeCm"), HeightfieldAmplitudeCm);
+					BakeCapMID->SetScalarParameterValue(HeightfieldAmplitudeParamName, HeightfieldAmplitudeCm);
 				}
 			}
 		}
@@ -218,6 +231,16 @@ void UFloodWaterPlaneComponent::RefreshFromFlood()
 		// One-shot inject + Niagara on first detection of a replicated breach for this
 		// compartment, plus optional recurring inject pulses while it stays active.
 		RefreshBreachReaction();
+
+		// ── Slosh modal (P3.6) ────────────────────────────────────────────────
+		// Spring-damper integrating the sub's velocity delta as an impulse on tilt+offset.
+		// Re-applies cap mesh transform with the current slosh state on top of the base water Z.
+		if (bEnableSlosh)
+		{
+			const float Dt = GetWorld() ? GetWorld()->GetDeltaSeconds() : 0.f;
+			UpdateSloshModal(Dt);
+			ApplyCapMeshTransformWithSlosh();
+		}
 
 		// Level change event.
 		if (FMath::Abs(Level01 - LastLevel01) > LevelChangeEventThreshold01)
@@ -399,9 +422,10 @@ bool UFloodWaterPlaneComponent::RefreshBakeCapMesh(float WaterHeightLocalCm)
 		LastSliceIndex = BestIdx;
 	}
 
-	// Position the PMC at the current water surface Z (sub-local). Cap mesh vertices have Z=0
-	// — the PMC translation places the slice at the right altitude.
-	BakeCapMeshComp->SetRelativeLocation(FVector(0.f, 0.f, WaterZLocal));
+	// Cache the base water Z (sub-local). Final transform incl. slosh offset/tilt is applied
+	// later via ApplyCapMeshTransformWithSlosh — called from RefreshFromFlood after slosh tick.
+	CurrentBaseWaterZLocal = WaterZLocal;
+	ApplyCapMeshTransformWithSlosh();
 	return true;
 }
 
@@ -975,4 +999,108 @@ void UFloodWaterPlaneComponent::RefreshBreachReaction()
 				BreachRecurringInjectForce, BreachInjectRadiusCm * 0.5f);
 		}
 	}
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  Slosh modal (P3.6)
+// ─────────────────────────────────────────────────────────────────────────────
+
+void UFloodWaterPlaneComponent::UpdateSloshModal(float Dt)
+{
+	if (Dt <= 0.f) return;
+
+	const ASubmarineBase* Sub = Cast<ASubmarineBase>(GetOwner());
+	const USubMovementComponent* SubMov = Sub ? Sub->SubMovement : nullptr;
+	const USceneComponent* SubRoot = Sub ? Sub->GetRootComponent() : nullptr;
+	if (!SubMov || !SubRoot)
+	{
+		return;
+	}
+
+	const FVector CurrentWorldVel = SubMov->Velocity;
+
+	// Seed on first call so we don't generate a huge fake impulse from (Vel - 0) / Dt.
+	if (!bSloshSeeded)
+	{
+		LastSubWorldVelocity = CurrentWorldVel;
+		bSloshSeeded = true;
+	}
+
+	// World accel → sub-local accel (X = forward, Y = right, Z = up in sub frame).
+	const FVector WorldAccel = (CurrentWorldVel - LastSubWorldVelocity) / Dt;
+	LastSubWorldVelocity = CurrentWorldVel;
+	const FVector LocalAccel = SubRoot->GetComponentTransform().InverseTransformVector(WorldAccel);
+
+	// Impulse into the spring-damper. Accel-driven (mass implicit in the gain). Negative signs:
+	//   +X accel (forward) → water lags behind → tilt toward rear → pitch DOWN at front
+	//   +Y accel (right)   → water lags left   → roll LEFT
+	//   +Z accel (up)      → water lags down   → OffsetZ DOWN
+	SloshTiltVel.X += -LocalAccel.X * SloshTiltGain;
+	SloshTiltVel.Y += -LocalAccel.Y * SloshTiltGain;
+	SloshOffsetVelZ += -LocalAccel.Z * SloshOffsetGain;
+
+	// Spring-damper integration.
+	//   Stiffness k = (2π * f)²
+	//   Damping   c = 2 * ζ * (2π * f)
+	//   v += (-k * x - c * v) * dt
+	//   x += v * dt
+	const float Omega = 2.f * PI * FMath::Max(0.01f, SloshNaturalFreqHz);
+	const float Stiffness = Omega * Omega;
+	const float DampingCoef = 2.f * SloshDampingRatio * Omega;
+
+	// Tilt + offset spring-damper integration. Inlined 3× to avoid lambda template deduction
+	// issues — FVector2D members are double under UE5 LWC, while SloshOffsetZ is float.
+	SloshTiltVel.X += (-SloshTilt.X * Stiffness - SloshTiltVel.X * DampingCoef) * Dt;
+	SloshTilt.X += SloshTiltVel.X * Dt;
+
+	SloshTiltVel.Y += (-SloshTilt.Y * Stiffness - SloshTiltVel.Y * DampingCoef) * Dt;
+	SloshTilt.Y += SloshTiltVel.Y * Dt;
+
+	SloshOffsetVelZ += (-SloshOffsetZ * Stiffness - SloshOffsetVelZ * DampingCoef) * Dt;
+	SloshOffsetZ += SloshOffsetVelZ * Dt;
+
+	// Hard clamps (visible-quality safety; sustained extreme accel would saturate otherwise).
+	const float TiltCap = FMath::Max(0.f, MaxSloshTiltDeg) / FMath::Max(0.01f, MaxSloshTiltDeg);
+	(void)TiltCap;
+	// SloshTilt is unitless fraction in -1..+1 conceptually; clamp directly.
+	SloshTilt.X = FMath::Clamp(SloshTilt.X, -1.f, 1.f);
+	SloshTilt.Y = FMath::Clamp(SloshTilt.Y, -1.f, 1.f);
+	SloshOffsetZ = FMath::Clamp(SloshOffsetZ, -MaxSloshOffsetCm, MaxSloshOffsetCm);
+}
+
+void UFloodWaterPlaneComponent::ApplyCapMeshTransformWithSlosh()
+{
+	if (!BakeCapMeshComp) return;
+
+	const ASubmarineBase* Sub = Cast<ASubmarineBase>(GetOwner());
+	if (!Sub) return;
+
+	// Water surface is gravity-aligned: stays HORIZONTAL in world regardless of sub pitch/roll.
+	// Only sub yaw is inherited (so the cap shape rotates with the sub heading and the bake's
+	// sub-local XY footprint covers the compartment correctly). Slosh tilts add small inertial
+	// pitch/roll on top as a visual response to sub acceleration.
+	//
+	// Note: world Z = sub.world.Z + sub-local water Z. This treats the compartment as if the sub
+	// were level (no per-compartment vertical adjustment when sub is pitched). For typical FP
+	// attitudes (≤15°) the slip is sub-cm; full correctness would require per-compartment world Z
+	// tracking, deferred post-FP.
+	//
+	// Side benefit: vertex Local Position stays anchored to the cap mesh component (which now
+	// follows the sub yaw frame, not the full sub orientation). Material nodes that read Local
+	// Position (heightfield UV, Gerstner) get sub-anchored waves automatically.
+	const FVector SubWorldLoc = Sub->GetActorLocation();
+	const float SubYaw = Sub->GetActorRotation().Yaw;
+
+	const FVector CapWorldPos(
+		SubWorldLoc.X,
+		SubWorldLoc.Y,
+		SubWorldLoc.Z + CurrentBaseWaterZLocal + SloshOffsetZ);
+
+	const FRotator CapWorldRot(
+		SloshTilt.X * MaxSloshTiltDeg,   // pitch (slosh only)
+		SubYaw,                           // yaw inherits sub
+		SloshTilt.Y * MaxSloshTiltDeg);  // roll (slosh only)
+
+	BakeCapMeshComp->SetWorldLocation(CapWorldPos);
+	BakeCapMeshComp->SetWorldRotation(CapWorldRot);
 }

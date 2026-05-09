@@ -4,8 +4,11 @@
 #include "Debug/Sub3DDebugSettings.h"
 #include "DrawDebugHelpers.h"
 #include "Editor.h"
+#include "Engine/Texture2D.h"
 #include "Engine/World.h"
 #include "EngineUtils.h"
+#include "Materials/MaterialInstanceDynamic.h"
+#include "Subsystems/AssetEditorSubsystem.h"
 #include "FloodWaterPlaneComponent.h"
 #include "GameFramework/Pawn.h"
 #include "GameFramework/PlayerController.h"
@@ -284,6 +287,30 @@ void SSub3DWaterDebugPanelWidget::Construct(const FArguments& InArgs)
 					.Value_Lambda([this]() { return GlobalHeightfieldAmplitudeCm; })
 					.OnValueChanged(this, &SSub3DWaterDebugPanelWidget::OnGlobalAmplitudeChanged)
 					.MinValue(0.f).MaxValue(500.f)
+				]
+			]
+			+ SVerticalBox::Slot().AutoHeight().Padding(RowPadding)
+			[
+				SNew(SHorizontalBox)
+				+ SHorizontalBox::Slot().AutoWidth().Padding(0, 0, 8, 0).VAlign(VAlign_Center).MinWidth(160.f)
+				[
+					SNew(STextBlock)
+					.Text_Lambda([this]() { return FText::Format(LOCTEXT("UpdateHzFmt", "Update Hz: {0}  (60..240)"),
+						FText::AsNumber(GlobalHeightfieldUpdateHz)); })
+				]
+				+ SHorizontalBox::Slot().FillWidth(1.f)
+				[
+					SNew(SSlider)
+					.Value_Lambda([this]() { return (GlobalHeightfieldUpdateHz - 30.f) / 210.f; })
+					.OnValueChanged_Lambda([this](float V) { GlobalHeightfieldUpdateHz = 30.f + V * 210.f; })
+				]
+				+ SHorizontalBox::Slot().AutoWidth().Padding(8, 0, 0, 0).MaxWidth(120.f)
+				[
+					SNew(SNumericEntryBox<float>)
+					.Value_Lambda([this]() { return GlobalHeightfieldUpdateHz; })
+					.OnValueChanged_Lambda([this](float V) { GlobalHeightfieldUpdateHz = V; })
+					.MinValue(10.f).MaxValue(480.f)
+					.ToolTipText(LOCTEXT("UpdateHzNumTip", "Substep rate of the wave equation. Higher = waves propagate faster in real time + more stable past CFL but heavier CPU."))
 				]
 			]
 			+ SVerticalBox::Slot().AutoHeight().Padding(RowPadding)
@@ -623,6 +650,25 @@ TSharedRef<SWidget> SSub3DWaterDebugPanelWidget::MakeCompartmentRow(UFloodWaterP
 						.OnClicked(this, &SSub3DWaterDebugPanelWidget::OnResetHeightfield, Plane)
 					]
 				]
+				// Row 1.5: material debug
+				+ SVerticalBox::Slot().AutoHeight().Padding(0, 4)
+				[
+					SNew(SHorizontalBox)
+					+ SHorizontalBox::Slot().AutoWidth().Padding(0, 0, 6, 0)
+					[
+						SNew(SButton)
+						.Text(LOCTEXT("DumpMID", "Dump MID params (log)"))
+						.ToolTipText(LOCTEXT("DumpMIDTip", "Logs every Scalar/Vector/Texture parameter currently bound on the cap mesh's MID. Verify what the runtime is pushing vs what the material expects."))
+						.OnClicked(this, &SSub3DWaterDebugPanelWidget::OnDumpMIDParams, Plane)
+					]
+					+ SHorizontalBox::Slot().AutoWidth()
+					[
+						SNew(SButton)
+						.Text(LOCTEXT("OpenHFTex", "Open heightfield texture"))
+						.ToolTipText(LOCTEXT("OpenHFTexTip", "Opens the runtime R32F heightfield texture in the editor texture viewer (transient asset)."))
+						.OnClicked(this, &SSub3DWaterDebugPanelWidget::OnOpenHeightfieldTexture, Plane)
+					]
+				]
 				// Row 2: water level shortcuts (so injects become visually meaningful)
 				+ SVerticalBox::Slot().AutoHeight().Padding(0, 4)
 				[
@@ -748,6 +794,81 @@ FReply SSub3DWaterDebugPanelWidget::OnFillCompartment(UFloodWaterPlaneComponent*
 FReply SSub3DWaterDebugPanelWidget::OnDrainCompartment(UFloodWaterPlaneComponent* Plane)
 {
 	return OnFillCompartment(Plane, 0.f);
+}
+
+FReply SSub3DWaterDebugPanelWidget::OnDumpMIDParams(UFloodWaterPlaneComponent* Plane)
+{
+	if (!Plane) return FReply::Handled();
+	const UCompartmentVolumeComponent* Vol = Plane->SourceVolume.Get();
+	const FName CompId = Vol ? Vol->CompartmentId : NAME_None;
+	UMaterialInstanceDynamic* MID = Plane->GetBakeCapMID();
+	if (!MID)
+	{
+		SetLastAction(FString::Printf(TEXT("Dump MID failed | Comp=%s | No BakeCapMID (cap mesh not yet rendered?)"),
+			*CompId.ToString()));
+		return FReply::Handled();
+	}
+
+	UE_LOG(LogTemp, Display, TEXT("──── MID Params Dump | Comp=%s | MID=%s | Parent=%s ────"),
+		*CompId.ToString(), *MID->GetName(), *GetNameSafe(MID->Parent));
+
+	// Iterate scalar params
+	TArray<FMaterialParameterInfo> ScalarInfos;
+	TArray<FGuid> ScalarGuids;
+	MID->GetAllScalarParameterInfo(ScalarInfos, ScalarGuids);
+	for (const FMaterialParameterInfo& Info : ScalarInfos)
+	{
+		float Value = 0.f;
+		MID->GetScalarParameterValue(Info, Value);
+		UE_LOG(LogTemp, Display, TEXT("  Scalar  %s = %.4f"), *Info.Name.ToString(), Value);
+	}
+
+	// Iterate vector params
+	TArray<FMaterialParameterInfo> VectorInfos;
+	TArray<FGuid> VectorGuids;
+	MID->GetAllVectorParameterInfo(VectorInfos, VectorGuids);
+	for (const FMaterialParameterInfo& Info : VectorInfos)
+	{
+		FLinearColor Value;
+		MID->GetVectorParameterValue(Info, Value);
+		UE_LOG(LogTemp, Display, TEXT("  Vector  %s = (%.3f, %.3f, %.3f, %.3f)"),
+			*Info.Name.ToString(), Value.R, Value.G, Value.B, Value.A);
+	}
+
+	// Iterate texture params
+	TArray<FMaterialParameterInfo> TexInfos;
+	TArray<FGuid> TexGuids;
+	MID->GetAllTextureParameterInfo(TexInfos, TexGuids);
+	for (const FMaterialParameterInfo& Info : TexInfos)
+	{
+		UTexture* Tex = nullptr;
+		MID->GetTextureParameterValue(Info, Tex);
+		UE_LOG(LogTemp, Display, TEXT("  Texture %s = %s"), *Info.Name.ToString(), *GetNameSafe(Tex));
+	}
+
+	UE_LOG(LogTemp, Display, TEXT("──── End dump  Comp=%s ────"), *CompId.ToString());
+	SetLastAction(FString::Printf(TEXT("Dumped MID params for %s — see Output Log"), *CompId.ToString()));
+	return FReply::Handled();
+}
+
+FReply SSub3DWaterDebugPanelWidget::OnOpenHeightfieldTexture(UFloodWaterPlaneComponent* Plane)
+{
+	if (!Plane) return FReply::Handled();
+	UTexture2D* Tex = Plane->GetHeightfieldTexture();
+	if (!Tex)
+	{
+		SetLastAction(TEXT("Heightfield texture not yet created."));
+		return FReply::Handled();
+	}
+	if (GEditor)
+	{
+		if (UAssetEditorSubsystem* AESS = GEditor->GetEditorSubsystem<UAssetEditorSubsystem>())
+		{
+			AESS->OpenEditorForAsset(Tex);
+		}
+	}
+	SetLastAction(FString::Printf(TEXT("Opened heightfield texture %s in editor"), *Tex->GetName()));
+	return FReply::Handled();
 }
 
 void SSub3DWaterDebugPanelWidget::OnCompartmentExpansionChanged(bool bExpanded, FName CompId)
@@ -917,10 +1038,11 @@ FReply SSub3DWaterDebugPanelWidget::OnApplyTunablesClicked()
 		P->WaveSpeed = GlobalWaveSpeed;
 		P->Damping = GlobalDamping;
 		P->HeightfieldAmplitudeCm = GlobalHeightfieldAmplitudeCm;
+		P->HeightfieldUpdateHz = GlobalHeightfieldUpdateHz;
 		++Count;
 	});
-	SetLastAction(FString::Printf(TEXT("Applied tunables to %d plane(s)  (Wave=%.2f Damp=%.4f Amp=%.1fcm)"),
-		Count, GlobalWaveSpeed, GlobalDamping, GlobalHeightfieldAmplitudeCm));
+	SetLastAction(FString::Printf(TEXT("Applied tunables to %d plane(s)  (Wave=%.2f Damp=%.4f Amp=%.1fcm UpdateHz=%.0f)"),
+		Count, GlobalWaveSpeed, GlobalDamping, GlobalHeightfieldAmplitudeCm, GlobalHeightfieldUpdateHz));
 	return FReply::Handled();
 }
 
