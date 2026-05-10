@@ -107,9 +107,34 @@ struct FFloodEdgeState
 	UPROPERTY()
 	bool bExteriorEdge = false;
 
-	// Door state: true = closed = no flow through this edge
+	/**
+	 * Door open state in [0, 1]. 0 = sealed (no flow), 1 = fully open. Continuous so a partially
+	 * animating door produces partial flow naturally. Replaces the legacy bClosed bool — readers
+	 * test `OpenRatio < KINDA_SMALL_NUMBER` for "fully closed" semantics.
+	 */
 	UPROPERTY()
-	bool bClosed = false;
+	float OpenRatio = 0.f;
+
+	/**
+	 * Full sub-local position of the passage's bottom edge (sill).
+	 * Populated from `Connection.LocalTransform.Translation` at init. Used to:
+	 *   - Compute world-Z of the sill (transformed by sub world transform each tick) so the
+	 *     flow simulation respects sub roll/pitch — water always uses world horizontal as the
+	 *     free surface reference.
+	 *   - Sample the surface elevation of each compartment at this XY (sub-local) so the head
+	 *     calculation reflects what the water "sees" right at the door, not at compartment
+	 *     centroid (matters when sub is tilted along the compartment's long axis).
+	 */
+	UPROPERTY()
+	FVector LocalSpillPosition = FVector::ZeroVector;
+
+	/**
+	 * Signed flow rate across this edge for the latest sim tick. Positive = A→B, negative = B→A.
+	 * Replicated so visual systems (Niagara cascades, audio, heightfield force injection) can
+	 * read it client-side without re-deriving from compartment levels.
+	 */
+	UPROPERTY()
+	float CurrentFlowRateLitersPerSec = 0.f;
 };
 
 /**
@@ -154,7 +179,15 @@ public:
 
 	// --- Door state ------------------------------------------------------
 
-	/** Set the open/closed state of a connection (by ConnectionId). */
+	/**
+	 * Set the open ratio of a connection (by ConnectionId). 0 = sealed, 1 = fully open. Doors
+	 * call this each tick with their current OpenAlpha so partial-open animations produce
+	 * partial flow naturally. Server-authoritative.
+	 */
+	UFUNCTION(BlueprintCallable, Category = "Submarine|Flood")
+	void SetDoorOpenRatio(FName ConnectionId, float NewOpenRatio);
+
+	/** Backward-compat shim: bClosed=true → OpenRatio=0, bClosed=false → OpenRatio=1. */
 	UFUNCTION(BlueprintCallable, Category = "Submarine|Flood")
 	void SetDoorState(FName ConnectionId, bool bClosed);
 
@@ -165,6 +198,10 @@ public:
 	 */
 	UFUNCTION(BlueprintCallable, Category = "Submarine|Flood")
 	void SetDoorStateByCompartments(FName CompA, FName CompB, bool bClosed);
+
+	/** OpenRatio variant of the compartment-pair fallback. */
+	UFUNCTION(BlueprintCallable, Category = "Submarine|Flood")
+	void SetDoorOpenRatioByCompartments(FName CompA, FName CompB, float NewOpenRatio);
 
 	// --- Breach ----------------------------------------------------------
 
@@ -230,8 +267,15 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Submarine|Flood|Tuning", meta = (ClampMin = "0.0"))
 	float MaxExteriorInflowLitersPerSec = 3000.f;
 
+	/**
+	 * Per-edge global flow rate cap. Bernoulli orifice (§6) can compute very high rates for
+	 * fully drowned doors with large head delta (~100K+ L/s for 2m² door at 1m head). This cap
+	 * is the safety net to prevent numerical blow-up; the actual flow is also constrained by
+	 * source water available and destination headroom in the budget passes. Bump higher if
+	 * equalization still feels slow; lower for explicit safety.
+	 */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Submarine|Flood|Tuning", meta = (ClampMin = "0.0"))
-	float MaxInternalFlowLitersPerSec = 1200.f;
+	float MaxInternalFlowLitersPerSec = 100000.f;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Submarine|Flood|Tuning", meta = (ClampMin = "1.0"))
 	float InternalConnectionAreaDivisorCm2 = 40000.f;

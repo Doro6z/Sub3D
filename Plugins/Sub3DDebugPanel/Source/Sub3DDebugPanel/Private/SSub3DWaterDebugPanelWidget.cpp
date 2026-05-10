@@ -1450,9 +1450,10 @@ FReply SSub3DWaterDebugPanelWidget::OnDumpFloodGraphClicked()
 	UE_LOG(LogTemp, Display, TEXT("  Runtime EdgeStates = %d  (these drive AdvanceFlooding)"), Edges.Num());
 	for (const FFloodEdgeState& E : Edges)
 	{
-		UE_LOG(LogTemp, Display, TEXT("    Edge %s | %s ↔ %s | Area=%.0f cm² | Closed=%s | Exterior=%s"),
+		UE_LOG(LogTemp, Display, TEXT("    Edge %s | %s ↔ %s | Area=%.0f cm² | OpenRatio=%.2f | SpillLocal=%s | FlowLps=%+.1f | Exterior=%s"),
 			*E.ClosureId.ToString(), *E.VolumeA.ToString(), *E.VolumeB.ToString(),
-			E.PassageAreaCm2, E.bClosed ? TEXT("true") : TEXT("false"), E.bExteriorEdge ? TEXT("true") : TEXT("false"));
+			E.PassageAreaCm2, E.OpenRatio, *E.LocalSpillPosition.ToString(), E.CurrentFlowRateLitersPerSec,
+			E.bExteriorEdge ? TEXT("true") : TEXT("false"));
 	}
 
 	UE_LOG(LogTemp, Display, TEXT("──── End flood graph dump ────"));

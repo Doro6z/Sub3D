@@ -832,6 +832,66 @@ UCompartmentWaterBake* USubmarineWaterBakerLibrary::BakeCompartment(
 	// looks up its compartment's CWB through this map. Mark the DA dirty so the panel's
 	// SaveLoadedAsset (asset action) actually persists the new reference.
 	Definition->WaterBakes.Add(CompartmentId, Bake);
+
+	// Sync derived fields back into Compartments[]. Removes the manual / bake-driven drift on
+	// CapacityLiters + MaxWaterHeightCm + WalkableFloorZCm — these are now bake outputs, not
+	// hand-edited inputs. Manual edits get overwritten on next bake by design.
+	{
+		auto PolyArea2D = [](const TArray<FVector2D>& P) -> float
+		{
+			const int32 N = P.Num();
+			if (N < 3) return 0.f;
+			float Acc = 0.f;
+			for (int32 i = 0; i < N; ++i)
+			{
+				const FVector2D& a = P[i];
+				const FVector2D& b = P[(i + 1) % N];
+				Acc += a.X * b.Y - b.X * a.Y;
+			}
+			return FMath::Abs(Acc) * 0.5f;
+		};
+
+		// Trapezoid integration along Z over the slice stack.
+		const float SliceSpacingCm = (NumSlices > 1)
+			? (LocalMax.Z - LocalMin.Z) / static_cast<float>(NumSlices - 1)
+			: (LocalMax.Z - LocalMin.Z);
+		float TotalVolumeCm3 = 0.f;
+		float PrevAreaCm2 = -1.f;
+		for (const FCompartmentBakeSlice& Slice : Bake->Slices)
+		{
+			const float AreaCm2 = (Slice.ContourPolygon.Num() >= 3)
+				? PolyArea2D(Slice.ContourPolygon)
+				: 0.f;
+			if (PrevAreaCm2 >= 0.f)
+			{
+				TotalVolumeCm3 += 0.5f * (PrevAreaCm2 + AreaCm2) * SliceSpacingCm;
+			}
+			PrevAreaCm2 = AreaCm2;
+		}
+		const float ComputedCapacityLiters = TotalVolumeCm3 / 1000.f;
+		const float ComputedMaxWaterHeightCm = LocalMax.Z - LocalMin.Z;
+		const float ComputedFloorZCm = LocalMin.Z;
+
+		for (FGeneratedCompartmentDef& Comp : Definition->Compartments)
+		{
+			if (Comp.CompartmentId == CompartmentId)
+			{
+				const FString SyncLine = FString::Printf(
+					TEXT("    sync DA: CapacityLiters %.0f → %.0f | MaxWaterHeightCm %.0f → %.0f | WalkableFloorZCm %.0f → %.0f"),
+					Comp.CapacityLiters, ComputedCapacityLiters,
+					Comp.MaxWaterHeightCm, ComputedMaxWaterHeightCm,
+					Comp.WalkableFloorZCm, ComputedFloorZCm);
+				UE_LOG(LogWaterBake, Display, TEXT("%s"), *SyncLine);
+				OutReport += SyncLine + TEXT("\n");
+
+				Comp.CapacityLiters = FMath::Max(1.f, ComputedCapacityLiters);
+				Comp.MaxWaterHeightCm = FMath::Max(1.f, ComputedMaxWaterHeightCm);
+				Comp.WalkableFloorZCm = ComputedFloorZCm;
+				break;
+			}
+		}
+	}
+
 	Definition->MarkPackageDirty();
 
 	// Save the asset.

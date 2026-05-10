@@ -145,4 +145,9 @@ private:
 	void ApplyCollisionFromAlpha();
 	void ApplySubmarineCollisionIgnoreToAllPrimitiveComponents();
 	void RegisterWithCompartments();
+
+	/** Forward the current OpenAlpha (continuous, 0..1) to the owning sub's flood graph,
+	 *  preferring DoorId match and falling back to CompartmentA/B match. Called every tick
+	 *  by the alpha tween + once per state change from ApplyDoorState. */
+	void PushOpenRatioToFlood(float Ratio);
 };

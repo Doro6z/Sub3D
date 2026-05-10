@@ -75,6 +75,7 @@ void ASubDoorActor::Tick(float DeltaTime)
 	{
 		// Reached target — stop ticking until next state change.
 		OpenAlpha = Target;
+		PushOpenRatioToFlood(OpenAlpha);
 		SetActorTickEnabled(false);
 		return;
 	}
@@ -91,6 +92,10 @@ void ASubDoorActor::Tick(float DeltaTime)
 	{
 		ApplyCollisionFromAlpha();
 	}
+
+	// Push the continuous OpenRatio to the flood graph each tick so partial-open animations
+	// produce partial flow (a door at 50% alpha = 50% effective passage area).
+	PushOpenRatioToFlood(OpenAlpha);
 
 	BP_OnOpenAlphaUpdated(OpenAlpha);
 }
@@ -217,34 +222,35 @@ void ASubDoorActor::ApplyDoorState()
 	ApplySubmarineCollisionIgnoreToAllPrimitiveComponents();
 	ApplyCollisionFromAlpha();
 
-	// Push door state into the flood graph so opening/closing actually gates water flow.
-	// DoorId is the FName key matching FFloodEdgeState::ClosureId — set explicitly in BP or
-	// via InitializeFromConnectionDef. If unset, fall back to compartment-pair matching so
-	// BP-placed doors still gate water without requiring DoorId to be wired manually.
-	if (OwningSubmarine && OwningSubmarine->SubFlood)
-	{
-		UE_LOG(LogTemp, Log,
-			TEXT("Door[%s] state changed: bClosed=%d DoorId='%s' A='%s' B='%s'"),
-			*GetName(), bClosed ? 1 : 0,
-			*DoorId.ToString(), *CompartmentA.ToString(), *CompartmentB.ToString());
-
-		if (!DoorId.IsNone())
-		{
-			OwningSubmarine->SubFlood->SetDoorState(DoorId, bClosed);
-		}
-		else if (!CompartmentA.IsNone() && !CompartmentB.IsNone())
-		{
-			OwningSubmarine->SubFlood->SetDoorStateByCompartments(CompartmentA, CompartmentB, bClosed);
-		}
-		else
-		{
-			UE_LOG(LogTemp, Warning,
-				TEXT("Door[%s] has no DoorId nor CompartmentA/B set — flood graph will not be gated."),
-				*GetName());
-		}
-	}
+	// Push door state into the flood graph. Use the current OpenAlpha (continuous), so a
+	// partially-animating door is reflected as partial flow naturally — the per-tick Tick()
+	// call refreshes this each frame.
+	UE_LOG(LogTemp, Log,
+		TEXT("Door[%s] state changed: bClosed=%d Alpha=%.2f DoorId='%s' A='%s' B='%s'"),
+		*GetName(), bClosed ? 1 : 0, OpenAlpha,
+		*DoorId.ToString(), *CompartmentA.ToString(), *CompartmentB.ToString());
+	PushOpenRatioToFlood(OpenAlpha);
 
 	BP_OnDoorStateChanged(bClosed);
+}
+
+void ASubDoorActor::PushOpenRatioToFlood(float Ratio)
+{
+	if (!OwningSubmarine || !OwningSubmarine->SubFlood)
+	{
+		return;
+	}
+
+	if (!DoorId.IsNone())
+	{
+		OwningSubmarine->SubFlood->SetDoorOpenRatio(DoorId, Ratio);
+	}
+	else if (!CompartmentA.IsNone() && !CompartmentB.IsNone())
+	{
+		OwningSubmarine->SubFlood->SetDoorOpenRatioByCompartments(CompartmentA, CompartmentB, Ratio);
+	}
+	// Silent skip if neither DoorId nor CompartmentA/B is set — warning fires once from
+	// ApplyDoorState on the first state change so we don't spam every tick.
 }
 
 void ASubDoorActor::ApplyCollisionFromAlpha()

@@ -84,25 +84,36 @@ void USubFloodComponent::InitializeFromDefinition(const USubmarineDefinition* De
 		ES.PassageAreaCm2 = FMath::Max(Edge.PassageAreaCm2, MinimumPassageAreaCm2);
 		ES.bExteriorEdge = Edge.bExteriorEdge;
 
-		// Initial closed state. Resolution rules:
-		//  1. If the connection is typed Open → permanently bClosed=false (never closable).
-		//  2. Otherwise → use the connection's bStartsClosed (Door / Hatch / ExteriorHatch).
-		//  3. No matching connection → bClosed=true (safe default; an unknown edge stays sealed).
+		// Initial OpenRatio + LocalSpillPosition derivation. Resolution rules:
+		//  1. ConnectionType=Open → OpenRatio=1 permanently (door cannot close it).
+		//  2. Otherwise → OpenRatio = bStartsClosed ? 0 : 1.
+		//  3. No matching connection → OpenRatio=0 (safe default; an unknown edge stays sealed).
+		// LocalSpillPosition comes from Connection.LocalTransform.Translation (full XYZ in
+		// sub-local space) so we can transform it to world each tick for the tilt-aware sim.
 		if (!Edge.ClosureId.IsNone())
 		{
 			const FGeneratedConnectionDef* Conn = Definition->FindConnection(Edge.ClosureId);
-			if (Conn && Conn->ConnectionType == EConnectionType::Open)
+			if (Conn)
 			{
-				ES.bClosed = false;
+				ES.LocalSpillPosition = Conn->LocalTransform.GetTranslation();
+				if (Conn->ConnectionType == EConnectionType::Open)
+				{
+					ES.OpenRatio = 1.f;
+				}
+				else
+				{
+					ES.OpenRatio = Conn->bStartsClosed ? 0.f : 1.f;
+				}
 			}
 			else
 			{
-				ES.bClosed = Conn ? Conn->bStartsClosed : true;
+				ES.OpenRatio = 0.f;
 			}
 		}
 		else
 		{
-			ES.bClosed = false;
+			// Edge with no matching connection (rare): default to open. Spill defaults to origin.
+			ES.OpenRatio = 1.f;
 		}
 
 		EdgeStates.Add(ES);
@@ -245,7 +256,7 @@ void USubFloodComponent::InitializeFromLayout(const USubmarineLayoutAsset* Layou
 		ES.VolumeB = Sheet.AdjacentCompartmentId;
 		ES.PassageAreaCm2 = Sheet.SizeCm.X * Sheet.SizeCm.Y;
 		ES.bExteriorEdge = false;
-		ES.bClosed = true; // doors start closed
+		ES.OpenRatio = 0.f; // doors start closed
 
 		// Check if there's a door definition matching this sheet.
 		const FDoorDef* Door = Layout->Doors.FindByPredicate([&](const FDoorDef& D)
@@ -385,39 +396,40 @@ void USubFloodComponent::TickComponent(float DeltaTime, ELevelTick TickType, FAc
 
 // --- Door state ----------------------------------------------------------
 
-void USubFloodComponent::SetDoorState(FName ConnectionId, bool bClosed)
+void USubFloodComponent::SetDoorOpenRatio(FName ConnectionId, float NewOpenRatio)
 {
-	if (!HasAuthority(this))
+	if (!HasAuthority(this) || ConnectionId.IsNone())
 	{
 		return;
 	}
 
-	if (ConnectionId.IsNone())
-	{
-		return;
-	}
-
+	const float ClampedRatio = FMath::Clamp(NewOpenRatio, 0.f, 1.f);
 	FFloodEdgeState* Edge = FindEdge(ConnectionId);
 	if (Edge)
 	{
-		Edge->bClosed = bClosed;
-		UE_LOG(LogSubFlood, Log, TEXT("SetDoorState: edge '%s' bClosed=%d"),
-			*ConnectionId.ToString(), bClosed ? 1 : 0);
+		Edge->OpenRatio = ClampedRatio;
 	}
 	else
 	{
-		UE_LOG(LogSubFlood, Warning, TEXT("SetDoorState: no edge found for ConnectionId '%s'"),
+		UE_LOG(LogSubFlood, Warning, TEXT("SetDoorOpenRatio: no edge found for ConnectionId '%s'"),
 			*ConnectionId.ToString());
 	}
 }
 
-void USubFloodComponent::SetDoorStateByCompartments(FName CompA, FName CompB, bool bClosed)
+void USubFloodComponent::SetDoorState(FName ConnectionId, bool bClosed)
+{
+	// Backward-compat: maps a binary state to the continuous OpenRatio.
+	SetDoorOpenRatio(ConnectionId, bClosed ? 0.f : 1.f);
+}
+
+void USubFloodComponent::SetDoorOpenRatioByCompartments(FName CompA, FName CompB, float NewOpenRatio)
 {
 	if (!HasAuthority(this) || CompA.IsNone() || CompB.IsNone())
 	{
 		return;
 	}
 
+	const float ClampedRatio = FMath::Clamp(NewOpenRatio, 0.f, 1.f);
 	for (FFloodEdgeState& Edge : EdgeStates)
 	{
 		const bool bMatch =
@@ -425,19 +437,19 @@ void USubFloodComponent::SetDoorStateByCompartments(FName CompA, FName CompB, bo
 			(Edge.VolumeA == CompB && Edge.VolumeB == CompA);
 		if (bMatch)
 		{
-			Edge.bClosed = bClosed;
-			UE_LOG(LogSubFlood, Log,
-				TEXT("SetDoorStateByCompartments: edge '%s' (A=%s B=%s) bClosed=%d"),
-				*Edge.ClosureId.ToString(),
-				*Edge.VolumeA.ToString(), *Edge.VolumeB.ToString(),
-				bClosed ? 1 : 0);
+			Edge.OpenRatio = ClampedRatio;
 			return;
 		}
 	}
 
 	UE_LOG(LogSubFlood, Warning,
-		TEXT("SetDoorStateByCompartments: no edge found for compartments A='%s' B='%s'"),
+		TEXT("SetDoorOpenRatioByCompartments: no edge found for compartments A='%s' B='%s'"),
 		*CompA.ToString(), *CompB.ToString());
+}
+
+void USubFloodComponent::SetDoorStateByCompartments(FName CompA, FName CompB, bool bClosed)
+{
+	SetDoorOpenRatioByCompartments(CompA, CompB, bClosed ? 0.f : 1.f);
 }
 
 // --- Breach --------------------------------------------------------------
@@ -702,7 +714,7 @@ void USubFloodComponent::AdvanceFlooding(float DeltaTime)
 	// 2. Exterior edge inflows (open exterior hatches)
 	for (const FFloodEdgeState& Edge : EdgeStates)
 	{
-		if (!Edge.bExteriorEdge || Edge.bClosed)
+		if (!Edge.bExteriorEdge || Edge.OpenRatio < KINDA_SMALL_NUMBER)
 		{
 			continue;
 		}
@@ -727,13 +739,37 @@ void USubFloodComponent::AdvanceFlooding(float DeltaTime)
 	{
 		int32 SourceIndex;
 		int32 DestIndex;
-		float DesiredRateLps; // liters per second
+		int32 EdgeIndex;       // for writing CurrentFlowRateLitersPerSec back after budget passes
+		bool  bSourceIsA;      // true if Source == VolumeA → final flow rate sign is +
+		float DesiredRateLps;  // liters per second (always positive after this point)
 	};
 	TArray<FPendingTransfer> PendingTransfers;
 
-	for (const FFloodEdgeState& Edge : EdgeStates)
+	// Reset every edge's per-tick flow rate. The compute below sets it for active edges; idle
+	// edges stay at zero so VFX / audio components see a clean signal each tick.
+	for (FFloodEdgeState& EdgeReset : EdgeStates)
 	{
-		if (Edge.bExteriorEdge || Edge.bClosed)
+		EdgeReset.CurrentFlowRateLitersPerSec = 0.f;
+	}
+
+	// Tunables (Project Settings → Game → Sub3D Debug → Submarine|Flood|SimTuning).
+	const USub3DDebugSettings* FloodSettings = GetDefault<USub3DDebugSettings>();
+	const float DischargeCoefficient    = FloodSettings ? FloodSettings->FloodDischargeCoefficient    : 0.6f;
+	const float FlowMultiplier          = FloodSettings ? FloodSettings->FloodFlowMultiplier          : 3.f;
+	const float OverpressureMaxNorm     = FloodSettings ? FloodSettings->FloodOverpressureMaxNormalized : 1.05f;
+
+	constexpr float Gravity_cm_s2 = 981.f;
+
+	// Sub-local sim. Sim and visual both run in sub-local (water surface = horizontal-in-sub-local
+	// plane). Inaccurate beyond ~10° tilt because real water redistributes in world-horizontal
+	// space; deferred to post-FP "intra-compartment water redistribution" where sim and cap mesh
+	// rendering must be reworked together. Keeping both sub-local now ensures sim/visual coherence:
+	// what you see in the cap mesh is what the sim transmits.
+
+	for (int32 EdgeIdx = 0; EdgeIdx < EdgeStates.Num(); ++EdgeIdx)
+	{
+		const FFloodEdgeState& Edge = EdgeStates[EdgeIdx];
+		if (Edge.bExteriorEdge || Edge.OpenRatio < KINDA_SMALL_NUMBER)
 		{
 			continue;
 		}
@@ -745,76 +781,80 @@ void USubFloodComponent::AdvanceFlooding(float DeltaTime)
 			continue;
 		}
 
-		// Absolute Z of each compartment's water surface (sub-local space). This includes
-		// the compartment floor offset so vertical connections respect gravity: water in a
-		// lower compartment only flows up to a higher one when its surface actually exceeds
-		// the higher compartment's floor (otherwise the lower one fills up first).
+		// Heads above the effective sill on each side. EffSill = max(floor_subZ, spill_subZ).
+		// This handles the "empty compartment with floor above spill" case (e.g. empty Upper_Hub
+		// with floor=130 connected to a vertical access at spillZ=0). Without it, the formula
+		// would treat the empty floor as a water surface and produce a bogus head — blocking the
+		// Main → Upper flow when Main is full.
+		const float SpillZ = Edge.LocalSpillPosition.Z;
+
 		const float SurfaceA = CompA->WalkableFloorZCm + CompA->WaterHeightCm;
 		const float SurfaceB = CompB->WalkableFloorZCm + CompB->WaterHeightCm;
-		float HeightDeltaCm = SurfaceA - SurfaceB;
+		const float EffSillA = FMath::Max(CompA->WalkableFloorZCm, SpillZ);
+		const float EffSillB = FMath::Max(CompB->WalkableFloorZCm, SpillZ);
+		const float HeadA = FMath::Max(0.f, SurfaceA - EffSillA);
+		const float HeadB = FMath::Max(0.f, SurfaceB - EffSillB);
 
-		// FP overflow rule for vertical connections: if one compartment sits significantly
-		// higher than the other, the strict absolute-Z gate may block any flow even when the
-		// lower compartment is full (e.g. Main_Hub max water = 112, Upper_Hub floor = 130 →
-		// gap of 18cm physically unreachable). In that case, once the lower compartment is
-		// essentially full and the higher one has headroom, force an overflow flow upward.
-		// Models "water spills up the open staircase when the source can't hold any more."
-		constexpr float VerticalThresholdCm = 50.f;
-		constexpr float ForcedOverflowDeltaCm = 30.f;
-		const float FloorDelta = CompA->WalkableFloorZCm - CompB->WalkableFloorZCm;
-		const bool bAHigher = FloorDelta >  VerticalThresholdCm;
-		const bool bBHigher = FloorDelta < -VerticalThresholdCm;
-		if (bAHigher || bBHigher)
+		if (HeadA < KINDA_SMALL_NUMBER && HeadB < KINDA_SMALL_NUMBER)
 		{
-			const FFloodCompartmentState* Lower  = bAHigher ? CompB : CompA;
-			const FFloodCompartmentState* Higher = bAHigher ? CompA : CompB;
-			const bool bLowerFull  = (Lower->WaterLevelNormalized  >= 0.99f);
-			const bool bHigherFull = (Higher->WaterLevelNormalized >= 1.0f - KINDA_SMALL_NUMBER);
-			if (bLowerFull && !bHigherFull)
+			continue;  // both sides below sill: no flow possible
+		}
+
+		// Effective passage area shrinks linearly with OpenRatio (partial-open animation = partial flow).
+		const float EffectiveAreaCm2 = Edge.PassageAreaCm2 * Edge.OpenRatio;
+		if (EffectiveAreaCm2 < KINDA_SMALL_NUMBER)
+		{
+			continue;
+		}
+
+		// Bernoulli orifice (both sides above sill = submerged) OR free weir (one side above).
+		// Sign convention: positive flow = A→B.
+		float SignedDesiredLps;
+		if (HeadA > KINDA_SMALL_NUMBER && HeadB > KINDA_SMALL_NUMBER)
+		{
+			// Submerged orifice — flow driven by surface delta.
+			const float DeltaH = SurfaceA - SurfaceB;
+			if (FMath::IsNearlyZero(DeltaH, 0.05f))
 			{
-				// Drive a flow Lower → Higher. Sign matches whichever side is the source.
-				HeightDeltaCm = (Lower == CompA) ? ForcedOverflowDeltaCm : -ForcedOverflowDeltaCm;
+				continue;  // < 0.5mm head difference → equilibrium, skip
 			}
+			const float VelocityCmPerSec = DischargeCoefficient * FMath::Sqrt(2.f * Gravity_cm_s2 * FMath::Abs(DeltaH));
+			// (cm² × cm/s) ÷ 1000 = L/s
+			SignedDesiredLps = FMath::Sign(DeltaH) * (EffectiveAreaCm2 * VelocityCmPerSec) * 0.001f * FlowMultiplier;
+		}
+		else
+		{
+			// Free weir / outflow — only one side above sill, water spills toward the dry side.
+			const float HeadSrc = FMath::Max(HeadA, HeadB);
+			const float SignAB  = (HeadA > KINDA_SMALL_NUMBER) ? +1.f : -1.f;
+			const float VelocityCmPerSec = DischargeCoefficient * FMath::Sqrt(2.f * Gravity_cm_s2 * HeadSrc);
+			SignedDesiredLps = SignAB * (EffectiveAreaCm2 * VelocityCmPerSec) * 0.001f * FlowMultiplier;
 		}
 
-		if (FMath::IsNearlyZero(HeightDeltaCm, KINDA_SMALL_NUMBER))
+		if (FMath::IsNearlyZero(SignedDesiredLps, KINDA_SMALL_NUMBER))
 		{
 			continue;
 		}
 
-		const FFloodCompartmentState* Source = HeightDeltaCm > 0.f ? CompA : CompB;
-		const FFloodCompartmentState* Dest = HeightDeltaCm > 0.f ? CompB : CompA;
+		const bool  bSourceIsA = SignedDesiredLps > 0.f;
+		const FFloodCompartmentState* Source = bSourceIsA ? CompA : CompB;
+		const FFloodCompartmentState* Dest   = bSourceIsA ? CompB : CompA;
+		float DesiredRateLps = FMath::Abs(SignedDesiredLps);
 
-		const float SourceLitersPerCm = Source->MaxWaterHeightCm > KINDA_SMALL_NUMBER
-			? Source->CapacityLiters / Source->MaxWaterHeightCm
-			: 0.f;
-		const float DestLitersPerCm = Dest->MaxWaterHeightCm > KINDA_SMALL_NUMBER
-			? Dest->CapacityLiters / Dest->MaxWaterHeightCm
-			: 0.f;
-		const float HeightResponsePerLiter = (SourceLitersPerCm > KINDA_SMALL_NUMBER ? 1.f / SourceLitersPerCm : 0.f)
-			+ (DestLitersPerCm > KINDA_SMALL_NUMBER ? 1.f / DestLitersPerCm : 0.f);
-		if (HeightResponsePerLiter <= KINDA_SMALL_NUMBER)
-		{
-			continue;
-		}
-
-		const float ConnectionAreaScale = FMath::Clamp(
-			Edge.PassageAreaCm2 / FMath::Max(1.f, InternalConnectionAreaDivisorCm2),
-			0.f,
-			8.f);
-		const float DesiredTransferLiters = FMath::Abs(HeightDeltaCm) / HeightResponsePerLiter;
-		const float DestHeadroom = FMath::Max(0.f, Dest->CapacityLiters - Dest->CurrentWaterLiters);
-		const float DesiredRateLps = FMath::Clamp(
-			(DesiredTransferLiters / FMath::Max(KINDA_SMALL_NUMBER, DeltaTime)) * ConnectionAreaScale,
-			0.f,
-			FMath::Min(MaxInternalFlowLitersPerSec, DestHeadroom / FMath::Max(KINDA_SMALL_NUMBER, DeltaTime)));
+		// Per-edge clamps before going into the budget passes:
+		//   1. Global per-edge max (MaxInternalFlowLitersPerSec)
+		//   2. Destination headroom with overpressure soft cap (1.05× capacity)
+		const float OverpressureCapLiters = Dest->CapacityLiters * OverpressureMaxNorm;
+		const float DestHeadroomLiters = FMath::Max(0.f, OverpressureCapLiters - Dest->CurrentWaterLiters);
+		const float DestHeadroomLps = DestHeadroomLiters / FMath::Max(KINDA_SMALL_NUMBER, DeltaTime);
+		DesiredRateLps = FMath::Min(DesiredRateLps, FMath::Min(MaxInternalFlowLitersPerSec, DestHeadroomLps));
 
 		if (DesiredRateLps <= KINDA_SMALL_NUMBER)
 		{
 			continue;
 		}
 
-		// Find indices for source and dest
+		// Find indices for source and dest.
 		const int32 SrcIdx = CompartmentStates.IndexOfByPredicate([&](const FFloodCompartmentState& S)
 		{
 			return &S == Source;
@@ -830,8 +870,10 @@ void USubFloodComponent::AdvanceFlooding(float DeltaTime)
 		}
 
 		FPendingTransfer Transfer;
-		Transfer.SourceIndex = SrcIdx;
-		Transfer.DestIndex = DstIdx;
+		Transfer.SourceIndex   = SrcIdx;
+		Transfer.DestIndex     = DstIdx;
+		Transfer.EdgeIndex     = EdgeIdx;
+		Transfer.bSourceIsA    = bSourceIsA;
 		Transfer.DesiredRateLps = DesiredRateLps;
 		PendingTransfers.Add(Transfer);
 	}
@@ -901,13 +943,18 @@ void USubFloodComponent::AdvanceFlooding(float DeltaTime)
 				InflowScale[i] = 1.f;
 				continue;
 			}
-			const float Headroom = FMath::Max(0.f, CompartmentStates[i].CapacityLiters - CompartmentStates[i].CurrentWaterLiters);
+			// Overpressure soft cap: allow water to exceed CapacityLiters by OverpressureMaxNorm
+			// before headroom reaches zero. Avoids equalization stalls between two near-full
+			// compartments (Barotrauma trick — see flood design doc §6.2).
+			const float OverCap = CompartmentStates[i].CapacityLiters * OverpressureMaxNorm;
+			const float Headroom = FMath::Max(0.f, OverCap - CompartmentStates[i].CurrentWaterLiters);
 			const float HeadroomRateLps = Headroom / FMath::Max(KINDA_SMALL_NUMBER, DeltaTime);
 			const float AvailableForInternal = FMath::Max(0.f, HeadroomRateLps - CommittedInflowRate[i]);
 			InflowScale[i] = FMath::Min(1.f, AvailableForInternal / TotalDesiredInflow[i]);
 		}
 
-		// Apply both budgets and commit to FloodRateIn/Out
+		// Apply both budgets, commit to FloodRateIn/Out, and write the signed per-edge flow
+		// rate back to FFloodEdgeState for visual consumers (Niagara cascades, audio, FX).
 		for (const FPendingTransfer& T : PendingTransfers)
 		{
 			const float ActualRateLps = T.DesiredRateLps * InflowScale[T.DestIndex];
@@ -917,6 +964,13 @@ void USubFloodComponent::AdvanceFlooding(float DeltaTime)
 			}
 			CompartmentStates[T.SourceIndex].FloodRateOut += ActualRateLps;
 			CompartmentStates[T.DestIndex].FloodRateIn += ActualRateLps;
+
+			// Sign convention: positive = A→B. bSourceIsA tells us whether the resolved source
+			// is VolumeA; if yes the rate is positive, otherwise negative.
+			if (EdgeStates.IsValidIndex(T.EdgeIndex))
+			{
+				EdgeStates[T.EdgeIndex].CurrentFlowRateLitersPerSec = T.bSourceIsA ? ActualRateLps : -ActualRateLps;
+			}
 		}
 	}
 
@@ -937,7 +991,11 @@ void USubFloodComponent::AdvanceFlooding(float DeltaTime)
 		S.FloodRateOut += FMath::Max(0.f, EffectivePumpOut);
 	}
 
-	// 5. Apply net flow (water is conserved: total out <= source available)
+	// 5. Apply net flow (water is conserved: total out <= source available).
+	//    Hard cap stays at CapacityLiters for downstream consumers (FloodLevel = Cur/Cap), but
+	//    pass-2 budgets allow up to OverpressureMaxNorm × CapacityLiters in transit so two
+	//    near-full compartments can still equalize. Any excess gets clamped here and discarded;
+	//    in practice the overpressure window is so small that the clamp triggers rarely.
 	for (FFloodCompartmentState& S : CompartmentStates)
 	{
 		const float DeltaLiters = (S.FloodRateIn - S.FloodRateOut) * DeltaTime;

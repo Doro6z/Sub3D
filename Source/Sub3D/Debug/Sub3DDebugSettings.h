@@ -173,6 +173,25 @@ public:
 	UPROPERTY(Config, EditAnywhere, Category = "Submarine|Flood")
 	bool bDrawConnectionMarkers = false;
 
+	// ── Submarine | Flood | Sim Tuning (progressive flooding §6) ──────────
+	/** Global flow rate multiplier applied on top of the Bernoulli orifice formula. Tune in PIE
+	 *  if equalization feels too slow or too fast. 1.0 = pure physics. Bumped to 15 (×5 vs
+	 *  initial 3.0) on 2026-05-10 — pure-physics equalization felt sluggish in PIE; gameplay
+	 *  prefers near-instant equalization once doors open. */
+	UPROPERTY(Config, EditAnywhere, Category = "Submarine|Flood|SimTuning", meta = (ClampMin = "0.1", ClampMax = "50.0"))
+	float FloodFlowMultiplier = 15.f;
+
+	/** Discharge coefficient C_d for the orifice equation. 0.6 for sharp-edged (Sub3D doors),
+	 *  0.8 for rounded openings. Per-connection override could be added later. */
+	UPROPERTY(Config, EditAnywhere, Category = "Submarine|Flood|SimTuning", meta = (ClampMin = "0.1", ClampMax = "1.0"))
+	float FloodDischargeCoefficient = 0.6f;
+
+	/** Allow `CurrentWaterLiters` to exceed `CapacityLiters` by this normalized factor before
+	 *  destination headroom hits 0. 1.05 = 5% overpressure soft cap (Barotrauma trick to avoid
+	 *  equalization stalls). 1.0 = strict (may stall when both sides are near full). */
+	UPROPERTY(Config, EditAnywhere, Category = "Submarine|Flood|SimTuning", meta = (ClampMin = "1.0", ClampMax = "1.5"))
+	float FloodOverpressureMaxNormalized = 1.05f;
+
 	// ── Submarine | Hull ──────────────────────────────────────
 	UPROPERTY(Config, EditAnywhere, Category = "Submarine|Hull")
 	bool bDrawHull = false;
