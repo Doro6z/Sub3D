@@ -1,0 +1,236 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<title>Sub3D · Concept C04 — Contextual Bloom</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<style>
+  :root {
+    --bg-deep:#0a0d12; --panel:#181c23; --border:#2a313b; --border-hi:#3a4452;
+    --text:#d8d4ca; --dim:#8d9095; --faint:#5e636a;
+    --teal:#6db4a3; --amber:#c89868; --gold:#d4b876; --leaf:#87a86b; --crimson:#b8554a;
+  }
+  body { background: var(--bg-deep); color: var(--text); font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; overflow: hidden; }
+  .mono { font-family: "JetBrains Mono", Consolas, monospace; }
+  .num { font-variant-numeric: tabular-nums; }
+  .viewport { background: radial-gradient(ellipse at 50% 38%, #14202a 0%, #0a1218 38%, #050709 80%), var(--bg-deep); }
+
+  .panel { background: rgba(24,28,35,.92); border: 1px solid var(--border); border-radius: 4px; }
+  .panel-tight { padding: 8px 12px; }
+  .key { display:inline-flex; align-items:center; justify-content:center; min-width:22px; height:22px; padding:0 5px; background:#0e1218; border:1px solid #2e3640; border-bottom-width:2px; border-radius:3px; font-family:"JetBrains Mono",monospace; font-size:10px; font-weight:600; color:#cbcab9; text-transform:uppercase; }
+
+  .preview-bar { background: rgba(5,8,12,.98); border-bottom: 1px solid var(--border); }
+  .preview-btn { padding:3px 9px; border-radius:2px; font-size:11px; color:var(--dim); border:1px solid var(--border); background:rgba(15,20,28,.6); }
+  .preview-btn:hover { color:var(--text); border-color:var(--border-hi); }
+  .preview-btn-active { background:rgba(109,180,163,.12); border-color:var(--teal); color:var(--teal); }
+
+  /* Target reticle — what the player is looking at */
+  .target-box {
+    position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%);
+    border: 1px solid rgba(212,184,118,.6);
+    transition: all .25s cubic-bezier(.4, 0, .2, 1);
+  }
+  .target-box::before, .target-box::after {
+    content:""; position: absolute; width: 12px; height: 12px;
+    border: 1px solid var(--gold);
+  }
+  .target-box::before { top: -4px; left: -4px; border-right: none; border-bottom: none; }
+  .target-box::after  { bottom: -4px; right: -4px; border-left: none; border-top: none; }
+
+  .bloom-card {
+    position: absolute;
+    background: rgba(24,28,35,.94);
+    border: 1px solid rgba(212,184,118,.4);
+    border-radius: 3px;
+    padding: 8px 12px;
+    animation: bloom-in .3s ease-out;
+  }
+  @keyframes bloom-in { from { opacity: 0; transform: scale(.9); } to { opacity: 1; transform: scale(1); } }
+
+  .bloom-line { stroke: rgba(212,184,118,.35); stroke-width: 1; fill: none; stroke-dasharray: 3 4; }
+
+  .heart-icon { transform-origin:center; animation: heart-beat 1s ease-in-out infinite; }
+  @keyframes heart-beat { 0%,70%,100%{transform:scale(1);} 20%{transform:scale(1.18);} 40%{transform:scale(1.04);} }
+</style>
+</head>
+<body>
+
+<div class="preview-bar fixed top-0 left-0 right-0 z-50 px-4 py-2 flex items-center gap-5 text-xs flex-wrap">
+  <a href="index.html" class="text-teal-300 hover:underline mono font-bold text-xs">← gallery</a>
+  <span class="text-slate-700">·</span>
+  <span class="text-teal-300 mono font-bold">C04 CONTEXTUAL BLOOM</span>
+  <span class="text-slate-700">·</span>
+  <span class="text-slate-500">UI radiates from interaction target</span>
+  <div class="flex items-center gap-2 ml-auto"><span class="text-slate-500 uppercase mono">target:</span><div id="target-buttons" class="flex gap-1"></div></div>
+</div>
+
+<div class="viewport relative w-screen h-screen pt-9">
+
+  <!-- Bloom container -->
+  <div id="bloom-host" class="absolute inset-0">
+    <!-- target box + cards rendered by JS -->
+  </div>
+
+  <!-- Minimal corner UI -->
+  <!-- Top-left: tiny heart + 3 vital pips -->
+  <div class="absolute top-12 left-5 flex items-center gap-3">
+    <svg class="heart-icon" width="14" height="14" viewBox="0 0 24 24" fill="#b8554a"><path d="M12 21s-7-4.35-7-10a4.5 4.5 0 0 1 8.5-2 4.5 4.5 0 0 1 8.5 2c0 5.65-7 10-7 10z"/></svg>
+    <div class="flex items-center gap-1.5 mono text-[10px] uppercase tracking-wider text-slate-500">
+      <span class="text-teal-300">HP 92</span>
+      <span class="text-slate-700">·</span>
+      <span class="text-amber-300">FAT 23</span>
+      <span class="text-slate-700">·</span>
+      <span class="text-emerald-300">XP 42</span>
+    </div>
+  </div>
+
+  <!-- Bottom-center: minimal hotbar -->
+  <div class="absolute bottom-5 left-1/2 -translate-x-1/2 flex items-center gap-1">
+    <div class="w-9 h-9 bg-slate-900 border rounded text-center pt-1.5" style="border-color:var(--gold)"><span class="text-base">🔧</span></div>
+    <div class="w-9 h-9 bg-slate-900 border border-slate-700 rounded text-center pt-1.5"><span class="text-base">✚</span></div>
+    <div class="w-9 h-9 bg-slate-900 border border-slate-700 rounded text-center pt-1.5"><span class="text-base">⚡</span></div>
+    <div class="w-9 h-9 bg-slate-900 border border-slate-700 rounded"></div>
+    <div class="w-9 h-9 bg-slate-900 border border-slate-700 rounded"></div>
+    <div class="w-9 h-9 bg-slate-900 border border-slate-700 rounded"></div>
+  </div>
+
+  <!-- Bottom-right: posture pip -->
+  <div class="absolute bottom-5 right-5 flex items-center gap-2">
+    <svg width="16" height="22" viewBox="0 0 24 32" fill="none" stroke="#aedccd" stroke-width="1.4" stroke-linecap="round">
+      <circle cx="12" cy="5" r="3"/><line x1="12" y1="8" x2="12" y2="20"/>
+      <line x1="12" y1="12" x2="7" y2="18"/><line x1="12" y1="12" x2="17" y2="18"/>
+      <line x1="12" y1="20" x2="9" y2="30"/><line x1="12" y1="20" x2="15" y2="30"/>
+    </svg>
+    <span class="text-[10px] mono uppercase tracking-wider text-slate-500">Standing</span>
+  </div>
+</div>
+
+<div class="fixed bottom-3 left-1/2 -translate-x-1/2 panel px-4 py-2 text-[11px] text-slate-400 max-w-2xl text-center pointer-events-none" style="z-index:60;">
+  <span class="text-teal-300 mono">C04 CONTEXTUAL BLOOM</span> · UI lives at the target.
+  Cards radiate from the focused object with connector lines. Corner UI stays minimal — info follows the gaze.
+</div>
+
+<script>
+const TARGETS = {
+  door: {
+    name: "Hatch ENG-02 → ENG-03",
+    type: "Hatch",
+    box: { w: 110, h: 180, x: 0, y: 30 },
+    cards: [
+      { pos: "top-left",    title: "Status",    body: "Sealed · No power",            color: "warn" },
+      { pos: "top-right",   title: "Pressure",  body: "Δ 12 kPa", color: "ok" },
+      { pos: "bottom-left", title: "Action",    keys: [["E","Open"],["HOLD E","Lock"],["F","Pry"]] }
+    ]
+  },
+  station: {
+    name: "Helm console",
+    type: "Station",
+    box: { w: 180, h: 130, x: 0, y: 30 },
+    cards: [
+      { pos: "top-right",   title: "Owner",     body: "Unmanned" },
+      { pos: "bottom-left", title: "Action",    keys: [["E","Sit / Mount"],["F","Activate"],["Q","Examine"]] }
+    ]
+  },
+  loot: {
+    name: "Medical kit",
+    type: "Item · 1×",
+    box: { w: 80, h: 60, x: 0, y: 30 },
+    cards: [
+      { pos: "top-right",   title: "Contents",  body: "+25 HP · stops bleeding" },
+      { pos: "bottom-left", title: "Action",    keys: [["F","Pick up"],["TAB","Inventory"]] }
+    ]
+  },
+  crew: {
+    name: "NAKAMURA",
+    type: "Crew · Mechanic",
+    box: { w: 60, h: 130, x: 0, y: 30 },
+    cards: [
+      { pos: "top-right",   title: "Status",    body: "OK · 78 hp", color: "ok" },
+      { pos: "top-left",    title: "Carrying",  body: "Wrench · Welder" },
+      { pos: "bottom-left", title: "Action",    keys: [["F","Talk"],["G","Trade"],["E","Heal"]] }
+    ]
+  },
+  breach: {
+    name: "Hull breach",
+    type: "Damage · 32% integrity",
+    box: { w: 120, h: 90, x: 0, y: 30 },
+    cards: [
+      { pos: "top-right",   title: "Inflow",    body: "12 L/s",            color: "warn" },
+      { pos: "top-left",    title: "Severity",  body: "Major · structural", color: "warn" },
+      { pos: "bottom-left", title: "Action",    keys: [["HOLD F","Patch · Wrench"],["R","Reinforce · Welder"]] }
+    ]
+  }
+};
+
+let s = { target: "station" };
+const host = document.getElementById("bloom-host");
+
+function pillBtns(hostId, opts, sel, cb) {
+  document.getElementById(hostId).innerHTML = opts
+    .map(o => `<button data-v="${o}" class="preview-btn ${o===sel?'preview-btn-active':''}">${o}</button>`).join("");
+  document.getElementById(hostId).querySelectorAll("button").forEach(b =>
+    b.addEventListener("click", () => cb(b.dataset.v)));
+}
+
+function renderBloom() {
+  const t = TARGETS[s.target];
+  const cx = window.innerWidth / 2;
+  const cy = window.innerHeight / 2 + (t.box.y || 0);
+
+  // Card offsets relative to target box edges
+  const offsetX = t.box.w / 2 + 80;
+  const offsetY = t.box.h / 2 + 30;
+
+  const cardsHtml = t.cards.map(c => {
+    let style = "";
+    if (c.pos === "top-left")     style = `right: calc(50% + ${offsetX}px); bottom: calc(50% + ${offsetY}px);`;
+    if (c.pos === "top-right")    style = `left:  calc(50% + ${offsetX}px); bottom: calc(50% + ${offsetY}px);`;
+    if (c.pos === "bottom-left")  style = `right: calc(50% + ${offsetX}px); top:    calc(50% + ${offsetY}px);`;
+    if (c.pos === "bottom-right") style = `left:  calc(50% + ${offsetX}px); top:    calc(50% + ${offsetY}px);`;
+
+    let inner = "";
+    if (c.body) {
+      const colorCls = c.color === "ok" ? "text-teal-300" : c.color === "warn" ? "text-amber-300" : c.color === "crit" ? "text-rose-300" : "text-slate-200";
+      inner = `<div class="text-sm ${colorCls}">${c.body}</div>`;
+    }
+    if (c.keys) {
+      inner = c.keys.map(([k, a]) => `<div class="flex items-center gap-2 mt-1 first:mt-0"><span class="key">${k}</span><span class="text-slate-100 text-xs">${a}</span></div>`).join("");
+    }
+    return `<div class="bloom-card" style="${style}">
+      <div class="text-[9px] mono uppercase tracking-wider text-slate-500 mb-1">${c.title}</div>
+      ${inner}
+    </div>`;
+  }).join("");
+
+  // Build SVG lines from box edges to card edges (approximate)
+  const linesHtml = t.cards.map(c => {
+    let x2, y2;
+    if (c.pos === "top-left")     { x2 = -offsetX; y2 = -offsetY; }
+    if (c.pos === "top-right")    { x2 =  offsetX; y2 = -offsetY; }
+    if (c.pos === "bottom-left")  { x2 = -offsetX; y2 =  offsetY; }
+    if (c.pos === "bottom-right") { x2 =  offsetX; y2 =  offsetY; }
+    const x1 = Math.sign(x2) * (t.box.w / 2);
+    const y1 = Math.sign(y2) * (t.box.h / 2);
+    return `<line class="bloom-line" x1="${cx + x1}" y1="${cy + y1}" x2="${cx + x2}" y2="${cy + y2}"/>`;
+  }).join("");
+
+  host.innerHTML = `
+    <svg class="absolute inset-0 w-full h-full pointer-events-none">${linesHtml}</svg>
+    <div class="target-box" style="width:${t.box.w}px; height:${t.box.h}px; transform: translate(-50%, calc(-50% + ${t.box.y}px))"></div>
+    <div class="absolute" style="left:50%; top:50%; transform:translate(-50%, calc(-50% + ${t.box.y - t.box.h/2 - 28}px))">
+      <div class="text-[9px] mono uppercase tracking-wider text-amber-300/80 text-center">${t.type}</div>
+      <div class="text-sm text-slate-100 text-center mt-0.5">${t.name}</div>
+    </div>
+    ${cardsHtml}
+  `;
+}
+
+function renderAll() {
+  pillBtns("target-buttons", Object.keys(TARGETS), s.target, v => { s.target = v; renderBloom(); pillBtns("target-buttons", Object.keys(TARGETS), s.target, v => { s.target = v; renderAll(); }); });
+  renderBloom();
+}
+renderAll();
+window.addEventListener("resize", renderBloom);
+</script>
+</body>
+</html>

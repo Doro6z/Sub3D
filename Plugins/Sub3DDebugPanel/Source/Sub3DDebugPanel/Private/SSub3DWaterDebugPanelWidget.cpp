@@ -1,5 +1,6 @@
 #include "SSub3DWaterDebugPanelWidget.h"
 
+#include "AssetRegistry/AssetData.h"
 #include "CompartmentVolumeComponent.h"
 #include "Debug/Sub3DDebugSettings.h"
 #include "DrawDebugHelpers.h"
@@ -9,14 +10,25 @@
 #include "EngineUtils.h"
 #include "Materials/MaterialInstanceDynamic.h"
 #include "Subsystems/AssetEditorSubsystem.h"
+#include "Subsystems/EditorActorSubsystem.h"
 #include "FloodWaterPlaneComponent.h"
 #include "GameFramework/Pawn.h"
 #include "GameFramework/PlayerController.h"
+#include "Generator/SubmarineDefinition.h"
+#include "Generator/SubmarineDefinitionTypes.h"
+#include "HAL/PlatformApplicationMisc.h"
 #include "Layout/Margin.h"
+#include "Misc/DateTime.h"
+#include "Misc/FileHelper.h"
+#include "Misc/Paths.h"
+#include "PropertyCustomizationHelpers.h"
 #include "SubFloodComponent.h"
 #include "SubCrewCharacter.h"
 #include "SubmarineBase.h"
+#include "SubmarineWaterBakerLibrary.h"
 #include "Styling/AppStyle.h"
+#include "Types/CompartmentWaterBake.h"
+#include "WaterBakeViewer.h"
 #include "Widgets/Input/SButton.h"
 #include "Widgets/Input/SCheckBox.h"
 #include "Widgets/Input/SMultiLineEditableTextBox.h"
@@ -79,6 +91,34 @@ void SSub3DWaterDebugPanelWidget::Construct(const FArguments& InArgs)
 					.Text(LOCTEXT("Refresh", "Refresh"))
 					.ToolTipText(LOCTEXT("RefreshTip", "Re-scan PIE world for ASubmarineBase actors and rebuild the compartment list."))
 					.OnClicked(this, &SSub3DWaterDebugPanelWidget::OnRefreshClicked)
+				]
+				+ SHorizontalBox::Slot().AutoWidth().Padding(0, 0, 6, 0)
+				[
+					SNew(SButton)
+					.Text(LOCTEXT("DumpFloodGraph", "Dump Flood Graph"))
+					.ToolTipText(LOCTEXT("DumpFloodGraphTip", "Logs to Output Log: Definition.Connections + FloodGraph.Edges + runtime EdgeStates with Closed/Area/Type. Tells you whether water can flow between compartments at all."))
+					.OnClicked(this, &SSub3DWaterDebugPanelWidget::OnDumpFloodGraphClicked)
+				]
+				+ SHorizontalBox::Slot().AutoWidth().Padding(0, 0, 6, 0)
+				[
+					SNew(SButton)
+					.Text(LOCTEXT("DumpSubDef", "Dump SubDef"))
+					.ToolTipText(LOCTEXT("DumpSubDefTip", "Full GeneratedDefinition dump to Output Log: Hull metrics, Performance, Compartments (capacity, hydroBounds, walkable Z, semantic), Connections (type, area, doors), FloodGraph (volumes + edges), Stations, Spawns, Mesh data sizes, WaterBakes link map, Flood defaults."))
+					.OnClicked(this, &SSub3DWaterDebugPanelWidget::OnDumpSubDefClicked)
+				]
+				+ SHorizontalBox::Slot().AutoWidth().Padding(0, 0, 6, 0)
+				[
+					SNew(SButton)
+					.Text(LOCTEXT("OpenAll", "Open All Internal"))
+					.ToolTipText(LOCTEXT("OpenAllTip", "Open every internal connection (skips ExteriorHatch). Lets water flow freely across all compartments — fastest way to validate the flood graph end-to-end."))
+					.OnClicked(this, &SSub3DWaterDebugPanelWidget::OnOpenAllInternalClicked)
+				]
+				+ SHorizontalBox::Slot().AutoWidth().Padding(0, 0, 6, 0)
+				[
+					SNew(SButton)
+					.Text(LOCTEXT("CloseAll", "Close All Internal"))
+					.ToolTipText(LOCTEXT("CloseAllTip", "Close every internal connection (skips ExteriorHatch). Compartments become isolated."))
+					.OnClicked(this, &SSub3DWaterDebugPanelWidget::OnCloseAllInternalClicked)
 				]
 				+ SHorizontalBox::Slot().FillWidth(1.f)
 				[
@@ -467,7 +507,109 @@ void SSub3DWaterDebugPanelWidget::Construct(const FArguments& InArgs)
 				]
 			]
 		]
+
+		+ SScrollBox::Slot()
+		[
+			SNew(SSeparator).Orientation(Orient_Horizontal)
+		]
+
+		// ── Authoring section (bake water + spawn viewers) ──────────────────
+		// Sits at the bottom of the panel by design — keeps the per-compartment + tunables
+		// sections at the top where they're used most often during water debug.
+		+ SScrollBox::Slot()
+		.Padding(SectionPadding)
+		[
+			SNew(SExpandableArea)
+			.InitiallyCollapsed(true)
+			.AreaTitle(LOCTEXT("AuthoringHeader", "Authoring (bake)"))
+			.AreaTitleFont(FAppStyle::Get().GetFontStyle("BoldFont"))
+			.BodyContent()
+			[
+				SNew(SVerticalBox)
+				+ SVerticalBox::Slot().AutoHeight().Padding(0, 4, 0, 0)
+				[
+					SNew(SHorizontalBox)
+					+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(0, 0, 8, 0)
+					[
+						SNew(STextBlock).Text(LOCTEXT("DefinitionLabel", "Submarine Definition"))
+					]
+					+ SHorizontalBox::Slot().FillWidth(1.f)
+					[
+						SNew(SObjectPropertyEntryBox)
+						.AllowedClass(USubmarineDefinition::StaticClass())
+						.ObjectPath_Raw(this, &SSub3DWaterDebugPanelWidget::GetSelectedDefinitionPath)
+						.OnObjectChanged_Raw(this, &SSub3DWaterDebugPanelWidget::OnDefinitionPicked)
+						.AllowClear(true)
+						.DisplayUseSelected(true)
+						.DisplayBrowse(true)
+					]
+				]
+				+ SVerticalBox::Slot().AutoHeight().Padding(0, 6, 0, 0)
+				[
+					SNew(SHorizontalBox)
+					+ SHorizontalBox::Slot().AutoWidth().Padding(0, 0, 8, 0)
+					[
+						SNew(SButton)
+						.Text(LOCTEXT("BakeWaterButton", "Bake Water"))
+						.ToolTipText(LOCTEXT("BakeWaterTip", "Iterate every compartment in the picked Submarine Definition, find a BP_Submarine_* actor in the active level, voxelise + Marching Squares, save CWB_<id>.uasset under Submarines/<sub>/Water/."))
+						.OnClicked_Raw(this, &SSub3DWaterDebugPanelWidget::OnBakeWaterClicked)
+					]
+					+ SHorizontalBox::Slot().AutoWidth()
+					[
+						SNew(SButton)
+						.Text(LOCTEXT("CopyBakeReportButton", "Copy Report"))
+						.ToolTipText(LOCTEXT("CopyBakeReportTip", "Copy the bake report to the clipboard."))
+						.OnClicked_Raw(this, &SSub3DWaterDebugPanelWidget::OnCopyBakeReportClicked)
+					]
+				]
+				+ SVerticalBox::Slot().AutoHeight().Padding(0, 6, 0, 0)
+				[
+					SNew(SBox)
+					.HeightOverride(220.f)
+					[
+						SAssignNew(BakeReportTextBox, SMultiLineEditableTextBox)
+						.IsReadOnly(true)
+						.AlwaysShowScrollbars(true)
+						.AutoWrapText(false)
+						.Text(FText::FromString(LastBakeReport))
+					]
+				]
+				+ SVerticalBox::Slot().AutoHeight().Padding(0, 10, 0, 0)
+				[
+					SNew(STextBlock)
+					.Text(LOCTEXT("BakeViewersHeader", "Bake Viewers"))
+					.Font(FAppStyle::Get().GetFontStyle("BoldFont"))
+				]
+				+ SVerticalBox::Slot().AutoHeight().Padding(0, 4, 0, 0)
+				[
+					SNew(SHorizontalBox)
+					+ SHorizontalBox::Slot().AutoWidth().Padding(0, 0, 8, 0)
+					[
+						SNew(SButton)
+						.Text(LOCTEXT("SpawnAllViewersButton", "Spawn All Viewers"))
+						.ToolTipText(LOCTEXT("SpawnAllViewersTip", "For every CWB asset produced by the last bake, spawn an AWaterBakeViewer at the submarine's location + (0, 5000, 0) cm. Move individual viewers via gizmo."))
+						.OnClicked_Raw(this, &SSub3DWaterDebugPanelWidget::OnSpawnAllViewersClicked)
+					]
+					+ SHorizontalBox::Slot().AutoWidth()
+					[
+						SNew(SButton)
+						.Text(LOCTEXT("DespawnAllViewersButton", "Despawn All Viewers"))
+						.ToolTipText(LOCTEXT("DespawnAllViewersTip", "Destroy every AWaterBakeViewer spawned by this panel session."))
+						.OnClicked_Raw(this, &SSub3DWaterDebugPanelWidget::OnDespawnAllViewersClicked)
+					]
+				]
+				+ SVerticalBox::Slot().AutoHeight().Padding(0, 4, 0, 0)
+				[
+					SNew(STextBlock)
+					.Text_Lambda([this]() { return ViewerStatus; })
+					.AutoWrapText(true)
+				]
+			]
+		]
 	];
+
+	LastBakeReport = TEXT("Idle. Pick a Submarine Definition + open the gameplay map (with BP_Submarine_* placed) + click Bake Water.");
+	ViewerStatus = LOCTEXT("ViewerStatusIdle", "No viewers spawned. Run Bake Water then click Spawn All Viewers.");
 
 	// First population if a PIE world is already running.
 	RebuildSubmarineList();
@@ -1115,6 +1257,210 @@ FReply SSub3DWaterDebugPanelWidget::OnRefreshClicked()
 	return FReply::Handled();
 }
 
+FReply SSub3DWaterDebugPanelWidget::OnOpenAllInternalClicked()
+{
+	const ASubmarineBase* Sub = SelectedSubmarine.Get();
+	if (!Sub || !Sub->SubFlood)
+	{
+		SetLastAction(TEXT("Open All: no Sub/SubFlood."));
+		return FReply::Handled();
+	}
+	int32 Count = 0;
+	for (const FFloodEdgeState& E : Sub->SubFlood->GetEdgeStates())
+	{
+		if (E.bExteriorEdge) continue; // skip exterior — would drain the sub
+		if (E.ClosureId.IsNone()) continue;
+		Sub->SubFlood->SetDoorState(E.ClosureId, false);
+		++Count;
+	}
+	SetLastAction(FString::Printf(TEXT("Opened %d internal connections (exterior skipped)."), Count));
+	return FReply::Handled();
+}
+
+FReply SSub3DWaterDebugPanelWidget::OnCloseAllInternalClicked()
+{
+	const ASubmarineBase* Sub = SelectedSubmarine.Get();
+	if (!Sub || !Sub->SubFlood)
+	{
+		SetLastAction(TEXT("Close All: no Sub/SubFlood."));
+		return FReply::Handled();
+	}
+	int32 Count = 0;
+	for (const FFloodEdgeState& E : Sub->SubFlood->GetEdgeStates())
+	{
+		if (E.bExteriorEdge) continue;
+		if (E.ClosureId.IsNone()) continue;
+		Sub->SubFlood->SetDoorState(E.ClosureId, true);
+		++Count;
+	}
+	SetLastAction(FString::Printf(TEXT("Closed %d internal connections."), Count));
+	return FReply::Handled();
+}
+
+FReply SSub3DWaterDebugPanelWidget::OnDumpSubDefClicked()
+{
+	const ASubmarineBase* Sub = SelectedSubmarine.Get();
+	if (!Sub)
+	{
+		SetLastAction(TEXT("Dump SubDef: no sub selected."));
+		return FReply::Handled();
+	}
+	const USubmarineDefinition* Def = Sub->GeneratedDefinition;
+	if (!Def)
+	{
+		SetLastAction(TEXT("Dump SubDef: no GeneratedDefinition."));
+		return FReply::Handled();
+	}
+
+	UE_LOG(LogTemp, Display, TEXT("════════ SubDef dump | %s ════════"), *GetNameSafe(Def));
+
+	UE_LOG(LogTemp, Display, TEXT("── Hull ──"));
+	UE_LOG(LogTemp, Display, TEXT("  Length=%.0fcm Beam=%.0fcm Height=%.0fcm WallThickness=%.1fcm"),
+		Def->HullLengthCm, Def->HullBeamCm, Def->HullHeightCm, Def->WallThicknessCm);
+	UE_LOG(LogTemp, Display, TEXT("  BaseMass=%.0fkg SubmergedVolume=%.0fL"),
+		Def->BaseMassKg, Def->SubmergedVolumeLiters);
+
+	UE_LOG(LogTemp, Display, TEXT("── Performance ──"));
+	UE_LOG(LogTemp, Display, TEXT("  MaxFwd=%.0f MaxRev=%.0f MaxVert=%.0f MaxThrust=%.0f"),
+		Def->MaxForwardSpeedCmS, Def->MaxReverseSpeedCmS, Def->MaxVerticalSpeedCmS, Def->MaxThrustN);
+
+	UE_LOG(LogTemp, Display, TEXT("── Compartments (%d) ──"), Def->Compartments.Num());
+	for (const FGeneratedCompartmentDef& C : Def->Compartments)
+	{
+		UE_LOG(LogTemp, Display,
+			TEXT("  [%s] Capacity=%.0fL  MaxH=%.0fcm  Floor=%.0fcm  Sem=%d"),
+			*C.CompartmentId.ToString(), C.CapacityLiters, C.MaxWaterHeightCm,
+			C.WalkableFloorZCm, static_cast<int32>(C.SemanticType));
+		UE_LOG(LogTemp, Display,
+			TEXT("    HydroBounds: Min=%s Max=%s"),
+			*C.HydroBoundsMin.ToString(), *C.HydroBoundsMax.ToString());
+	}
+
+	UE_LOG(LogTemp, Display, TEXT("── Connections (%d) ──"), Def->Connections.Num());
+	for (const FGeneratedConnectionDef& C : Def->Connections)
+	{
+		FString TypeName;
+		switch (C.ConnectionType)
+		{
+			case EConnectionType::Door:          TypeName = TEXT("Door"); break;
+			case EConnectionType::Hatch:         TypeName = TEXT("Hatch"); break;
+			case EConnectionType::ExteriorHatch: TypeName = TEXT("ExteriorHatch"); break;
+			case EConnectionType::Open:          TypeName = TEXT("Open"); break;
+			default: TypeName = TEXT("?"); break;
+		}
+		const FString CompBStr = C.CompartmentB.IsNone() ? TEXT("(EXT)") : C.CompartmentB.ToString();
+		UE_LOG(LogTemp, Display,
+			TEXT("  [%s] Type=%s  %s ↔ %s  Area=%.0fcm²  StartsClosed=%s  Door=%.0fx%.0fcm"),
+			*C.ConnectionId.ToString(), *TypeName,
+			*C.CompartmentA.ToString(), *CompBStr,
+			C.FlowAreaCm2, C.bStartsClosed ? TEXT("true") : TEXT("false"),
+			C.DoorWidthCm, C.DoorHeightCm);
+	}
+
+	UE_LOG(LogTemp, Display, TEXT("── FloodGraph.Volumes (%d) ──"), Def->FloodGraph.Volumes.Num());
+	for (const FDerivedFloodVolume& V : Def->FloodGraph.Volumes)
+	{
+		UE_LOG(LogTemp, Display, TEXT("  [%s] Capacity=%.0fL"),
+			*V.VolumeId.ToString(), V.CapacityLiters);
+	}
+
+	UE_LOG(LogTemp, Display, TEXT("── FloodGraph.Edges (%d) ──"), Def->FloodGraph.Edges.Num());
+	for (const FFloodGraphEdge& E : Def->FloodGraph.Edges)
+	{
+		const FString VBStr = E.VolumeB.IsNone() ? TEXT("(EXT)") : E.VolumeB.ToString();
+		UE_LOG(LogTemp, Display,
+			TEXT("  [%s] %s ↔ %s  Area=%.0fcm²  Exterior=%s"),
+			*E.ClosureId.ToString(),
+			*E.VolumeA.ToString(), *VBStr,
+			E.PassageAreaCm2, E.bExteriorEdge ? TEXT("true") : TEXT("false"));
+	}
+
+	UE_LOG(LogTemp, Display, TEXT("── StationSlots (%d) ──"), Def->StationSlots.Num());
+	for (const FGeneratedStationSlotDef& S : Def->StationSlots)
+	{
+		UE_LOG(LogTemp, Display, TEXT("  [%s] Type=%d  Compartment=%s"),
+			*S.StationId.ToString(), static_cast<int32>(S.StationType), *S.CompartmentId.ToString());
+	}
+
+	UE_LOG(LogTemp, Display, TEXT("── SpawnPoints (%d) ──"), Def->SpawnPoints.Num());
+	for (const FGeneratedSpawnPointDef& Sp : Def->SpawnPoints)
+	{
+		UE_LOG(LogTemp, Display, TEXT("  [%s] Role=%d"),
+			*Sp.SpawnId.ToString(), static_cast<int32>(Sp.Role));
+	}
+
+	UE_LOG(LogTemp, Display, TEXT("── Mesh data summary ──"));
+	UE_LOG(LogTemp, Display, TEXT("  ExteriorHull: vertices=%d, indices=%d"),
+		Def->ExteriorHullMesh.Vertices.Num(), Def->ExteriorHullMesh.Triangles.Num());
+	UE_LOG(LogTemp, Display, TEXT("  InteriorMeshes: %d entries"), Def->InteriorMeshes.Num());
+	UE_LOG(LogTemp, Display, TEXT("  BulkheadMeshes: %d entries"), Def->BulkheadMeshes.Num());
+
+	UE_LOG(LogTemp, Display, TEXT("── WaterBakes (%d entries) ──"), Def->WaterBakes.Num());
+	for (const TPair<FName, TObjectPtr<UCompartmentWaterBake>>& Pair : Def->WaterBakes)
+	{
+		UE_LOG(LogTemp, Display, TEXT("  [%s] → %s"),
+			*Pair.Key.ToString(), *GetNameSafe(Pair.Value));
+	}
+
+	UE_LOG(LogTemp, Display, TEXT("── Flood defaults ──"));
+	UE_LOG(LogTemp, Display, TEXT("  MaxExteriorInflow=%.0fL/s  DefaultPumpRate=%.0fL/s"),
+		Def->MaxExteriorInflowLitersPerSec, Def->DefaultPumpRateLitersPerSec);
+
+	UE_LOG(LogTemp, Display, TEXT("════════ End SubDef dump ════════"));
+
+	SetLastAction(FString::Printf(TEXT("Dumped SubDef '%s' (%d compartments, %d connections, %d edges) — see Output Log"),
+		*GetNameSafe(Def),
+		Def->Compartments.Num(), Def->Connections.Num(), Def->FloodGraph.Edges.Num()));
+	return FReply::Handled();
+}
+
+FReply SSub3DWaterDebugPanelWidget::OnDumpFloodGraphClicked()
+{
+	const ASubmarineBase* Sub = SelectedSubmarine.Get();
+	if (!Sub)
+	{
+		SetLastAction(TEXT("Dump flood graph: no sub selected."));
+		return FReply::Handled();
+	}
+	const USubFloodComponent* Flood = Sub->FindComponentByClass<USubFloodComponent>();
+	if (!Flood)
+	{
+		SetLastAction(TEXT("Dump flood graph: no SubFloodComponent."));
+		return FReply::Handled();
+	}
+
+	UE_LOG(LogTemp, Display, TEXT("──── Flood graph dump | Sub=%s ────"), *Sub->GetName());
+	UE_LOG(LogTemp, Display, TEXT("  GeneratedDefinition = %s"), *GetNameSafe(Sub->GeneratedDefinition));
+
+	if (Sub->GeneratedDefinition)
+	{
+		UE_LOG(LogTemp, Display, TEXT("  Definition.Compartments = %d"), Sub->GeneratedDefinition->Compartments.Num());
+		UE_LOG(LogTemp, Display, TEXT("  Definition.Connections  = %d"), Sub->GeneratedDefinition->Connections.Num());
+		UE_LOG(LogTemp, Display, TEXT("  Definition.FloodGraph.Volumes = %d"), Sub->GeneratedDefinition->FloodGraph.Volumes.Num());
+		UE_LOG(LogTemp, Display, TEXT("  Definition.FloodGraph.Edges   = %d"), Sub->GeneratedDefinition->FloodGraph.Edges.Num());
+		for (const FGeneratedConnectionDef& C : Sub->GeneratedDefinition->Connections)
+		{
+			UE_LOG(LogTemp, Display, TEXT("    Connection %s | %s ↔ %s | Type=%d | Area=%.0f cm² | StartsClosed=%s"),
+				*C.ConnectionId.ToString(), *C.CompartmentA.ToString(), *C.CompartmentB.ToString(),
+				static_cast<int32>(C.ConnectionType), C.FlowAreaCm2, C.bStartsClosed ? TEXT("true") : TEXT("false"));
+		}
+	}
+
+	const TArray<FFloodEdgeState>& Edges = Flood->GetEdgeStates();
+	UE_LOG(LogTemp, Display, TEXT("  Runtime EdgeStates = %d  (these drive AdvanceFlooding)"), Edges.Num());
+	for (const FFloodEdgeState& E : Edges)
+	{
+		UE_LOG(LogTemp, Display, TEXT("    Edge %s | %s ↔ %s | Area=%.0f cm² | Closed=%s | Exterior=%s"),
+			*E.ClosureId.ToString(), *E.VolumeA.ToString(), *E.VolumeB.ToString(),
+			E.PassageAreaCm2, E.bClosed ? TEXT("true") : TEXT("false"), E.bExteriorEdge ? TEXT("true") : TEXT("false"));
+	}
+
+	UE_LOG(LogTemp, Display, TEXT("──── End flood graph dump ────"));
+	SetLastAction(FString::Printf(TEXT("Dumped flood graph: %d connections, %d edges. See Output Log."),
+		Sub->GeneratedDefinition ? Sub->GeneratedDefinition->Connections.Num() : 0, Edges.Num()));
+	return FReply::Handled();
+}
+
 void SSub3DWaterDebugPanelWidget::HandlePIEStarted(const bool bIsSimulating)
 {
 	RebuildSubmarineList();
@@ -1128,6 +1474,187 @@ void SSub3DWaterDebugPanelWidget::HandlePIEEnded(const bool bIsSimulating)
 	AvailableSubs.Reset();
 	RebuildCompartmentList();
 	SetLastAction(TEXT("PIE ended."));
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  Authoring section (moved from SSub3DDebugPanelWidget — bake + viewers)
+// ─────────────────────────────────────────────────────────────────────────────
+
+FString SSub3DWaterDebugPanelWidget::GetSelectedDefinitionPath() const
+{
+	return SelectedDefinition.IsValid() ? SelectedDefinition->GetPathName() : FString();
+}
+
+void SSub3DWaterDebugPanelWidget::OnDefinitionPicked(const FAssetData& Asset)
+{
+	SelectedDefinition = Cast<USubmarineDefinition>(Asset.GetAsset());
+}
+
+FReply SSub3DWaterDebugPanelWidget::OnBakeWaterClicked()
+{
+	auto SetReport = [this](const FString& Text)
+	{
+		LastBakeReport = Text;
+		if (BakeReportTextBox.IsValid()) BakeReportTextBox->SetText(FText::FromString(LastBakeReport));
+	};
+
+	USubmarineDefinition* Definition = SelectedDefinition.Get();
+	if (!Definition)
+	{
+		SetReport(TEXT("[FAIL] Pick a Submarine Definition first."));
+		return FReply::Handled();
+	}
+
+	UEditorActorSubsystem* ActorSubsystem = GEditor ? GEditor->GetEditorSubsystem<UEditorActorSubsystem>() : nullptr;
+	if (!ActorSubsystem)
+	{
+		SetReport(TEXT("[FAIL] EditorActorSubsystem unavailable."));
+		return FReply::Handled();
+	}
+
+	TArray<AActor*> AllActors = ActorSubsystem->GetAllLevelActors();
+	AActor* HullActor = nullptr;
+	for (AActor* Actor : AllActors)
+	{
+		if (!Actor) continue;
+		if (Actor->GetClass()->GetName().StartsWith(TEXT("BP_Submarine_")))
+		{
+			HullActor = Actor;
+			break;
+		}
+	}
+	if (!HullActor)
+	{
+		SetReport(TEXT("[FAIL] No BP_Submarine_* actor in the active level. Open the gameplay map first."));
+		return FReply::Handled();
+	}
+
+	FSubmarineWaterBakeParams Params;
+	FString Report;
+	Report += FString::Printf(
+		TEXT("Bake on %s — %d compartments — params: NumSlices=%d CellSize=%.1fcm RingsCount=%d ResampleN=%d Inset=%.1fcm\n"),
+		*HullActor->GetName(), Definition->Compartments.Num(),
+		Params.NumSlices, Params.CellSizeCm, Params.RingsCount, Params.PolygonResampleN, Params.CapInsetCm);
+
+	LastBakedAssets.Reset();
+	int32 SuccessCount = 0;
+	for (const FGeneratedCompartmentDef& Comp : Definition->Compartments)
+	{
+		if (Comp.CompartmentId.IsNone()) continue;
+		UCompartmentWaterBake* Bake = USubmarineWaterBakerLibrary::BakeCompartment(
+			Definition, Comp.CompartmentId, HullActor, Params, Report);
+		if (Bake)
+		{
+			++SuccessCount;
+			LastBakedAssets.Add(Bake);
+		}
+	}
+
+	Report += FString::Printf(TEXT("─ Done: %d/%d compartments baked ─\n"),
+		SuccessCount, Definition->Compartments.Num());
+
+	const FString Timestamp = FDateTime::Now().ToString(TEXT("%Y%m%d_%H%M%S"));
+	const FString ReportPath = FPaths::ProjectSavedDir() / TEXT("Sub3D/BakeReports")
+		/ FString::Printf(TEXT("BakeReport_%s.txt"), *Timestamp);
+	if (FFileHelper::SaveStringToFile(Report, *ReportPath))
+	{
+		Report += FString::Printf(TEXT("Report saved to: %s\n"), *FPaths::ConvertRelativePathToFull(ReportPath));
+	}
+
+	SetReport(Report);
+	ViewerStatus = FText::Format(LOCTEXT("ViewerStatusReady", "{0} bake(s) ready. Click Spawn All Viewers."),
+		FText::AsNumber(LastBakedAssets.Num()));
+	SetLastAction(FString::Printf(TEXT("Bake done: %d/%d"),
+		SuccessCount, Definition->Compartments.Num()));
+	return FReply::Handled();
+}
+
+FReply SSub3DWaterDebugPanelWidget::OnSpawnAllViewersClicked()
+{
+	if (LastBakedAssets.Num() == 0)
+	{
+		ViewerStatus = LOCTEXT("ViewerStatusNoBakes", "No bakes captured. Run Bake Water first.");
+		return FReply::Handled();
+	}
+
+	UEditorActorSubsystem* ActorSubsystem = GEditor ? GEditor->GetEditorSubsystem<UEditorActorSubsystem>() : nullptr;
+	if (!ActorSubsystem)
+	{
+		ViewerStatus = LOCTEXT("ViewerStatusNoSubsystem", "EditorActorSubsystem unavailable.");
+		return FReply::Handled();
+	}
+
+	UWorld* World = GEditor ? GEditor->GetEditorWorldContext().World() : nullptr;
+	if (!World)
+	{
+		ViewerStatus = LOCTEXT("ViewerStatusNoWorld", "No editor world.");
+		return FReply::Handled();
+	}
+
+	TArray<AActor*> AllActors = ActorSubsystem->GetAllLevelActors();
+	AActor* HullActor = nullptr;
+	for (AActor* Actor : AllActors)
+	{
+		if (Actor && Actor->GetClass()->GetName().StartsWith(TEXT("BP_Submarine_")))
+		{
+			HullActor = Actor;
+			break;
+		}
+	}
+	const FVector AnchorLocation = HullActor ? HullActor->GetActorLocation() : FVector::ZeroVector;
+	const FRotator AnchorRotation = HullActor ? HullActor->GetActorRotation() : FRotator::ZeroRotator;
+	const FVector SpawnLocation = AnchorLocation + FVector(0.f, 5000.f, 0.f);
+
+	int32 Spawned = 0;
+	for (const TWeakObjectPtr<UCompartmentWaterBake>& WeakBake : LastBakedAssets)
+	{
+		UCompartmentWaterBake* Bake = WeakBake.Get();
+		if (!Bake) continue;
+
+		FActorSpawnParameters SpawnParams;
+		SpawnParams.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
+		AWaterBakeViewer* Viewer = World->SpawnActor<AWaterBakeViewer>(
+			AWaterBakeViewer::StaticClass(), SpawnLocation, AnchorRotation, SpawnParams);
+		if (!Viewer) continue;
+
+		Viewer->BakeToView = Bake;
+#if WITH_EDITOR
+		Viewer->SetActorLabel(FString::Printf(TEXT("BakeViewer_%s"), *Bake->CompartmentId.ToString()));
+#endif
+		SpawnedViewers.Add(Viewer);
+		++Spawned;
+	}
+
+	ViewerStatus = FText::Format(LOCTEXT("ViewerStatusSpawned",
+		"Spawned {0} viewer(s) at sub + (0, 5000, 0). Move them via gizmo to inspect."),
+		FText::AsNumber(Spawned));
+	SetLastAction(FString::Printf(TEXT("Spawned %d viewers."), Spawned));
+	return FReply::Handled();
+}
+
+FReply SSub3DWaterDebugPanelWidget::OnDespawnAllViewersClicked()
+{
+	int32 Destroyed = 0;
+	for (const TWeakObjectPtr<AWaterBakeViewer>& WeakViewer : SpawnedViewers)
+	{
+		if (AWaterBakeViewer* Viewer = WeakViewer.Get())
+		{
+			Viewer->Destroy();
+			++Destroyed;
+		}
+	}
+	SpawnedViewers.Reset();
+	ViewerStatus = FText::Format(LOCTEXT("ViewerStatusDespawned", "Despawned {0} viewer(s)."),
+		FText::AsNumber(Destroyed));
+	SetLastAction(FString::Printf(TEXT("Despawned %d viewers."), Destroyed));
+	return FReply::Handled();
+}
+
+FReply SSub3DWaterDebugPanelWidget::OnCopyBakeReportClicked()
+{
+	FPlatformApplicationMisc::ClipboardCopy(*LastBakeReport);
+	SetLastAction(TEXT("Bake report copied to clipboard."));
+	return FReply::Handled();
 }
 
 #undef LOCTEXT_NAMESPACE

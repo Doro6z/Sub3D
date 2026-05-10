@@ -37,17 +37,12 @@ TArray<const FGeneratedStationSlotDef*> USubmarineDefinition::GetStationsInCompa
 	return Result;
 }
 
-const FGeneratedCompartmentDef* USubmarineDefinition::FindCompartmentAtLocalLocation(const FVector& LocalPosition) const
+const FGeneratedCompartmentDef* USubmarineDefinition::FindCompartmentAtLocalLocation(const FVector& /*LocalPosition*/) const
 {
-	for (const FGeneratedCompartmentDef& Comp : Compartments)
-	{
-		if (LocalPosition.X >= Comp.HydroBoundsMin.X && LocalPosition.X <= Comp.HydroBoundsMax.X &&
-			LocalPosition.Y >= Comp.HydroBoundsMin.Y && LocalPosition.Y <= Comp.HydroBoundsMax.Y &&
-			LocalPosition.Z >= Comp.HydroBoundsMin.Z && LocalPosition.Z <= Comp.HydroBoundsMax.Z)
-		{
-			return &Comp;
-		}
-	}
+	// DEPRECATED 2026-05-10 (option B): HydroBounds AABB lookup removed. Compartment
+	// resolution now goes through ASubmarineBase::FindCompartmentIdAtLocalLocation
+	// (CV-based, multi-volume aware). This stub remains so the function signature
+	// still compiles for the paused Generator pipeline; always returns nullptr.
 	return nullptr;
 }
 
@@ -77,13 +72,9 @@ bool USubmarineDefinition::IsValid() const
 			{
 				return false;
 			}
-			// Bounds min must be strictly less than max on all axes
-			if (Comp.HydroBoundsMin.X >= Comp.HydroBoundsMax.X ||
-				Comp.HydroBoundsMin.Y >= Comp.HydroBoundsMax.Y ||
-				Comp.HydroBoundsMin.Z >= Comp.HydroBoundsMax.Z)
-			{
-				return false;
-			}
+			// HydroBounds Min<Max validation removed 2026-05-10 (option B). The field is
+			// deprecated and no longer load-bearing — CV components on the sub actor are the
+			// authoritative source of compartment geometry.
 		}
 	}
 

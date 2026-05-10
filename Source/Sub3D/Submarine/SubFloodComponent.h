@@ -49,6 +49,15 @@ struct FFloodCompartmentState
 	UPROPERTY()
 	float MaxWaterHeightCm = 200.f;
 
+	/**
+	 * Z coordinate (sub-local space) of the compartment's floor — i.e. the bottom of its
+	 * water column. Used by AdvanceFlooding to compute the absolute Z of the water surface
+	 * so vertical connections respect gravity (water doesn't flow up to a higher compartment
+	 * unless the source level rises above the destination's floor).
+	 */
+	UPROPERTY()
+	float WalkableFloorZCm = 0.f;
+
 	UPROPERTY()
 	float CurrentWaterLiters = 0.f;
 
@@ -149,6 +158,14 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Submarine|Flood")
 	void SetDoorState(FName ConnectionId, bool bClosed);
 
+	/**
+	 * Fallback for BP-placed doors that don't carry a DoorId — match the edge whose
+	 * (VolumeA, VolumeB) pair equals (CompA, CompB) in either order. Logs a warning
+	 * if no match is found.
+	 */
+	UFUNCTION(BlueprintCallable, Category = "Submarine|Flood")
+	void SetDoorStateByCompartments(FName CompA, FName CompB, bool bClosed);
+
 	// --- Breach ----------------------------------------------------------
 
 	/** Create or update a breach inflow on a compartment. */
@@ -193,6 +210,10 @@ public:
 
 	UFUNCTION(BlueprintPure, Category = "Submarine|Flood")
 	const TArray<FCompartmentBreachState>& GetBreaches() const { return Breaches; }
+
+	/** Read-only access to the runtime edge states for diagnostics. Edges drive AdvanceFlooding's
+	 *  internal transfers between compartments and exterior hatch inflows. */
+	const TArray<FFloodEdgeState>& GetEdgeStates() const { return EdgeStates; }
 
 	// --- Events ----------------------------------------------------------
 

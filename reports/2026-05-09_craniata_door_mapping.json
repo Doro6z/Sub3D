@@ -1,0 +1,20 @@
+{
+  "blueprint_path": "/Game/Sub3D/FirstPlayableRun/BP_Submarine_Craniata",
+  "dry_run": true,
+  "candidate_count": 0,
+  "mapped_count": 0,
+  "skipped": [],
+  "unmapped": [],
+  "missing_connections": [
+    "N_main_Fwd",
+    "N_main_Control",
+    "N_lower_BallastFwd",
+    "N_lower_BallastAft",
+    "N_upper_UpperAirlock_Inner",
+    "N_upper_UpperAirlock_Exit",
+    "N_upper_UpperAirlock_Exit__to_EXT",
+    "N_vert_LowerAccess",
+    "N_vert_UpperAccess"
+  ],
+  "mapping": []
+}

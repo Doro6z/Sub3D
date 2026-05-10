@@ -1,0 +1,377 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Sub3D · Crew HUD — Concept Gallery (round 3)</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<style>
+  :root {
+    --bg-deep:#0a0d12; --panel:#181c23; --panel-soft:#1d222a; --border:#2a313b; --border-hi:#3a4452;
+    --text:#d8d4ca; --dim:#8d9095; --faint:#5e636a;
+    --teal:#6db4a3; --amber:#c89868; --gold:#d4b876; --leaf:#87a86b; --crimson:#b8554a;
+    --ctx-yellow:#f4d03f;
+  }
+  body { background: var(--bg-deep); color: var(--text); font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+  .mono { font-family: "JetBrains Mono", Consolas, monospace; }
+  .grid-bg {
+    background-image:
+      linear-gradient(rgba(148,163,184,.04) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(148,163,184,.04) 1px, transparent 1px);
+    background-size: 24px 24px;
+  }
+
+  .card {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    overflow: hidden;
+    transition: transform .15s, border-color .15s;
+    text-decoration: none;
+    color: inherit;
+    display: flex; flex-direction: column;
+  }
+  .card:hover { transform: translateY(-3px); border-color: var(--teal); }
+  .card.featured { border-color: var(--gold); border-width: 2px; }
+  .card.superseded { opacity: .55; }
+  .card.superseded:hover { opacity: .85; border-color: var(--border-hi); }
+
+  .card-preview {
+    aspect-ratio: 16 / 9;
+    background:
+      radial-gradient(ellipse at 50% 38%, #14202a 0%, #0a1218 38%, #050709 80%),
+      var(--bg-deep);
+    border-bottom: 1px solid var(--border);
+    position: relative;
+    overflow: hidden;
+  }
+
+  .tag {
+    display: inline-block;
+    padding: 1px 7px;
+    font-family: "JetBrains Mono", monospace;
+    font-size: 9px; letter-spacing: .12em; text-transform: uppercase;
+    border-radius: 2px;
+  }
+  .tag-ship       { background: rgba(212,184,118,.18); color: var(--gold); border: 1px solid rgba(212,184,118,.35); }
+  .tag-historical { background: rgba(141,144,149,.12); color: #cbcab9; }
+  .tag-standby    { background: rgba(200,152,104,.14); color: var(--amber); }
+
+  .doc-card {
+    background: var(--panel-soft);
+    border: 1px solid var(--border);
+    border-left: 3px solid var(--teal);
+    border-radius: 4px;
+    padding: 14px;
+    text-decoration: none;
+    color: inherit;
+    transition: border-color .15s, transform .15s;
+  }
+  .doc-card:hover { border-left-color: var(--gold); transform: translateY(-1px); }
+  .doc-card.primary { border-left-color: var(--gold); background: rgba(212,184,118,.04); }
+
+  .group-banner {
+    background: linear-gradient(90deg, var(--panel) 0%, transparent 100%);
+    border-left: 3px solid var(--teal);
+    padding: 12px 18px;
+    margin-bottom: 16px;
+    border-radius: 0 4px 4px 0;
+  }
+  .group-banner.gold { border-left-color: var(--gold); }
+  .group-banner.faint { border-left-color: var(--faint); }
+</style>
+</head>
+<body class="grid-bg">
+
+<div class="max-w-7xl mx-auto p-6 md:p-10">
+
+  <header class="mb-12">
+    <div class="text-xs text-slate-500 mb-2 mono">Sub3D · 2026-05-08 · round 3 · branch <span class="text-slate-400">water-proto</span></div>
+    <h1 class="text-4xl font-bold text-white mb-3">Crew HUD · DA validée</h1>
+    <p class="text-slate-400 max-w-3xl text-sm leading-relaxed">
+      Architecture 6 couches committed (L1–L6) avec règle d'ownership stricte.
+      Deux concepts <strong class="text-amber-300">ship target</strong> :
+      <strong>S01 Unified HUD</strong> (L1+L2+L5) et <strong>S02 Station Helm</strong> (L4).
+      Les anciens concepts restent en référence historique.
+    </p>
+  </header>
+
+  <!-- DA + pillars (primary docs) -->
+  <section class="mb-12">
+    <div class="text-[11px] mono uppercase tracking-widest text-slate-500 mb-4 flex items-center gap-2">
+      <span class="w-1 h-4 bg-amber-500 rounded"></span> Source of truth
+    </div>
+    <div class="grid md:grid-cols-2 gap-3">
+      <a href="../plans/2026-05-08_crew_hud_unified_da.md" class="doc-card primary">
+        <div class="text-[10px] mono uppercase text-amber-400 mb-1">→ DA · ARCHITECTURE</div>
+        <div class="text-sm font-medium text-slate-100">Unified Design Architecture</div>
+        <div class="text-xs text-slate-400 mt-1">6 couches · ownership matrix · scope decisions · build plan</div>
+      </a>
+      <a href="../ui-pillars.md" class="doc-card">
+        <div class="text-[10px] mono uppercase text-slate-500 mb-1">→ GOVERNANCE</div>
+        <div class="text-sm font-medium text-slate-100">Design pillars (P1–P16)</div>
+        <div class="text-xs text-slate-400 mt-1">Palette · zoning · checklist · pillars P13–P16 added round 3</div>
+      </a>
+    </div>
+  </section>
+
+  <!-- ─── SHIP TARGETS — featured ─── -->
+  <section class="mb-12">
+    <div class="group-banner gold">
+      <div class="text-[10px] mono uppercase tracking-widest text-amber-400 mb-1">★ SHIP TARGETS · IMPLEMENTATION GATE</div>
+      <h2 class="text-xl font-bold text-white">S01 + S02 · à shipper en UMG</h2>
+      <p class="text-slate-400 text-sm mt-1">Les deux maquettes qui dérivent directement de la DA. Tout autre concept est superseded.</p>
+    </div>
+    <div class="grid md:grid-cols-2 gap-5" id="gallery-ship"></div>
+  </section>
+
+  <!-- Asset / modeling handoffs -->
+  <section class="mb-12">
+    <div class="group-banner" style="border-left-color: var(--brass-hi, #c9a25f);">
+      <div class="text-[10px] mono uppercase tracking-widest mb-1" style="color: #c9a25f;">▣ ASSET HANDOFFS · BLENDER MODELING</div>
+      <h2 class="text-xl font-bold text-white">Helm Station · prop physique</h2>
+      <p class="text-slate-400 text-sm mt-1">Brief de design + maquette multi-vues pour modéliser le poste de pilotage avant import UE.</p>
+    </div>
+    <div class="grid md:grid-cols-2 gap-3">
+      <a href="helm_station_layout.html" class="doc-card" style="border-left-color: #c9a25f; background: rgba(212,184,118,.04);">
+        <div class="text-[10px] mono uppercase mb-1" style="color: #c9a25f;">▣ VISUAL LAYOUT</div>
+        <div class="text-sm font-medium text-slate-100">Helm Station — multi-view mockup</div>
+        <div class="text-xs text-slate-400 mt-1">3/4 perspective · front · top-down · side · annotations / reach zones / UI overlays toggleables</div>
+      </a>
+      <a href="../handoffs/2026-05-08_helm_station_design.md" class="doc-card" style="border-left-color: #c9a25f;">
+        <div class="text-[10px] mono uppercase mb-1" style="color: #c9a25f;">▣ DESIGN BRIEF</div>
+        <div class="text-sm font-medium text-slate-100">Modeling spec (markdown)</div>
+        <div class="text-xs text-slate-400 mt-1">21 meshes · ~4 800 verts · UV strategy · Blender 5.0 export · UI ↔ socket mapping · ordered task list</div>
+      </a>
+    </div>
+  </section>
+
+  <!-- Reference docs and tools -->
+  <section class="mb-12">
+    <div class="text-[11px] mono uppercase tracking-widest text-slate-500 mb-4 flex items-center gap-2">
+      <span class="w-1 h-4 bg-teal-500 rounded"></span> Toolbox
+    </div>
+    <div class="grid md:grid-cols-2 gap-3">
+      <a href="crew_hud_icon_plate.html" class="doc-card">
+        <div class="text-[10px] mono uppercase text-slate-500 mb-1">VOCABULARY</div>
+        <div class="text-sm font-medium text-slate-100">Icon plate</div>
+        <div class="text-xs text-slate-400 mt-1">73 icons · click-to-copy SVG</div>
+      </a>
+      <a href="../research/2026-05-08_crew_hud_design_analysis.md" class="doc-card">
+        <div class="text-[10px] mono uppercase text-slate-500 mb-1">RESEARCH</div>
+        <div class="text-sm font-medium text-slate-100">Design analysis (round 1)</div>
+        <div class="text-xs text-slate-400 mt-1">10-game reference matrix · taxonomy · attention budget · superseded by DA on architecture but research stays valid</div>
+      </a>
+    </div>
+  </section>
+
+  <!-- ─── Historical references — collapsed ─── -->
+  <section class="mb-12">
+    <div class="group-banner faint">
+      <div class="text-[10px] mono uppercase tracking-widest text-slate-500 mb-1">HISTORICAL · CONCEPT EVOLUTION</div>
+      <h2 class="text-base font-bold text-slate-300">Concepts qui ont nourri la DA</h2>
+      <p class="text-slate-500 text-sm mt-1">Conservés comme référence design. Aucun ne ship en l'état — leurs idées sont fondues dans S01/S02.</p>
+    </div>
+    <div class="grid md:grid-cols-2 lg:grid-cols-4 gap-4" id="gallery-historical"></div>
+  </section>
+
+  <!-- Trackers -->
+  <section class="mb-12">
+    <div class="text-[11px] mono uppercase tracking-widest text-slate-500 mb-4 flex items-center gap-2">
+      <span class="w-1 h-4 bg-amber-500 rounded"></span> Related trackers
+    </div>
+    <a href="../trackers/crew_anim_debug_tracker.html" class="doc-card block">
+      <div class="text-[10px] mono uppercase text-slate-500 mb-1">IMPLEMENTATION TRACKER</div>
+      <div class="text-sm font-medium text-slate-100">Crew Animation Debug System</div>
+      <div class="text-xs text-slate-400 mt-1">10 phases · plan 2026-05-08 · debug snapshot + UMG panel + CSV trace</div>
+    </a>
+  </section>
+
+  <footer class="mt-20 pt-6 border-t border-slate-800 text-xs text-slate-600">
+    Round 3 · DA verrouillée · S01 + S02 sont les targets · 5 historiques · governed by ui-pillars.md
+  </footer>
+</div>
+
+<script>
+const SHIP_TARGETS = [
+  {
+    id: "S01", name: "Unified HUD",
+    file: "concept_S01_unified_hud.html",
+    layers: "L1 ambient · L2 Statut hybride carnet · L5 context auto",
+    summary: "Aperçu always-on bottom-right · click ou C → carnet qui sort (slide+rotate). Page Status avec stick figure + 3 bars + hover-membre. Crosshair morphs en icône au look-at, label jaune type/nom apparaît auto à 150ms.",
+    sketch: () => `
+      <svg viewBox="0 0 320 180" preserveAspectRatio="none" width="100%" height="100%">
+        <!-- L5 context -->
+        <text x="160" y="92" text-anchor="middle" font-size="16" fill="#d4b876" font-family="monospace">✱</text>
+        <rect x="172" y="80" width="80" height="22" fill="rgba(8,12,17,.94)" stroke="rgba(244,208,63,.6)" stroke-width="1.5"/>
+        <text x="178" y="89" font-size="6" fill="#f4d03f" font-family="monospace" letter-spacing="2">STATION</text>
+        <text x="178" y="98" font-size="8" fill="#e8e5dc" font-family="sans-serif">Helm console</text>
+        <!-- L1 hotbar -->
+        <g transform="translate(110 154)">
+          <rect width="100" height="14" fill="rgba(24,28,35,.85)" stroke="rgba(42,49,59,.8)"/>
+          <rect x="2" y="2" width="14" height="10" fill="#0e1218" stroke="#d4b876"/>
+          <rect x="18" y="2" width="14" height="10" fill="#0e1218" stroke="#2c333d"/>
+          <rect x="34" y="2" width="14" height="10" fill="#0e1218" stroke="#2c333d"/>
+          <rect x="50" y="2" width="14" height="10" fill="#0e1218" stroke="#2c333d"/>
+          <rect x="66" y="2" width="14" height="10" fill="#0e1218" stroke="#2c333d"/>
+          <rect x="82" y="2" width="14" height="10" fill="#0e1218" stroke="#2c333d"/>
+        </g>
+        <!-- L2 Statut aperçu (closed) -->
+        <g transform="translate(244 132) rotate(-2)">
+          <rect width="58" height="36" fill="#2a1a08" stroke="#1a0e04"/>
+          <rect x="3" y="3" width="52" height="30" fill="#d8c89c" stroke="#8a7148"/>
+          <rect x="6" y="6" width="6" height="8" fill="#2a1a08"/>
+          <rect x="14" y="8" width="3" height="4" fill="#2a1a08"/>
+          <rect x="18" y="8" width="3" height="4" fill="#2a1a08"/>
+          <rect x="22" y="8" width="3" height="4" fill="#2a1a08"/>
+          <rect x="26" y="8" width="3" height="4" fill="rgba(0,0,0,0)" stroke="#5a4528" stroke-width=".4"/>
+          <rect x="30" y="8" width="3" height="4" fill="rgba(0,0,0,0)" stroke="#5a4528" stroke-width=".4"/>
+          <text x="14" y="22" font-size="5" font-family="cursive" fill="#2a1a08">Standing</text>
+          <text x="48" y="14" font-size="6" fill="#b8554a">♥</text>
+        </g>
+      </svg>`
+  },
+  {
+    id: "S02", name: "Station Helm composite",
+    file: "concept_S02_station_helm.html",
+    layers: "L4 station prop hosts multiple terminals",
+    summary: "Distinction station (prop 3D) ≠ terminal (UI). Station Helm embarque 3 terminaux sur le FP : Helm Controls (4 instruments existants conservés), Sensor (depth/speed/tilt), Hull Integrity (vue volumétrique + breach).",
+    sketch: () => `
+      <svg viewBox="0 0 320 180" preserveAspectRatio="none" width="100%" height="100%">
+        <!-- Console frame -->
+        <rect x="20" y="20" width="280" height="140" fill="#1a1f24" stroke="#11151b" stroke-width="2" rx="6"/>
+        <rect x="22" y="22" width="276" height="6" fill="rgba(74,82,96,.4)"/>
+        <!-- Sensor terminal -->
+        <rect x="32" y="36" width="70" height="50" fill="#0d201d" stroke="#0a1816"/>
+        <text x="36" y="44" font-size="5" fill="rgba(174,220,205,.6)" font-family="monospace" letter-spacing="1">SENSOR</text>
+        <line x1="36" y1="50" x2="60" y2="50" stroke="rgba(174,220,205,.5)"/>
+        <text x="36" y="58" font-size="6" fill="#aedccd" font-family="monospace">−1240m</text>
+        <text x="36" y="66" font-size="6" fill="#aedccd" font-family="monospace">047°</text>
+        <text x="36" y="74" font-size="6" fill="#aedccd" font-family="monospace">6.2 kn</text>
+        <!-- Hull Integrity terminal -->
+        <rect x="200" y="36" width="90" height="68" fill="#0d201d" stroke="#0a1816"/>
+        <text x="204" y="44" font-size="5" fill="rgba(174,220,205,.6)" font-family="monospace" letter-spacing="1">INTEGRITY</text>
+        <path d="M 210 70 Q 215 60 230 60 L 280 60 Q 285 60 285 75 Q 285 88 280 90 L 215 90 Q 210 88 210 75 Z"
+              fill="rgba(109,180,163,.18)" stroke="rgba(174,220,205,.6)"/>
+        <line x1="232" y1="60" x2="232" y2="90" stroke="rgba(174,220,205,.4)" stroke-dasharray="1 1"/>
+        <line x1="252" y1="60" x2="252" y2="90" stroke="rgba(174,220,205,.4)" stroke-dasharray="1 1"/>
+        <rect x="232" y="60" width="20" height="30" fill="rgba(200,152,104,.3)"/>
+        <circle cx="240" cy="73" r="2" fill="#b8554a"/>
+        <!-- Helm Controls terminal -->
+        <rect x="32" y="96" width="160" height="56" fill="#0d201d" stroke="#0a1816"/>
+        <text x="36" y="104" font-size="5" fill="rgba(174,220,205,.6)" font-family="monospace" letter-spacing="1">HELM CONTROLS · 4 INSTRUMENTS</text>
+        <g transform="translate(40 110)">
+          <circle cx="14" cy="20" r="14" fill="rgba(0,0,0,.4)" stroke="rgba(174,220,205,.4)"/>
+          <line x1="14" y1="20" x2="22" y2="14" stroke="#d4b876" stroke-width="1.2"/>
+        </g>
+        <g transform="translate(78 110)">
+          <line x1="0" y1="20" x2="28" y2="20" stroke="rgba(174,220,205,.4)"/>
+          <circle cx="14" cy="20" r="7" fill="none" stroke="rgba(174,220,205,.5)"/>
+        </g>
+        <g transform="translate(116 112)">
+          <rect width="28" height="28" fill="rgba(0,0,0,.4)" stroke="rgba(174,220,205,.3)"/>
+          <circle cx="20" cy="18" r="2" fill="#d4b876"/>
+        </g>
+        <g transform="translate(154 112)">
+          <rect width="28" height="28" fill="rgba(184,85,74,.15)" stroke="#b8554a"/>
+          <text x="14" y="18" text-anchor="middle" font-size="5" fill="#b8554a" font-family="monospace">KILL</text>
+        </g>
+      </svg>`
+  }
+];
+
+const HISTORICAL = [
+  {
+    id: "C03", name: "Wrist Slate",
+    file: "concept_C03_wrist_slate.html",
+    fate: "Mouvement diégétique → fondu dans S01 L2",
+    sketch: () => `<svg viewBox="0 0 320 180" preserveAspectRatio="none" width="100%" height="100%">
+      <g transform="translate(40 110) rotate(-8)">
+        <rect width="160" height="100" rx="8" fill="rgba(26,53,48,.9)" stroke="rgba(174,220,205,.4)"/>
+        <rect x="6" y="6" width="148" height="88" rx="4" fill="rgba(13,32,28,.8)"/>
+        <line x1="20" y1="30" x2="60" y2="30" stroke="rgba(174,220,205,.6)"/>
+        <line x1="20" y1="46" x2="120" y2="46" stroke="rgba(174,220,205,.4)"/>
+      </g></svg>`
+  },
+  {
+    id: "C04", name: "Contextual Bloom",
+    file: "concept_C04_contextual_bloom.html",
+    fate: "Label type/nom jaune gardé → L5. Cards dropped",
+    sketch: () => `<svg viewBox="0 0 320 180" preserveAspectRatio="none" width="100%" height="100%">
+      <rect x="138" y="68" width="50" height="50" fill="none" stroke="rgba(212,184,118,.5)"/>
+      <line x1="138" y1="68" x2="80" y2="34" stroke="rgba(212,184,118,.3)" stroke-dasharray="3 4"/>
+      <line x1="188" y1="68" x2="240" y2="34" stroke="rgba(212,184,118,.3)" stroke-dasharray="3 4"/>
+      <rect x="40" y="22" width="80" height="24" fill="rgba(24,28,35,.9)" stroke="rgba(212,184,118,.4)"/>
+      <rect x="200" y="22" width="80" height="24" fill="rgba(24,28,35,.9)" stroke="rgba(212,184,118,.4)"/></svg>`
+  },
+  {
+    id: "W-Notebook", name: "Submariner's Notebook",
+    file: "concept_W_notebook.html",
+    fate: "Forme carnet + pages → fondu dans S01 L2",
+    sketch: () => `<svg viewBox="0 0 320 180" preserveAspectRatio="none" width="100%" height="100%">
+      <g transform="translate(60 60)">
+        <rect width="200" height="86" fill="#2a1a08" stroke="#1a0e04"/>
+        <rect x="6" y="6" width="92" height="74" fill="#d8c89c"/>
+        <rect x="102" y="6" width="92" height="74" fill="#d8c89c"/>
+        <line x1="100" y1="0" x2="100" y2="86" stroke="#1a0e04" stroke-width="2"/>
+      </g></svg>`
+  },
+  {
+    id: "W-StationTerminal", name: "Compartment Terminal",
+    file: "concept_W_stationterminal.html",
+    fate: "Distinction station/terminal → S02 L4",
+    sketch: () => `<svg viewBox="0 0 320 180" preserveAspectRatio="none" width="100%" height="100%">
+      <g transform="translate(80 50)">
+        <rect width="160" height="90" fill="#0d201d" stroke="#11151b" stroke-width="3"/>
+        <line x1="14" y1="20" x2="100" y2="20" stroke="#aedccd"/>
+        <line x1="14" y1="34" x2="140" y2="34" stroke="#aedccd" opacity=".5"/>
+        <line x1="14" y1="46" x2="120" y2="46" stroke="#aedccd" opacity=".5"/>
+      </g></svg>`
+  },
+  {
+    id: "G-CornerPips", name: "Corner Pips (standby)",
+    file: "concept_G_cornerpips.html",
+    fate: "STANDBY — réintégrable plus tard pour alertes critiques L1",
+    standby: true,
+    sketch: () => `<svg viewBox="0 0 320 180" preserveAspectRatio="none" width="100%" height="100%">
+      <rect x="14" y="14" width="80" height="22" fill="rgba(24,28,35,.9)" stroke="rgba(109,180,163,.5)"/>
+      <rect x="226" y="14" width="80" height="22" fill="rgba(24,28,35,.9)" stroke="rgba(200,152,104,.6)"/>
+      <rect x="14" y="144" width="80" height="22" fill="rgba(24,28,35,.9)" stroke="rgba(184,85,74,.7)"/>
+      <rect x="226" y="144" width="80" height="22" fill="rgba(24,28,35,.9)" stroke="rgba(109,180,163,.5)"/></svg>`
+  }
+];
+
+document.getElementById("gallery-ship").innerHTML = SHIP_TARGETS.map(c => `
+  <a href="${c.file}" class="card featured">
+    <div class="card-preview">${c.sketch()}</div>
+    <div class="p-5 flex-1 flex flex-col">
+      <div class="flex items-center justify-between mb-2">
+        <span class="mono text-[11px] uppercase tracking-widest text-amber-400 font-bold">${c.id}</span>
+        <span class="tag tag-ship">★ ship target</span>
+      </div>
+      <h3 class="text-lg font-bold text-white mb-1">${c.name}</h3>
+      <div class="text-[10px] mono uppercase tracking-wider text-amber-300/70 mb-2">${c.layers}</div>
+      <p class="text-xs text-slate-400 leading-relaxed flex-1">${c.summary}</p>
+      <div class="mt-3 flex items-center justify-end text-[10px] mono">
+        <span class="text-amber-400">open ▸</span>
+      </div>
+    </div>
+  </a>
+`).join("");
+
+document.getElementById("gallery-historical").innerHTML = HISTORICAL.map(c => `
+  <a href="${c.file}" class="card ${c.standby ? '' : 'superseded'}">
+    <div class="card-preview">${c.sketch()}</div>
+    <div class="p-3 flex-1 flex flex-col">
+      <div class="flex items-center justify-between mb-1">
+        <span class="mono text-[10px] uppercase tracking-widest text-slate-500">${c.id}</span>
+        <span class="tag ${c.standby ? 'tag-standby' : 'tag-historical'}">${c.standby ? 'standby' : 'historical'}</span>
+      </div>
+      <h3 class="text-sm font-medium text-slate-300 mb-1">${c.name}</h3>
+      <p class="text-[11px] text-slate-500 leading-relaxed flex-1">${c.fate}</p>
+    </div>
+  </a>
+`).join("");
+</script>
+</body>
+</html>

@@ -1,0 +1,538 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Sub3D · Asset Library</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+<script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+<script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+<script src="./assets-data.js"></script>
+<style>
+  :root {
+    --bg-deep:#0a0d12; --panel:#181c23; --panel-soft:#1d222a; --border:#2a313b; --border-hi:#3a4452;
+    --text:#d8d4ca; --dim:#8d9095; --faint:#5e636a;
+    --teal:#6db4a3; --amber:#c89868; --gold:#d4b876; --leaf:#87a86b; --crimson:#b8554a;
+    --ctx-yellow:#f4d03f;
+    --acier-brosse:#4A4E52; --vert-hopital:#8FB80C; --jaune-securite:#C8AA45;
+    --rouge-minium:#80363F; --caoutchouc:#1A1A1A; --cuivre-laiton:#A57212;
+  }
+  body { background: var(--bg-deep); color: var(--text); font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+  .mono { font-family: "JetBrains Mono", Consolas, monospace; }
+  .grid-bg {
+    background-image:
+      linear-gradient(rgba(148,163,184,.04) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(148,163,184,.04) 1px, transparent 1px);
+    background-size: 24px 24px;
+  }
+  .card {
+    background: var(--panel); border: 1px solid var(--border); border-radius: 6px;
+    overflow: hidden; transition: transform .15s, border-color .15s;
+    cursor: pointer; display: flex; flex-direction: column;
+  }
+  .card:hover { transform: translateY(-3px); border-color: var(--teal); }
+  .card-preview {
+    aspect-ratio: 4 / 3;
+    background: radial-gradient(ellipse at 50% 38%, #14202a 0%, #0a1218 38%, #050709 80%), var(--bg-deep);
+    border-bottom: 1px solid var(--border);
+    position: relative; overflow: hidden;
+    display: flex; align-items: center; justify-content: center;
+  }
+  .card-preview img { width: 100%; height: 100%; object-fit: cover; }
+  .placeholder-icon {
+    color: var(--faint); font-family: "JetBrains Mono", monospace;
+    font-size: 12px; letter-spacing: .15em; text-transform: uppercase;
+  }
+  .tag {
+    display: inline-block; padding: 1px 7px;
+    font-family: "JetBrains Mono", monospace;
+    font-size: 9px; letter-spacing: .12em; text-transform: uppercase;
+    border-radius: 2px;
+  }
+  .tag-draft   { background: rgba(141,144,149,.12); color: var(--dim); border: 1px solid rgba(141,144,149,.2); }
+  .tag-concept { background: rgba(109,180,163,.18); color: var(--teal); border: 1px solid rgba(109,180,163,.35); }
+  .tag-model   { background: rgba(200,152,104,.18); color: var(--amber); border: 1px solid rgba(200,152,104,.35); }
+  .tag-shipped { background: rgba(212,184,118,.18); color: var(--gold); border: 1px solid rgba(212,184,118,.35); }
+  .tab-btn {
+    padding: 8px 16px; font-family: "JetBrains Mono", monospace;
+    font-size: 11px; letter-spacing: .12em; text-transform: uppercase;
+    color: var(--dim); border-bottom: 2px solid transparent;
+    cursor: pointer; transition: color .15s, border-color .15s;
+    white-space: nowrap; user-select: none;
+  }
+  .tab-btn:hover { color: var(--text); }
+  .tab-btn.active { color: var(--gold); border-bottom-color: var(--gold); }
+  .tab-count {
+    display: inline-block; margin-left: 8px; padding: 1px 6px;
+    background: rgba(255,255,255,.05); border-radius: 8px; font-size: 10px;
+  }
+  .modal-bg {
+    position: fixed; inset: 0; background: rgba(5,7,9,.85);
+    backdrop-filter: blur(4px); z-index: 50;
+    display: flex; align-items: center; justify-content: center; padding: 24px;
+  }
+  .modal-content {
+    background: var(--panel); border: 1px solid var(--border-hi);
+    border-radius: 8px; max-width: 800px; width: 100%;
+    max-height: 90vh; overflow-y: auto;
+  }
+  .prompt-block {
+    background: #0c0f14; border: 1px solid var(--border);
+    border-radius: 4px; padding: 12px;
+    font-family: "JetBrains Mono", Consolas, monospace;
+    font-size: 11px; color: var(--text);
+    white-space: pre-wrap; word-break: break-word;
+    max-height: 220px; overflow-y: auto;
+  }
+  .swatch-tile {
+    background: var(--panel-soft);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 10px;
+  }
+</style>
+</head>
+<body class="grid-bg">
+
+<div id="root"></div>
+
+<script type="text/babel">
+const { useState, useEffect, useMemo } = React;
+const { createRoot } = ReactDOM;
+
+const TABS = [
+  { id: "overview",        label: "Overview" },
+  { id: "scale",           label: "Scale" },
+  { id: "character",       label: "Characters" },
+  { id: "wearable",        label: "Wearables" },
+  { id: "held_tool",       label: "Tools" },
+  { id: "set_dressing",    label: "Dressing" },
+  { id: "sub_fixture",     label: "Fixtures" },
+  { id: "abyss_exterior",  label: "Exterior" },
+];
+
+const STATUS_LABELS = { draft: "draft", concept_done: "concept", model_done: "model", in_game: "shipped" };
+const STATUS_TAG    = { draft: "tag-draft", concept_done: "tag-concept", model_done: "tag-model", in_game: "tag-shipped" };
+
+function scaleSummary(s) {
+  if (!s) return "";
+  const parts = [];
+  if (s.length_cm)    parts.push(`${s.length_cm}cm`);
+  if (s.height_cm)    parts.push(`h${s.height_cm}cm`);
+  if (s.diameter_cm)  parts.push(`Ø${s.diameter_cm}cm`);
+  if (s.weight_g)     parts.push(`${s.weight_g}g`);
+  if (s.two_handed)   parts.push("2H");
+  if (s.fits_through_door === false) parts.push("⚠ door");
+  if (s.exterior_only) parts.push("ext-only");
+  return parts.join(" · ");
+}
+
+function Header() {
+  return (
+    <header className="mb-8">
+      <div className="text-xs text-slate-500 mb-2 mono">
+        Sub3D · 2026-05-09 · branch <span className="text-slate-400">water-proto</span>
+      </div>
+      <h1 className="text-4xl font-bold text-white mb-3">Asset Library</h1>
+      <p className="text-slate-400 max-w-3xl text-sm leading-relaxed">
+        Pipeline parallèle Meshy → 3D mesh. Hand-painted PBR low-poly stylized, palette canonique Sub3D, Surcouf 1929 inspiré.
+        Sources DA : color sheet · crew lineup · creatures concepts · blockout brief.
+        Plan complet : <a className="text-amber-400 hover:underline" href="../plans/2026-05-09_meshy_asset_pipeline_plan.md">2026-05-09 Meshy asset pipeline plan</a>.
+      </p>
+    </header>
+  );
+}
+
+function TabNav({ activeTab, setActiveTab, items }) {
+  const counts = useMemo(() => {
+    const m = {};
+    items.forEach(i => { m[i.category] = (m[i.category] || 0) + 1; });
+    return m;
+  }, [items]);
+
+  return (
+    <div className="border-b border-slate-800 mb-6 overflow-x-auto">
+      <div className="flex gap-1">
+        {TABS.map(t => (
+          <div
+            key={t.id}
+            className={"tab-btn " + (activeTab === t.id ? "active" : "")}
+            onClick={() => setActiveTab(t.id)}
+          >
+            {t.label}
+            {counts[t.id] !== undefined && <span className="tab-count">{counts[t.id]}</span>}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function OverviewTab() {
+  const palette = [
+    { name: "Acier brossé",    hex: "#4A4E52" },
+    { name: "Acier oxydé",     hex: "#8C5A3A" },
+    { name: "Vert hôpital",    hex: "#8FB80C" },
+    { name: "Jaune sécurité",  hex: "#C8AA45" },
+    { name: "Rouge minium",    hex: "#80363F" },
+    { name: "Caoutchouc",      hex: "#1A1A1A" },
+    { name: "Cuivre/laiton",   hex: "#A57212" },
+  ];
+  const emissive = [
+    { name: "Tungstène 2700K", hex: "#FFC891" },
+    { name: "CRT phosphore",   hex: "#7CC57A" },
+    { name: "LED rouge alarme", hex: "#C8332D" },
+    { name: "Cyan biolumin.",   hex: "#69E5F0" },
+    { name: "Néon blanc",       hex: "#E8F0FF" },
+  ];
+  const archetypes = [
+    { id: 1, name: "Pilot / Helm", look: "Dark blue jumpsuit · headset · weathered worker (45-55)", role: "Cockpit" },
+    { id: 2, name: "Engineer",     look: "Orange jumpsuit weathered · hard hat jaune · heavyset variant", role: "Salle machines" },
+    { id: 3, name: "Medic",        look: "Cream jumpsuit · Red Cross arm patch · stoic worker", role: "Zone médicale" },
+    { id: 4, name: "EVA / Diver",  look: "Dark wetsuit + yellow stripes · veteran diver", role: "Sortie extérieure" },
+    { id: 5, name: "Captain",      look: "Olive coat · grey beard · pipe · calm authority", role: "Command" },
+  ];
+  const sources = [
+    { label: "Color sheet (palette + zones)",  path: "C:/ACC/Projects/Sub3D/Image & Concept/ChatGPT Image 5 mai 2026, 10_40_11.png" },
+    { label: "Crew lineup (5 archetypes)",     path: "C:/ACC/Projects/Sub3D/Image & Concept/ChatGPT Image 5 mai 2026, 10_40_15.png" },
+    { label: "Hostile creatures concepts",     path: "C:/ACC/Projects/Sub3D/Image & Concept/Mobs/" },
+    { label: "Sub blockout brief",             path: "../Sub3D_Submarine_Blockout_Brief.md" },
+    { label: "Plan complet pipeline",          path: "../plans/2026-05-09_meshy_asset_pipeline_plan.md" },
+    { label: "Mood board prompts (M01-M06)",   path: "moodboard_prompts.md" },
+    { label: "README workflow",                path: "README.md" },
+  ];
+
+  return (
+    <div className="space-y-8">
+      <section>
+        <h2 className="text-lg font-bold text-white mb-3">Visual target</h2>
+        <p className="text-sm text-slate-400 leading-relaxed max-w-3xl">
+          Hand-painted PBR low-poly stylized, game-ready UE5. Stylized proportions <code className="text-amber-400 mono">1:6.5</code> (NOT realistic 1:7.5, NOT Marvel 1:8, NOT cartoon, NOT anime).
+          Compact muscular worker bodies, NOT slim athletic, NOT gym-muscular. Character over beauty.
+          Submarine inspiré Surcouf class 1929 (diesel-electric français).
+        </p>
+      </section>
+
+      <section>
+        <h2 className="text-lg font-bold text-white mb-3">Body template (male base)</h2>
+        <div className="swatch-tile space-y-2 text-sm leading-relaxed">
+          <div><strong className="text-white">Proportions</strong> — 1.78m, head:body <code className="text-amber-400 mono">1:6.5</code> (slightly stylized). Broad shoulders, thick neck, solid chest. Compact muscular <em>worker</em> (NOT slim, NOT gym).</div>
+          <div><strong className="text-white">Age default</strong> — 40-55 ans, weathered submarine worker. Strong jaw, deep-set tired eyes, weathered creases.</div>
+          <div><strong className="text-white">FPS hands</strong> — +10% oversized for readability. Knuckle detail visible, calloused worker hands.</div>
+          <div><strong className="text-white">Skin</strong> — weathered dark, fatigue visible. Roughness 0.72-0.80, metallic 0.0.</div>
+          <div><strong className="text-white">Persona</strong> — <em>character over beauty</em>. NOT generic, NOT young, NOT idealized.</div>
+          <div><strong className="text-white">Tech</strong> — stylized low-poly + sharp edge loops · 3500 tris max · UE5 Epic skeleton · T-pose · sockets neck/wrists/ankles · 2048×2048 PBR atlas · FBX.</div>
+          <div className="text-xs text-slate-500 mt-2">Female base body : à valider scope FP — même template adapted si retenu (1 medic femme dans crew lineup).</div>
+        </div>
+      </section>
+
+      <section>
+        <h2 className="text-lg font-bold text-white mb-3">Prompt format adopté</h2>
+        <div className="swatch-tile text-sm leading-relaxed">
+          <div className="text-slate-400 mb-2">Section-based — plus précis et reproducible que paragraphes flat. Source : user template 2026-05-09.</div>
+          <div className="mono text-xs text-amber-300 space-y-0.5">
+            <div>PROPORTIONS</div>
+            <div>SKIN / MATERIALS</div>
+            <div>FACE / DETAIL</div>
+            <div>HANDS</div>
+            <div>TECHNICAL (poly count, atlas, format, sockets)</div>
+          </div>
+          <div className="text-slate-500 text-xs mt-2">Voir <code className="text-amber-400">char_body_male</code> dans tab Characters pour le template canonique complet.</div>
+        </div>
+      </section>
+
+      <section>
+        <h2 className="text-lg font-bold text-white mb-3">Palette principale</h2>
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+          {palette.map(p => (
+            <div key={p.hex} className="swatch-tile">
+              <div className="w-full h-8 rounded mb-2" style={{ background: p.hex, border: "1px solid #00000040" }} />
+              <div className="text-xs text-slate-300 font-medium">{p.name}</div>
+              <div className="text-[10px] mono text-slate-500">{p.hex}</div>
+            </div>
+          ))}
+        </div>
+      </section>
+
+      <section>
+        <h2 className="text-lg font-bold text-white mb-3">Éclairages émissifs</h2>
+        <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+          {emissive.map(p => (
+            <div key={p.hex} className="swatch-tile">
+              <div className="w-full h-6 rounded mb-2" style={{ background: p.hex, boxShadow: `0 0 12px ${p.hex}88` }} />
+              <div className="text-xs text-slate-300 font-medium">{p.name}</div>
+              <div className="text-[10px] mono text-slate-500">{p.hex}</div>
+            </div>
+          ))}
+        </div>
+      </section>
+
+      <section>
+        <h2 className="text-lg font-bold text-white mb-3">Crew archétypes (5)</h2>
+        <div className="space-y-2">
+          {archetypes.map(a => (
+            <div key={a.id} className="swatch-tile flex items-start gap-4">
+              <span className="mono text-amber-400 text-sm w-6 flex-shrink-0">{a.id}</span>
+              <div className="flex-1">
+                <div className="text-sm font-medium text-white">{a.name}</div>
+                <div className="text-xs text-slate-400 mt-1">{a.look}</div>
+              </div>
+              <div className="text-[10px] mono text-slate-500 uppercase tracking-wider">{a.role}</div>
+            </div>
+          ))}
+        </div>
+      </section>
+
+      <section>
+        <h2 className="text-lg font-bold text-white mb-3">Sources canoniques</h2>
+        <div className="space-y-1">
+          {sources.map(s => (
+            <div key={s.path} className="swatch-tile flex justify-between items-center gap-3">
+              <div className="text-sm text-slate-300">{s.label}</div>
+              <code className="text-[10px] mono text-slate-500 truncate">{s.path}</code>
+            </div>
+          ))}
+        </div>
+      </section>
+
+      <section>
+        <h2 className="text-lg font-bold text-white mb-3">Workflow</h2>
+        <ol className="text-sm text-slate-400 space-y-1 list-decimal list-inside">
+          <li>Mood board (priorité 1) — générer M01-M06 via <code className="text-amber-400">moodboard_prompts.md</code></li>
+          <li>Item concept — text-to-image par item, sauve dans <code className="text-amber-400">concepts/</code></li>
+          <li>Item mesh — Meshy image-to-3D, mesh dans <code className="text-amber-400">Content/Sub3D/Assets/Meshy/</code></li>
+          <li>Status update — éditer <code className="text-amber-400">assets-data.js</code> draft → concept → model → in_game</li>
+          <li>UE integration — row dans <code className="text-amber-400">DT_ItemUIRequests</code> (post-FP)</li>
+        </ol>
+      </section>
+    </div>
+  );
+}
+
+function ScaleTab() {
+  const refs = [
+    { name: "DOOR",    value: 185, color: "#C8AA45" },
+    { name: "CREW",    value: 178, color: "#6db4a3" },
+    { name: "CONSOLE", value: 120, color: "#4A4E52" },
+    { name: "CRATE",   value: 60,  color: "#A57212" },
+    { name: "VALVE",   value: 25,  color: "#80363F" },
+    { name: "GRIP",    value: 8,   color: "#d8d4ca" },
+  ];
+  const maxV = 200;
+
+  return (
+    <div className="space-y-6">
+      <section>
+        <h2 className="text-lg font-bold text-white mb-2">Scale references</h2>
+        <p className="text-sm text-slate-400 max-w-2xl">
+          Door 185cm est la primitive. Tout asset interactif passe par la porte (sauf démontage explicite).
+          Crew height 178cm — slim athletic default.
+        </p>
+      </section>
+
+      <section className="swatch-tile p-6">
+        <svg viewBox="0 0 600 280" className="w-full h-auto">
+          {[0, 50, 100, 150, 200].map(y => (
+            <g key={y}>
+              <line x1="60" y1={260 - (y * 220 / maxV)} x2="580" y2={260 - (y * 220 / maxV)}
+                    stroke="rgba(148,163,184,.08)" strokeDasharray="2 4" />
+              <text x="50" y={265 - (y * 220 / maxV)} textAnchor="end" fontSize="9"
+                    fill="#5e636a" fontFamily="monospace">{y}cm</text>
+            </g>
+          ))}
+          <line x1="60" y1="260" x2="580" y2="260" stroke="#3a4452" strokeWidth="1" />
+          {refs.map((r, i) => {
+            const x = 100 + i * 80;
+            const h = (r.value * 220) / maxV;
+            return (
+              <g key={r.name}>
+                <rect x={x - 18} y={260 - h} width="36" height={h} fill={r.color} stroke="#00000060" />
+                <text x={x} y={272} textAnchor="middle" fontSize="9" fill="#8d9095" fontFamily="monospace">{r.value}cm</text>
+                <text x={x} y={258 - h - 4} textAnchor="middle" fontSize="9"
+                      fill="#d8d4ca" fontFamily="monospace" letterSpacing="1">{r.name}</text>
+              </g>
+            );
+          })}
+        </svg>
+      </section>
+
+      <section>
+        <h2 className="text-lg font-bold text-white mb-3">Rules</h2>
+        <ul className="text-sm text-slate-400 space-y-2 list-disc pl-6">
+          <li><strong className="text-white">Fits through door</strong> — every asset under 90×185cm bounding box, otherwise demountable.</li>
+          <li><strong className="text-white">Two-handed</strong> — items {`>`} 1500g or {`>`} 50cm long are flagged <code className="text-amber-400">two_handed=true</code>.</li>
+          <li><strong className="text-white">Exterior only</strong> — creatures, wreck pieces flagged <code className="text-amber-400">exterior_only=true</code>.</li>
+          <li><strong className="text-white">Body proportions</strong> — crew 178cm, slim shoulders ~45cm wide, head ~24cm tall.</li>
+        </ul>
+      </section>
+    </div>
+  );
+}
+
+function ItemCard({ item, onClick }) {
+  const status = item.status || "draft";
+  return (
+    <div className="card" onClick={() => onClick(item)}>
+      <div className="card-preview">
+        {item.preview_url
+          ? <img src={item.preview_url} alt={item.name} />
+          : <div className="placeholder-icon">CONCEPT TBD</div>}
+      </div>
+      <div className="p-4 flex-1 flex flex-col">
+        <div className="flex items-center justify-between mb-2">
+          <span className="mono text-[10px] uppercase tracking-widest text-slate-500">{item.id}</span>
+          <span className={"tag " + STATUS_TAG[status]}>{STATUS_LABELS[status]}</span>
+        </div>
+        <h3 className="text-sm font-bold text-white mb-1">{item.name}</h3>
+        {item.name_fr && <div className="text-xs text-slate-500 mb-2">{item.name_fr}</div>}
+        <div className="flex flex-wrap gap-1 mb-2">
+          {(item.tags || []).slice(0, 3).map(t => (
+            <span key={t} className="text-[9px] mono text-slate-400 bg-slate-800 px-1.5 py-0.5 rounded">{t}</span>
+          ))}
+        </div>
+        <div className="text-[10px] mono text-slate-500 mt-auto">{scaleSummary(item.scale)}</div>
+      </div>
+    </div>
+  );
+}
+
+function CategoryTab({ items, category, onCardClick }) {
+  const filtered = items.filter(i => i.category === category);
+  if (filtered.length === 0) {
+    return (
+      <div className="text-slate-500 text-sm py-12 text-center">
+        Aucun item dans cette catégorie pour le moment. Voir le plan §4 pour les counts cibles.
+        <br />
+        Ajouter un item : éditer <code className="text-amber-400">assets-data.js</code> et reload la page.
+      </div>
+    );
+  }
+  return (
+    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+      {filtered.map(i => <ItemCard key={i.id} item={i} onClick={onCardClick} />)}
+    </div>
+  );
+}
+
+function ItemModal({ item, onClose }) {
+  if (!item) return null;
+  const copy = (text) => { navigator.clipboard.writeText(text); };
+  const status = item.status || "draft";
+
+  return (
+    <div className="modal-bg" onClick={onClose}>
+      <div className="modal-content" onClick={e => e.stopPropagation()}>
+        <div className="p-6 space-y-5">
+          <div className="flex items-start justify-between">
+            <div>
+              <div className="mono text-[10px] uppercase tracking-widest text-slate-500 mb-1">{item.id}</div>
+              <h2 className="text-2xl font-bold text-white">{item.name}</h2>
+              {item.name_fr && <div className="text-sm text-slate-500 mt-1">{item.name_fr}</div>}
+            </div>
+            <button onClick={onClose} className="text-slate-400 hover:text-white text-2xl leading-none px-2">×</button>
+          </div>
+
+          <div className="grid grid-cols-2 gap-3 text-xs">
+            <div>
+              <div className="text-slate-500 mono uppercase tracking-wider mb-1">Category</div>
+              <div className="text-slate-300">{item.category}</div>
+            </div>
+            <div>
+              <div className="text-slate-500 mono uppercase tracking-wider mb-1">Status</div>
+              <div><span className={"tag " + STATUS_TAG[status]}>{STATUS_LABELS[status]}</span></div>
+            </div>
+            <div className="col-span-2">
+              <div className="text-slate-500 mono uppercase tracking-wider mb-1">Scale</div>
+              <div className="text-slate-300 mono">{scaleSummary(item.scale) || "—"}</div>
+            </div>
+            <div className="col-span-2">
+              <div className="text-slate-500 mono uppercase tracking-wider mb-1">Tags</div>
+              <div className="flex flex-wrap gap-1">
+                {(item.tags || []).map(t => (
+                  <span key={t} className="text-[10px] mono text-slate-300 bg-slate-800 px-2 py-0.5 rounded">{t}</span>
+                ))}
+              </div>
+            </div>
+            {item.materials && (
+              <div className="col-span-2">
+                <div className="text-slate-500 mono uppercase tracking-wider mb-1">Materials</div>
+                <div className="text-slate-300 text-xs">{item.materials.join(" · ")}</div>
+              </div>
+            )}
+          </div>
+
+          {item.concept_prompt && (
+            <div>
+              <div className="flex items-center justify-between mb-1">
+                <div className="text-slate-500 mono uppercase tracking-wider text-xs">Concept prompt (text-to-image)</div>
+                <button onClick={() => copy(item.concept_prompt)} className="text-[10px] mono text-amber-400 hover:text-amber-300 px-2">copy</button>
+              </div>
+              <div className="prompt-block">{item.concept_prompt}</div>
+            </div>
+          )}
+
+          {item.meshy_3d_prompt && (
+            <div>
+              <div className="flex items-center justify-between mb-1">
+                <div className="text-slate-500 mono uppercase tracking-wider text-xs">Meshy 3D prompt (image-to-3D)</div>
+                <button onClick={() => copy(item.meshy_3d_prompt)} className="text-[10px] mono text-amber-400 hover:text-amber-300 px-2">copy</button>
+              </div>
+              <div className="prompt-block">{item.meshy_3d_prompt}</div>
+            </div>
+          )}
+
+          {item.ui_request && (
+            <div>
+              <div className="text-slate-500 mono uppercase tracking-wider text-xs mb-1">UI request (item-driven panel)</div>
+              <div className="prompt-block">{JSON.stringify(item.ui_request, null, 2)}</div>
+            </div>
+          )}
+
+          {item.notes && (
+            <div>
+              <div className="text-slate-500 mono uppercase tracking-wider text-xs mb-1">Notes</div>
+              <div className="text-sm text-slate-400 leading-relaxed">{item.notes}</div>
+            </div>
+          )}
+
+          {item.references && item.references.length > 0 && (
+            <div>
+              <div className="text-slate-500 mono uppercase tracking-wider text-xs mb-1">References</div>
+              <div className="text-sm text-slate-400">{item.references.join(", ")}</div>
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function App() {
+  const [activeTab, setActiveTab] = useState("overview");
+  const [modalItem, setModalItem] = useState(null);
+  const data = window.SUB3D_ASSETS || { items: [] };
+  const items = data.items || [];
+
+  let content;
+  if (activeTab === "overview")        content = <OverviewTab />;
+  else if (activeTab === "scale")      content = <ScaleTab />;
+  else                                  content = <CategoryTab items={items} category={activeTab} onCardClick={setModalItem} />;
+
+  return (
+    <div className="max-w-7xl mx-auto p-6 md:p-10">
+      <Header />
+      <TabNav activeTab={activeTab} setActiveTab={setActiveTab} items={items} />
+      <div className="mt-6">{content}</div>
+      <ItemModal item={modalItem} onClose={() => setModalItem(null)} />
+      <footer className="mt-20 pt-6 border-t border-slate-800 text-xs text-slate-600">
+        Sub3D · Asset Library · {data.last_updated || "2026-05-09"} · {items.length} items · sources canoniques color sheet + crew lineup + creatures + Surcouf brief
+      </footer>
+    </div>
+  );
+}
+
+createRoot(document.getElementById("root")).render(<App />);
+</script>
+</body>
+</html>

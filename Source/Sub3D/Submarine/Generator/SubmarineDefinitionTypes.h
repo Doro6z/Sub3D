@@ -78,31 +78,23 @@ struct FGeneratedCompartmentDef
 	float CapacityLiters = 0.f;
 
 	/**
-	 * Compartment bounding box, submarine-local space. CONTRACT:
-	 *   - Must FULLY ENCLOSE the compartment's interior geometry: hull walls,
-	 *     bulkheads, ceiling, floor, props.
-	 *   - Must STOP at structural boundaries: doors, bulkheads to neighbouring
-	 *     compartments, decks above/below. The volume must NOT extend into
-	 *     adjacent compartments (the bake's SDF + Marching Squares would then
-	 *     pick up neighbour walls as if they were boundaries of THIS compartment).
-	 *   - X/Y: clip exactly at door/bulkhead planes shared with adjacent compartments.
-	 *   - Z:   clip exactly at the deck above/below (with a small margin like ±5 cm
-	 *          to ensure floor/ceiling geometry is captured by voxelisation).
+	 * DEPRECATED 2026-05-10 — Option B refactor.
 	 *
-	 * This bounds drives:
-	 *   1. Auto-spawn of UCompartmentVolumeComponent (crew overlap detection,
-	 *      water plane sizing) — see ASubmarineBase::EnsureCompartmentVolumesFromDefinition.
-	 *   2. Phase 2 offline bake voxelisation volume (cap mesh generation).
+	 * No longer read at runtime. UCompartmentVolumeComponent (placed manually in BP) is the
+	 * single source of truth for compartment geometry. All live consumers go through
+	 * ASubmarineBase::FindCompartmentIdAtLocalLocation (lookup) and
+	 * ASubmarineBase::GetCompartmentLocalBounds (AABB).
 	 *
-	 * Common authoring mistake: setting Z range to [WalkableFloorZCm,
-	 * WalkableFloorZCm + MaxWaterHeightCm]. That captures water-volume only,
-	 * which is INSUFFICIENT — the volume must include the walkable headroom
-	 * above the water cap up to the ceiling.
+	 * The fields are kept in the struct only because the paused Generator pipeline
+	 * (SubmarineGenerator / SubmarineMeshBuilder / SubmarineAuthoringActors) still writes
+	 * them. Existing values in DA_SubDef_Craniata are stale and harmless — feel free to
+	 * zero them out or ignore them. Will be removed entirely in the post-FP SubDef
+	 * simplification refacto.
 	 */
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Compartment")
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Compartment|Deprecated")
 	FVector HydroBoundsMin = FVector::ZeroVector;
 
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Compartment")
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Compartment|Deprecated")
 	FVector HydroBoundsMax = FVector::ZeroVector;
 
 	/**

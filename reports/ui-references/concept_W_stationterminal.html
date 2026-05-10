@@ -1,0 +1,245 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<title>Sub3D · W-StationTerminal — Diegetic compartment terminals</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<style>
+  :root { --bg-deep:#0a0d12; --panel:#181c23; --border:#2a313b; --border-hi:#3a4452; --text:#d8d4ca; --dim:#8d9095; --faint:#5e636a; --teal:#6db4a3; --amber:#c89868; --gold:#d4b876; --leaf:#87a86b; --crimson:#b8554a; --term:#aedccd; --term-bg:#0d201d; }
+  body { background: var(--bg-deep); color: var(--text); font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; overflow: hidden; }
+  .mono { font-family: "JetBrains Mono", Consolas, monospace; }
+  .num { font-variant-numeric: tabular-nums; }
+  .viewport { background: radial-gradient(ellipse at 50% 38%, #14202a 0%, #0a1218 38%, #050709 80%), var(--bg-deep); }
+  .crosshair { stroke: rgba(216,212,202,.4); stroke-width:1; }
+
+  .preview-bar { background: rgba(5,8,12,.98); border-bottom: 1px solid var(--border); }
+  .preview-btn { padding:3px 9px; border-radius:2px; font-size:11px; color:var(--dim); border:1px solid var(--border); background:rgba(15,20,28,.6); }
+  .preview-btn:hover { color:var(--text); border-color:var(--border-hi); }
+  .preview-btn-active { background:rgba(109,180,163,.12); border-color:var(--teal); color:var(--teal); }
+  .panel { background: rgba(24,28,35,.92); border: 1px solid var(--border); border-radius: 4px; }
+
+  .heart-icon { transform-origin:center; animation: heart-beat 1s ease-in-out infinite; }
+  @keyframes heart-beat { 0%,70%,100%{transform:scale(1);} 20%{transform:scale(1.18);} 40%{transform:scale(1.04);} }
+
+  /* Wall-mounted terminal that lives "in" the world (rendered as overlay because we're in HTML) */
+  .terminal-housing {
+    position: absolute;
+    top: 50%; left: 50%;
+    transform: translate(-50%, -50%) perspective(1200px) rotateY(-8deg);
+    width: 520px; height: 360px;
+    background: linear-gradient(135deg, #1a1f24, #0c1015);
+    border: 4px solid #11151b;
+    border-radius: 8px;
+    padding: 22px;
+    box-shadow:
+      0 0 0 2px #2a313b,
+      0 12px 28px rgba(0,0,0,.75),
+      inset 0 1px 0 rgba(255,255,255,.04);
+    transition: transform .4s cubic-bezier(.4, 0, .2, 1), opacity .25s;
+    opacity: 0;
+    pointer-events: none;
+  }
+  .terminal-housing.is-open { opacity: 1; pointer-events: auto; transform: translate(-50%, -50%) perspective(1200px) rotateY(0deg); }
+  .terminal-housing::before { /* rivets */
+    content:""; position: absolute; top: 6px; left: 6px; right: 6px; height: 8px;
+    background-image: radial-gradient(circle, #4a5260 1.5px, transparent 1.5px);
+    background-size: 16px 8px;
+  }
+
+  .terminal-screen {
+    background: var(--term-bg);
+    border: 1px solid #11151b;
+    border-radius: 4px;
+    height: 100%;
+    color: var(--term);
+    font-family: "JetBrains Mono", monospace;
+    padding: 16px 18px;
+    box-shadow: inset 0 0 30px rgba(0,0,0,.7);
+    position: relative;
+  }
+
+  .term-row { display: flex; justify-content: space-between; padding: 3px 0; font-size: 12px; }
+  .term-row .lbl { color: rgba(174,220,205,.55); letter-spacing: .12em; text-transform: uppercase; font-size: 10px; }
+  .term-row .val { color: var(--term); font-weight: 500; }
+  .term-section { font-size: 10px; letter-spacing: .14em; text-transform: uppercase; color: rgba(174,220,205,.6); border-bottom: 1px solid rgba(174,220,205,.18); padding-bottom: 3px; margin: 12px 0 8px; }
+
+  .term-bar { height: 6px; background: rgba(174,220,205,.08); border-radius: 1px; overflow: hidden; }
+  .term-bar-fill { height: 100%; background: var(--term); }
+
+  /* Approach hint when not at terminal */
+  .approach-hint {
+    position: absolute;
+    top: 50%; left: 50%;
+    transform: translate(-50%, -50%);
+    width: 40px; height: 40px;
+    border: 1px dashed rgba(212,184,118,.6);
+    border-radius: 4px;
+    pointer-events: none;
+    transition: opacity .3s;
+  }
+  .approach-hint::before {
+    content:""; position:absolute; left: -50px; top: 50%; height: 1px; width: 40px;
+    background: rgba(212,184,118,.4);
+  }
+  .approach-hint::after {
+    content:""; position:absolute; right: -50px; top: 50%; height: 1px; width: 40px;
+    background: rgba(212,184,118,.4);
+  }
+
+  .scan-line { position: absolute; left: 0; right: 0; height: 1px; background: rgba(174,220,205,.12); animation: scan 5s linear infinite; }
+  @keyframes scan { 0% { top: 0; } 100% { top: 100%; } }
+</style>
+</head>
+<body>
+
+<div class="preview-bar fixed top-0 left-0 right-0 z-50 px-4 py-2 flex items-center gap-5 text-xs flex-wrap">
+  <a href="index.html" class="text-teal-300 hover:underline mono font-bold text-xs">← gallery</a>
+  <span class="text-slate-700">·</span>
+  <span class="text-teal-300 mono font-bold">W-STATIONTERMINAL</span>
+  <span class="text-slate-700">·</span>
+  <span class="text-slate-500">terminals diégétiques par compartiment · coop-friendly</span>
+  <div class="flex items-center gap-2 ml-auto">
+    <span class="text-slate-500 uppercase mono">terminal:</span>
+    <button id="far-btn"   class="preview-btn preview-btn-active">far</button>
+    <button id="near-btn"  class="preview-btn">approaching</button>
+    <button id="open-btn"  class="preview-btn">activated</button>
+  </div>
+  <div class="flex items-center gap-2"><span class="text-slate-500 uppercase mono">tab:</span><div id="page-buttons" class="flex gap-1"></div></div>
+</div>
+
+<div class="viewport relative w-screen h-screen pt-9">
+
+  <svg class="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 pointer-events-none" width="14" height="14" style="z-index:5;">
+    <line class="crosshair" x1="7" y1="0" x2="7" y2="4"/><line class="crosshair" x1="7" y1="10" x2="7" y2="14"/>
+    <line class="crosshair" x1="0" y1="7" x2="4" y2="7"/><line class="crosshair" x1="10" y1="7" x2="14" y2="7"/>
+  </svg>
+
+  <!-- Personal HUD: minimal -->
+  <div class="absolute bottom-3 left-3 flex items-center gap-2 mono text-[10px] uppercase tracking-wider text-slate-500">
+    <svg class="heart-icon" width="13" height="13" viewBox="0 0 24 24" fill="#b8554a"><path d="M12 21s-7-4.35-7-10a4.5 4.5 0 0 1 8.5-2 4.5 4.5 0 0 1 8.5 2c0 5.65-7 10-7 10z"/></svg>
+    <span>72 bpm · standing</span>
+  </div>
+
+  <!-- Tiny posture indicator bottom-right -->
+  <div class="absolute bottom-3 right-3 flex items-center gap-2">
+    <svg width="14" height="20" viewBox="0 0 24 32" fill="none" stroke="#aedccd" stroke-width="1.4" stroke-linecap="round">
+      <circle cx="12" cy="5" r="3"/><line x1="12" y1="8" x2="12" y2="20"/>
+      <line x1="12" y1="12" x2="7" y2="18"/><line x1="12" y1="12" x2="17" y2="18"/>
+      <line x1="12" y1="20" x2="9" y2="30"/><line x1="12" y1="20" x2="15" y2="30"/>
+    </svg>
+    <span class="text-[10px] mono uppercase tracking-wider text-slate-500">Standing</span>
+  </div>
+
+  <!-- Approach hint shown when "near" -->
+  <div id="approach" class="approach-hint" style="opacity:0;"></div>
+
+  <!-- Approach prompt that floats next to terminal when near -->
+  <div id="approach-prompt" class="absolute" style="top: 50%; left: 50%; transform: translate(-50%, calc(-50% + 90px)); display:none; pointer-events:none;">
+    <div class="flex items-center gap-1.5">
+      <span class="inline-flex items-center justify-center w-5 h-5 bg-slate-900 border border-slate-600 rounded text-[10px] mono">F</span>
+      <span class="text-amber-300 text-xs">Activate hull diagnostics terminal</span>
+    </div>
+  </div>
+
+  <!-- The terminal itself (open state) -->
+  <div id="terminal" class="terminal-housing">
+    <div class="terminal-screen">
+      <div class="scan-line"></div>
+      <!-- Header bar -->
+      <div class="flex items-center justify-between mb-2 pb-2 border-b" style="border-color: rgba(174,220,205,.2);">
+        <div class="flex items-center gap-3">
+          <span style="font-size:10px; letter-spacing:.18em;">SUB3D · ENG-02 · TERMINAL 2A</span>
+          <span style="font-size:9px; opacity:.6;">REV 0.7</span>
+        </div>
+        <div class="flex items-center gap-2">
+          <span style="width:8px; height:8px; border-radius:50%; background: var(--leaf); box-shadow: 0 0 6px var(--leaf);"></span>
+          <span style="font-size:9px; opacity:.6;">ONLINE</span>
+        </div>
+      </div>
+
+      <div id="page-content"></div>
+
+      <!-- Footer hints -->
+      <div class="absolute bottom-3 left-4 right-4 flex items-center justify-between" style="font-size:9px; opacity:.5;">
+        <span>TAB · CYCLE PAGE</span>
+        <span>ESC · STEP AWAY</span>
+      </div>
+    </div>
+  </div>
+
+  <div class="absolute top-12 left-1/2 -translate-x-1/2 text-[10px] mono uppercase tracking-wider text-slate-600">
+    Personal HUD stays minimal. Detail lives on terminals (any crew can use).
+  </div>
+</div>
+
+<div class="fixed bottom-3 left-1/2 -translate-x-1/2 panel px-4 py-2 text-[11px] text-slate-400 max-w-2xl text-center pointer-events-none" style="z-index:60;">
+  <span class="text-teal-300 mono">W-STATIONTERMINAL</span> · diegetic terminals per compartment.
+  Most coop-friendly: any crew can read what any terminal shows. Personal HUD reduced to ambient minimum.
+</div>
+
+<script>
+const PAGES = {
+  hull: () => `
+    <div class="term-section">Hull integrity · per compartment</div>
+    ${[["Bow",88,"ok"],["ENG-02",62,"warn"],["ENG-03",91,"ok"],["Stern",74,"ok"],["Conning",100,"ok"]].map(([n,p,s]) => `
+      <div class="flex items-center gap-3 py-1">
+        <span class="lbl" style="width:80px;">${n}</span>
+        <div class="flex-1 term-bar"><div class="term-bar-fill" style="width:${p}%; background:${s==='ok'?'var(--term)':'#c89868'}"></div></div>
+        <span class="val num">${p}%</span>
+      </div>`).join("")}
+    <div class="term-section">Power load</div>
+    <div class="term-row"><span class="lbl">Reactor</span><span class="val">74 / 100 kW</span></div>
+    <div class="term-row"><span class="lbl">Battery reserve</span><span class="val">42%</span></div>
+    <div class="term-row"><span class="lbl">Pump status</span><span class="val">offline · ENG-02</span></div>`,
+  crew: () => `
+    <div class="term-section">Crew positions</div>
+    ${[["KOWALSKI","Captain","Bridge","ok"],["NAKAMURA","Mechanic","ENG-02","ok"],["HALDIR","Diver","Airlock","warn"],["MOREL","Medic","Med-bay","ok"],["VOSS","Sonar","Bridge","ok"]].map(([n,r,c,s]) => `
+      <div class="term-row"><span class="lbl">${n} · <span style="color:rgba(174,220,205,.4)">${r}</span></span><span class="val" style="color:${s==='ok'?'var(--term)':'#c89868'}">${c}</span></div>`).join("")}`,
+  log: () => `
+    <div class="term-section">Activity log</div>
+    <div style="font-size:11px; opacity:.85; line-height: 1.6;">
+      <div>14:00 · cruising 047° · −1 240 m</div>
+      <div>14:32 · HALDIR EVA · airlock cycled</div>
+      <div>15:08 · sonar contact 020° · 340 m</div>
+      <div>15:14 · descend −1 290 m · evade</div>
+      <div style="color:#c89868;">15:18 · ENG-02 hull stress &gt; threshold</div>
+      <div style="color:#b8554a;">15:21 · BREACH detected · NW wall · 12 L/s</div>
+    </div>`
+};
+let page = "hull";
+
+function pillBtns(host, opts, sel, cb) {
+  document.getElementById(host).innerHTML = opts
+    .map(o => `<button data-v="${o}" class="preview-btn ${o===sel?'preview-btn-active':''}">${o}</button>`).join("");
+  document.getElementById(host).querySelectorAll("button").forEach(b => b.addEventListener("click", () => cb(b.dataset.v)));
+}
+
+let mode = "far";
+function setMode(m) {
+  mode = m;
+  document.getElementById("far-btn").classList.toggle("preview-btn-active",   m === "far");
+  document.getElementById("near-btn").classList.toggle("preview-btn-active",  m === "near");
+  document.getElementById("open-btn").classList.toggle("preview-btn-active",  m === "open");
+  document.getElementById("approach").style.opacity = (m === "near") ? "1" : "0";
+  document.getElementById("approach-prompt").style.display = (m === "near") ? "block" : "none";
+  document.getElementById("terminal").classList.toggle("is-open", m === "open");
+}
+function renderPage() {
+  document.getElementById("page-content").innerHTML = PAGES[page]();
+  pillBtns("page-buttons", Object.keys(PAGES), page, v => { page = v; renderPage(); });
+}
+
+document.getElementById("far-btn").addEventListener("click",  () => setMode("far"));
+document.getElementById("near-btn").addEventListener("click", () => setMode("near"));
+document.getElementById("open-btn").addEventListener("click", () => setMode("open"));
+
+document.addEventListener("keydown", e => {
+  if (e.key === "Escape") setMode("far");
+  if (e.key === "Tab" && mode === "open") { e.preventDefault(); const ks = Object.keys(PAGES); page = ks[(ks.indexOf(page)+1) % ks.length]; renderPage(); }
+});
+
+renderPage();
+setMode("far");
+</script>
+</body>
+</html>

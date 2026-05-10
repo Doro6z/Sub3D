@@ -7,6 +7,7 @@
 #include "SubCrewMovementComponent.generated.h"
 
 class UPrimitiveComponent;
+class APhysicsVolume;
 class ASubmarineBase;
 class ULadderClimbComponent;
 
@@ -20,7 +21,7 @@ enum class ECrewPostureState : uint8
 
 /**
  * Crew locomotion axis state. Orthogonal to environment context (see ASubCrewCharacter::CurrentCompartment).
- * Outside       = World-space, CMC native (ocean swim, world walking).
+ * Outside       = World-space, CMC native (exterior swimming or world walking).
  * Embarked      = Local grid-space rebase active (inside the submarine moving frame).
  * Transitioning = Handoff in progress (reserved for post-FP multi-tick velocity blend; FP does instant flips).
  */
@@ -44,6 +45,8 @@ class SUB3D_API USubCrewMovementComponent : public UCharacterMovementComponent
 public:
 	USubCrewMovementComponent();
 
+	virtual void SetMovementMode(EMovementMode NewMovementMode, uint8 NewCustomMode = 0) override;
+	virtual bool IsInWater() const override;
 	virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
 	virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const override;
 
@@ -234,12 +237,27 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Submarine|Crew|Movement", meta = (ClampMin = "1.0", ClampMax = "3.0"))
 	float RunSpeedMultiplier = 1.8f;
 
+	/** Vertical swim input scale. +1 is up, -1 is down. Used only while MovementMode is Swimming. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Submarine|Crew|Movement|Swim", meta = (ClampMin = "0.0", ClampMax = "2.0"))
+	float SwimVerticalInputScale = 1.f;
+
+	/** Fluid friction used by Sub3D exterior swimming when no UE water PhysicsVolume is present. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Submarine|Crew|Movement|Swim", meta = (ClampMin = "0.0"))
+	float Sub3DExteriorSwimFluidFriction = 0.5f;
+
 	/**
 	 * Sole locomotion input entry point for crew walking/swimming.
 	 * MoveAxis.X = forward/back, MoveAxis.Y = right/left.
 	 */
 	UFUNCTION(BlueprintCallable, Category = "Submarine|Crew|Movement")
 	void ApplyCrewPlanarMoveInput(FVector2D MoveAxis);
+
+	/** Vertical swim input entry point. Axis +1 = up, -1 = down. No effect while walking. */
+	UFUNCTION(BlueprintCallable, Category = "Submarine|Crew|Movement")
+	void ApplyCrewVerticalMoveInput(float Axis);
+
+	UFUNCTION(BlueprintPure, Category = "Submarine|Crew|Movement")
+	bool IsCrewSwimming() const;
 
 	UFUNCTION(BlueprintPure, Category = "Submarine|Crew|Movement")
 	FCrewMoveIntent GetLastMoveIntent() const { return LastMoveIntent; }
@@ -317,6 +335,10 @@ public:
 	bool HasSubmarineBinding() const;
 
 protected:
+	virtual void PhysicsVolumeChanged(APhysicsVolume* NewVolume) override;
+	virtual void SetDefaultMovementMode() override;
+	virtual void PhysSwimming(float DeltaTime, int32 Iterations) override;
+	virtual void OnMovementModeChanged(EMovementMode PreviousMovementMode, uint8 PreviousCustomMode) override;
 	virtual void UpdateBasedMovement(float DeltaSeconds) override;
 	virtual void UpdateBasedRotation(FRotator& FinalRotation, const FRotator& ReducedRotation) override;
 
@@ -337,9 +359,9 @@ protected:
 	virtual class FNetworkPredictionData_Client* GetPredictionData_Client() const override;
 
 	/**
-	 * Override to apply client-reported grid-space state after CMC's native MoveAutonomous
-	 * processing. Reads the current FCharacterNetworkMoveData_SubCrew and syncs
-	 * GridSpaceTransform + EmbarkState on the server. For FP co-op the server trusts the
+	 * Override to apply client-reported grid-space state around CMC's native MoveAutonomous
+	 * processing. EmbarkState must be visible before physics runs so exterior swimming does
+	 * not fall back to stock no-water-volume behavior. For FP co-op the server trusts the
 	 * client's reported grid-space pose; production validation would bound the delta.
 	 */
 	virtual void MoveAutonomous(float ClientTimeStamp, float DeltaTime, uint8 CompressedFlags, const FVector& NewAccel) override;
@@ -423,7 +445,8 @@ private:
 
 	void TickPosture(float DeltaTime);
 	void SetRunningState(bool bNewRunning);
-	FCrewMoveIntent BuildMoveIntent(FVector2D MoveAxis) const;
+	FVector BuildWorldMoveInput(FVector2D MoveAxis, float VerticalAxis) const;
+	FCrewMoveIntent BuildMoveIntent(FVector2D MoveAxis, float VerticalAxis) const;
 	void UpdateLocomotionFrame();
 	void UpdateHandIKProbes();
 	void UpdateFootIKTraces();
@@ -445,6 +468,12 @@ private:
 
 	/** Set by ApplyCrewPlanarMoveInput so LastMoveIntent can be cleared when input stops. */
 	bool bReceivedMoveInputThisFrame = false;
+
+	/** Set by ApplyCrewVerticalMoveInput so vertical swim input can be cleared when input stops. */
+	bool bReceivedVerticalMoveInputThisFrame = false;
+
+	FVector2D PendingPlanarMoveAxis = FVector2D::ZeroVector;
+	float PendingVerticalMoveAxis = 0.f;
 
 	/**
 	 * Handoff event pending capture into the next saved move. Set by

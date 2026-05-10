@@ -160,6 +160,19 @@ public:
 	UPROPERTY(Config, EditAnywhere, Category = "Submarine|Flood", meta = (ClampMin = "0.05", ClampMax = "10.0"))
 	float WaterInjectMarkerLifetime = 1.5f;
 
+	/** Draw the CompartmentId text at each compartment volume's center. Use to verify which
+	 *  CompartmentA / CompartmentB to set on a placed door. */
+	UPROPERTY(Config, EditAnywhere, Category = "Submarine|Flood")
+	bool bDrawCompartmentLabels = false;
+
+	/** Draw a colored sphere + label at each connection's LocalTransform (from the DA). Color
+	 *  by ConnectionType: Door=red, Hatch=orange, ExteriorHatch=blue, Open=green. Label format:
+	 *  "ConnectionId | CompartmentA ↔ CompartmentB". The sphere shows where the DA expected
+	 *  the door to be — your manually-placed BP can be elsewhere, but its DoorId must match
+	 *  the text shown here. */
+	UPROPERTY(Config, EditAnywhere, Category = "Submarine|Flood")
+	bool bDrawConnectionMarkers = false;
+
 	// ── Submarine | Hull ──────────────────────────────────────
 	UPROPERTY(Config, EditAnywhere, Category = "Submarine|Hull")
 	bool bDrawHull = false;

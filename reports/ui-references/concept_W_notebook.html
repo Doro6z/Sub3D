@@ -1,0 +1,346 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<title>Sub3D · W-Notebook — Submariner's Notebook</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<style>
+  :root {
+    --bg-deep:#0a0d12; --panel:#181c23; --border:#2a313b; --border-hi:#3a4452;
+    --text:#d8d4ca; --dim:#8d9095; --faint:#5e636a;
+    --teal:#6db4a3; --amber:#c89868; --gold:#d4b876; --leaf:#87a86b; --crimson:#b8554a;
+    --paper:    #d8c89c;
+    --paper-dk: #c4b386;
+    --ink:      #2a1a08;
+    --ink-soft: #5a4528;
+    --paper-edge: #8a7148;
+  }
+  body { background: var(--bg-deep); color: var(--text); font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; overflow: hidden; }
+  .mono { font-family: "JetBrains Mono", Consolas, monospace; }
+  .num { font-variant-numeric: tabular-nums; }
+  .viewport { background: radial-gradient(ellipse at 50% 38%, #14202a 0%, #0a1218 38%, #050709 80%), var(--bg-deep); }
+  .crosshair { stroke: rgba(216,212,202,.4); stroke-width:1; }
+
+  .preview-bar { background: rgba(5,8,12,.98); border-bottom: 1px solid var(--border); }
+  .preview-btn { padding:3px 9px; border-radius:2px; font-size:11px; color:var(--dim); border:1px solid var(--border); background:rgba(15,20,28,.6); }
+  .preview-btn:hover { color:var(--text); border-color:var(--border-hi); }
+  .preview-btn-active { background:rgba(109,180,163,.12); border-color:var(--teal); color:var(--teal); }
+
+  .panel { background: rgba(24,28,35,.92); border: 1px solid var(--border); border-radius: 4px; }
+
+  /* Notebook chassis */
+  .notebook {
+    position: absolute;
+    bottom: -380px; left: 50%;
+    transform: translateX(-50%);
+    width: 680px; height: 420px;
+    transition: bottom .4s cubic-bezier(.22, 1, .36, 1);
+    perspective: 1200px;
+  }
+  .notebook.show { bottom: 36px; }
+
+  .notebook-spine {
+    position: absolute; left: 50%; top: 0; bottom: 0; width: 4px;
+    background: linear-gradient(90deg, #1a1208, #2a1a08, #1a1208);
+    transform: translateX(-50%);
+    z-index: 3;
+  }
+  .notebook-cover {
+    position: absolute; inset: 0;
+    background: linear-gradient(135deg, #2a1a08 0%, #1a0e04 100%);
+    border: 1px solid #0a0604;
+    border-radius: 6px;
+    box-shadow:
+      0 -10px 30px rgba(0,0,0,.6),
+      inset 0 1px 0 rgba(255,255,255,.03);
+  }
+  .page {
+    position: absolute; top: 12px; bottom: 12px;
+    width: calc(50% - 16px);
+    background:
+      linear-gradient(180deg, rgba(0,0,0,0) 0%, rgba(122, 96, 56, .15) 100%),
+      var(--paper);
+    border: 1px solid var(--paper-edge);
+    border-radius: 2px;
+    color: var(--ink);
+    padding: 18px 22px;
+    overflow: hidden;
+    box-shadow: inset 0 0 30px rgba(98, 76, 38, .25);
+  }
+  .page-l { left: 12px;  border-right: none; border-radius: 4px 0 0 4px; }
+  .page-r { right: 12px; border-left: none;  border-radius: 0 4px 4px 0; }
+
+  .page::before { /* paper grain */
+    content: ""; position: absolute; inset: 0;
+    background-image:
+      radial-gradient(rgba(80, 60, 30, .04) 1px, transparent 1px);
+    background-size: 4px 4px;
+    pointer-events: none;
+  }
+
+  .ink-title {
+    font-family: "Georgia", serif;
+    font-style: italic;
+    font-size: 18px;
+    color: var(--ink);
+    border-bottom: 1px solid var(--ink-soft);
+    padding-bottom: 4px;
+    margin-bottom: 12px;
+    letter-spacing: .03em;
+  }
+  .ink-row { display: flex; justify-content: space-between; padding: 3px 0; font-family: "Georgia", serif; font-size: 13px; color: var(--ink); border-bottom: 1px dashed rgba(90,69,40,.3); }
+  .ink-row .lbl { font-style: italic; color: var(--ink-soft); font-size: 12px; }
+  .ink-row .val { font-weight: bold; }
+
+  .ink-section { font-family: "Georgia", serif; font-size: 11px; font-style: italic; color: var(--ink-soft); margin: 12px 0 6px; letter-spacing: .04em; }
+
+  .ink-bar {
+    height: 8px; background: rgba(90,69,40,.15); border: 1px solid var(--ink-soft); border-radius: 1px; overflow: hidden;
+  }
+  .ink-bar-fill { height: 100%; background: var(--ink); }
+
+  .tab-row {
+    position: absolute; top: -32px; left: 0; right: 0;
+    display: flex; justify-content: center; gap: 4px;
+    pointer-events: auto;
+  }
+  .tab {
+    background: linear-gradient(180deg, #2a1a08 0%, #1a0e04 100%);
+    border: 1px solid #0a0604; border-bottom: none;
+    color: var(--paper-dk); font-family: "Georgia", serif; font-size: 12px;
+    padding: 6px 14px; border-radius: 4px 4px 0 0;
+    cursor: pointer;
+    transition: background .15s;
+  }
+  .tab:hover { background: linear-gradient(180deg, #3a2510 0%, #2a1a08 100%); color: var(--paper); }
+  .tab.active { background: var(--paper); color: var(--ink); border-color: var(--paper-edge); }
+
+  /* Idle peek — corner of notebook visible at bottom */
+  .peek-tab {
+    position: absolute; bottom: 0; left: 12px;
+    width: 50px; height: 24px;
+    background: linear-gradient(180deg, #2a1a08, #1a0e04);
+    border: 1px solid #0a0604; border-bottom: none;
+    border-radius: 4px 4px 0 0;
+    display: flex; align-items: center; justify-content: center;
+    font-family: "Georgia", serif; font-size: 10px; color: var(--paper-dk);
+    pointer-events: none;
+  }
+
+  .heart-icon { transform-origin:center; animation: heart-beat 1s ease-in-out infinite; }
+  @keyframes heart-beat { 0%,70%,100%{transform:scale(1);} 20%{transform:scale(1.18);} 40%{transform:scale(1.04);} }
+
+  /* Page-flip animation */
+  .page-flipping {
+    animation: page-flip .35s ease-out;
+    transform-origin: left center;
+  }
+  @keyframes page-flip {
+    0%   { transform: rotateY(0deg); }
+    50%  { transform: rotateY(-90deg); }
+    51%  { transform: rotateY(90deg); }
+    100% { transform: rotateY(0deg); }
+  }
+</style>
+</head>
+<body>
+
+<div class="preview-bar fixed top-0 left-0 right-0 z-50 px-4 py-2 flex items-center gap-5 text-xs flex-wrap">
+  <a href="index.html" class="text-teal-300 hover:underline mono font-bold text-xs">← gallery</a>
+  <span class="text-slate-700">·</span>
+  <span class="text-teal-300 mono font-bold">W-NOTEBOOK</span>
+  <span class="text-slate-700">·</span>
+  <span class="text-slate-500">submariner's flip-page notebook · diegetic</span>
+  <div class="flex items-center gap-2 ml-auto">
+    <button id="show-btn" class="preview-btn">show</button>
+    <button id="peek-btn" class="preview-btn preview-btn-active">peek</button>
+  </div>
+</div>
+
+<div class="viewport relative w-screen h-screen pt-9">
+  <svg class="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 pointer-events-none" width="14" height="14">
+    <line class="crosshair" x1="7" y1="0" x2="7" y2="4"/><line class="crosshair" x1="7" y1="10" x2="7" y2="14"/>
+    <line class="crosshair" x1="0" y1="7" x2="4" y2="7"/><line class="crosshair" x1="10" y1="7" x2="14" y2="7"/>
+  </svg>
+
+  <!-- Tiny ambient indicators when notebook is closed -->
+  <div class="absolute top-12 left-5 flex items-center gap-3">
+    <svg class="heart-icon" width="13" height="13" viewBox="0 0 24 24" fill="#b8554a"><path d="M12 21s-7-4.35-7-10a4.5 4.5 0 0 1 8.5-2 4.5 4.5 0 0 1 8.5 2c0 5.65-7 10-7 10z"/></svg>
+    <span class="text-[10px] mono uppercase tracking-wider text-slate-500">72 bpm · standing</span>
+  </div>
+
+  <div class="absolute top-12 right-5 text-[10px] mono uppercase tracking-wider text-slate-600">
+    hold <span class="bg-slate-900 border border-slate-700 rounded px-1.5">N</span> · notebook
+  </div>
+
+  <!-- The notebook itself -->
+  <div id="notebook" class="notebook peek">
+    <div class="tab-row">
+      <button class="tab active" data-page="status">Status</button>
+      <button class="tab" data-page="kit">Kit</button>
+      <button class="tab" data-page="crew">Crew</button>
+      <button class="tab" data-page="map">Map</button>
+    </div>
+
+    <div class="notebook-cover"></div>
+    <div class="notebook-spine"></div>
+
+    <div class="page page-l" id="page-l"></div>
+    <div class="page page-r" id="page-r"></div>
+
+    <div class="peek-tab">notebook</div>
+  </div>
+</div>
+
+<div class="fixed bottom-3 left-1/2 -translate-x-1/2 panel px-4 py-2 text-[11px] text-slate-400 max-w-2xl text-center pointer-events-none" style="z-index:60;">
+  <span class="text-teal-300 mono">W-NOTEBOOK</span> · paper-and-ink submariner journal.
+  Hold N for the notebook to flip up. Tab pages with handwriting feel. Most analog of the device family.
+</div>
+
+<script>
+const PAGES = {
+  status: {
+    l: () => `
+      <div class="ink-title">Vitals · self</div>
+      <div class="ink-row"><span class="lbl">Health</span><span class="val">92 / 100</span></div>
+      <div class="ink-row"><span class="lbl">Fatigue</span><span class="val">23 / 100</span></div>
+      <div class="ink-row"><span class="lbl">Experience</span><span class="val">42 / 100</span></div>
+      <div class="ink-row"><span class="lbl">Pulse</span><span class="val">72 bpm</span></div>
+      <div class="ink-row"><span class="lbl">Hydration</span><span class="val">68%</span></div>
+      <div class="ink-section">Posture</div>
+      <div class="flex items-center gap-3">
+        <svg width="40" height="56" viewBox="0 0 40 56" fill="none" stroke="#2a1a08" stroke-width="1.6" stroke-linecap="round">
+          <circle cx="20" cy="9" r="3.5"/><line x1="20" y1="12.5" x2="20" y2="32"/>
+          <line x1="20" y1="17" x2="13" y2="25"/><line x1="20" y1="17" x2="27" y2="25"/>
+          <line x1="20" y1="32" x2="14" y2="50"/><line x1="20" y1="32" x2="26" y2="50"/>
+        </svg>
+        <span style="font-family:Georgia, serif; font-style:italic; color: var(--ink);">Standing · steady</span>
+      </div>`,
+    r: () => `
+      <div class="ink-title">Environment</div>
+      <div class="ink-row"><span class="lbl">Compartment</span><span class="val">ENG-02</span></div>
+      <div class="ink-row"><span class="lbl">Depth</span><span class="val">−1 240 m</span></div>
+      <div class="ink-row"><span class="lbl">Heading</span><span class="val">047°</span></div>
+      <div class="ink-row"><span class="lbl">Pressure</span><span class="val">128 kPa</span></div>
+      <div class="ink-row"><span class="lbl">Body temp</span><span class="val">36.4 °C</span></div>
+      <div class="ink-section">Worn</div>
+      <div class="ink-row"><span class="lbl">Suit</span><span class="val">MK-IV</span></div>
+      <div class="ink-row"><span class="lbl">Helmet</span><span class="val">basic</span></div>
+      <div class="ink-section">Notes</div>
+      <div style="font-family:Georgia, serif; font-style:italic; color: var(--ink-soft); font-size: 12px;">"Hull groans on starboard — log entry 47."</div>`
+  },
+  kit: {
+    l: () => `
+      <div class="ink-title">Hotbar · 1–6</div>
+      ${[["1","Wrench","held"],["2","Med kit",""],["3","Welder",""],["4","Flare",""],["5","—",""],["6","—",""]].map(([n,it,t]) =>
+        `<div class="ink-row"><span class="lbl">${n}</span><span class="val">${it}${t?'  · '+t:''}</span></div>`).join("")}
+      <div class="ink-section">Backpack · 4 / 8</div>
+      <div class="ink-row"><span class="lbl">a</span><span class="val">Spare oxygen tank</span></div>
+      <div class="ink-row"><span class="lbl">b</span><span class="val">Repair patch ×3</span></div>
+      <div class="ink-row"><span class="lbl">c</span><span class="val">Hull-checker</span></div>
+      <div class="ink-row"><span class="lbl">d</span><span class="val">Captain's log</span></div>`,
+    r: () => `
+      <div class="ink-title">Held · Wrench</div>
+      <div style="font-family:Georgia, serif; font-style: italic; color: var(--ink-soft); font-size: 12px; margin-bottom: 10px;">Mk-II adjustable · steel · forged 2042</div>
+      <div class="ink-row"><span class="lbl">Condition</span><span class="val">88%</span></div>
+      <div class="ink-row"><span class="lbl">Wear</span><span class="val">light pitting</span></div>
+      <div class="ink-section">Diagnostic readings</div>
+      ${[["Bow",88,"ok"],["ENG-02",62,"warn"],["ENG-03",91,"ok"],["Stern",74,"ok"]].map(([n,p,st]) => `
+        <div style="margin-bottom:6px;">
+          <div class="ink-row" style="border:none; padding-bottom:2px"><span class="lbl">${n}</span><span class="val">${p}%</span></div>
+          <div class="ink-bar"><div class="ink-bar-fill" style="width:${p}%; background:${st==='ok'?'#2a1a08':'#9c5e1a'}"></div></div>
+        </div>`).join("")}`
+  },
+  crew: {
+    l: () => `
+      <div class="ink-title">Crew of the <em>Craniata</em></div>
+      ${[
+        ["Kowalski","Captain","Bridge","ok"],
+        ["Nakamura","Mechanic","ENG-02","ok"],
+        ["Haldir","Diver","Airlock","warn"],
+        ["Morel","Medic","Med-bay","ok"],
+        ["Voss","Sonar","Bridge","ok"]
+      ].map(([n,r,c,s]) => `
+        <div class="flex justify-between items-baseline" style="font-family:Georgia, serif; padding: 4px 0; border-bottom: 1px dashed rgba(90,69,40,.3);">
+          <span><strong>${n}</strong> <em style="color: var(--ink-soft);">— ${r}</em></span>
+          <span style="font-size:11px; color: ${s==='ok'?'#2a5a40':'#9c5e1a'};">${c}</span>
+        </div>`).join("")}`,
+    r: () => `
+      <div class="ink-title">Roster notes</div>
+      <div style="font-family:Georgia, serif; font-style: italic; color: var(--ink); line-height: 1.7; font-size: 13px;">
+        Haldir requested EVA at 14:32. Suit O₂ at 62%, returning by 15:00.
+        <br><br>
+        Voss flagged faint contact at 020° · suspected biological. Active ping discouraged in this sector.
+        <br><br>
+        Morel requests resupply of stims when next at port.
+      </div>`
+  },
+  map: {
+    l: () => `
+      <div class="ink-title">Compartment plan</div>
+      <svg width="100%" height="240" viewBox="0 0 280 240" fill="none">
+        <g stroke="#2a1a08" stroke-width="1.5">
+          <path d="M 30 100 Q 40 60 90 60 L 220 60 Q 250 60 250 100 Q 250 140 230 160 L 70 160 Q 30 140 30 100 Z"/>
+          <line x1="90" y1="60" x2="90" y2="160"/>
+          <line x1="150" y1="60" x2="150" y2="160"/>
+          <line x1="200" y1="60" x2="200" y2="160"/>
+        </g>
+        <g font-family="Georgia, serif" font-size="10" fill="#5a4528" font-style="italic">
+          <text x="60"  y="115" text-anchor="middle">Bow</text>
+          <text x="120" y="115" text-anchor="middle">ENG-02</text>
+          <text x="175" y="115" text-anchor="middle">ENG-03</text>
+          <text x="225" y="115" text-anchor="middle">Stern</text>
+        </g>
+        <circle cx="120" cy="105" r="4" fill="#b8554a"/>
+        <text x="128" y="108" font-size="9" fill="#b8554a" font-family="Georgia">you</text>
+      </svg>`,
+    r: () => `
+      <div class="ink-title">Course log</div>
+      <div style="font-family:Georgia, serif; line-height: 1.7; font-size: 13px; color: var(--ink);">
+        14:00 · cruising 047° · −1 240 m<br>
+        14:32 · Haldir EVA · airlock cycled<br>
+        15:08 · sonar contact 020° · range 340 m<br>
+        15:14 · descended to −1 290 m · evade<br>
+        <br>
+        <em style="color: var(--ink-soft);">Heading toward signal source. ETA 22 min.</em>
+      </div>`
+  }
+};
+
+const notebook = document.getElementById("notebook");
+const pageL = document.getElementById("page-l");
+const pageR = document.getElementById("page-r");
+let activePage = "status";
+
+function setMode(mode) {
+  notebook.classList.toggle("show", mode === "show");
+  notebook.classList.toggle("peek", mode === "peek");
+  document.getElementById("show-btn").classList.toggle("preview-btn-active", mode === "show");
+  document.getElementById("peek-btn").classList.toggle("preview-btn-active", mode === "peek");
+}
+function flipTo(p) {
+  if (p === activePage) return;
+  pageL.classList.add("page-flipping");
+  pageR.classList.add("page-flipping");
+  setTimeout(() => {
+    activePage = p;
+    document.querySelectorAll(".tab").forEach(t => t.classList.toggle("active", t.dataset.page === p));
+    pageL.innerHTML = PAGES[p].l();
+    pageR.innerHTML = PAGES[p].r();
+    pageL.classList.remove("page-flipping");
+    pageR.classList.remove("page-flipping");
+  }, 175);
+}
+
+document.querySelectorAll(".tab").forEach(t => t.addEventListener("click", () => flipTo(t.dataset.page)));
+document.getElementById("show-btn").addEventListener("click", () => setMode("show"));
+document.getElementById("peek-btn").addEventListener("click", () => setMode("peek"));
+document.addEventListener("keydown", e => { if (e.key.toLowerCase() === "n") { e.preventDefault(); setMode("show"); }});
+document.addEventListener("keyup",   e => { if (e.key.toLowerCase() === "n") { e.preventDefault(); setMode("peek"); }});
+
+pageL.innerHTML = PAGES.status.l();
+pageR.innerHTML = PAGES.status.r();
+setMode("peek");
+</script>
+</body>
+</html>

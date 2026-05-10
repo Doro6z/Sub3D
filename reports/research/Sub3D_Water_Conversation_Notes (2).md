@@ -341,4 +341,173 @@ Code à inspecter :
 
 ---
 
+## 9. Ajout 2026-05-07 - Water visuals, heightfield, extensions gameplay
+
+**Source** : conversation du 2026-05-07 apres audit du plan `2026-05-04_water_implementation_plan.md`, relecture des chemins water/flood/hull existants, et observation des captures de bake/runtime.
+
+**Statut** : note de conception. Ne remplace pas le plan d'implementation. Les points ci-dessous doivent rester subordonnes au plan authority-max `2026-04-10_first_playable_strategic_analysis.md` et au plan water courant.
+
+### 9.1 Socle reel exploitable
+
+Le socle actuel permet deja d'imaginer des extensions gameplay sans partir sur une IA complete :
+
+- Compartiments, portes et flood donnent une consequence gameplay lisible : isoler, pomper, reparer.
+- Les breaches et `OnBreachesUpdated` donnent un point d'accroche naturel pour degats de coque, VFX et reparations.
+- Les water planes et le heightfield prevu peuvent afficher les consequences : jet, onde, perturbation, slosh.
+- Les interactables existants peuvent servir a reparer, sceller, deloger ou declencher une contre-mesure.
+- Le sonar/contact system peut annoncer une menace avant qu'elle devienne visible ou qu'elle cree une fuite.
+- Le sous-marin comme moving frame permet d'attacher des evenements a des positions locales stables sur la coque.
+
+Conclusion : le bon axe court terme n'est pas "monstre interieur avec pathfinding", mais "incident exterieur localise qui devient un probleme interieur via flood, breach, sonar, VFX et interaction joueur".
+
+### 9.2 Quick wins gameplay depuis ce socle
+
+1. **Contact sonar + choc coque + fuite**
+   - Un contact hostile apparait au sonar.
+   - Le joueur percoit un choc coque.
+   - Un breach apparait dans un compartiment donne.
+   - Le joueur doit isoler, pomper, reparer.
+   - ROI eleve : beaucoup de gameplay avec peu de nouveau systeme.
+
+2. **Attached Hull Threat**
+   - Un actor externe approche le sous-marin.
+   - Il s'attache a un point ou une zone locale de coque.
+   - Tant qu'il est accroche, il augmente un compteur de dommage.
+   - Au seuil, il cree ou aggrave une fuite.
+   - Il produit bruit sonar, VFX, vibration, alarme.
+   - Le joueur peut le deloger via station, tourelle, pulse, ou action de reparation interne.
+   - Machine d'etat suffisante pour une premiere version : `Approach -> Latch -> Damage -> Detach / Killed / BreachCreated`.
+
+3. **Breach parasite**
+   - Variante encore plus proche du systeme water.
+   - Une menace maintient une fuite active.
+   - La reparation normale ne fonctionne pas tant que la source externe reste presente.
+   - Le joueur doit d'abord deloger la source, puis reparer.
+
+4. **Perturbation d'eau liee aux incidents**
+   - Breach actif : jet et onde locale.
+   - Impact sur coque : pulse dans le compartiment adjacent.
+   - Monstre accroche : micro-ondes repetees, coups, vibration.
+   - Porte forcee ou bulkhead sous stress : onde pres de la boundary.
+
+Elements a deferer :
+
+- Monstre qui entre dans le sous-marin.
+- IA de poursuite dans les couloirs.
+- NavMesh dynamique dans le sous-marin mobile.
+- Navigation physique complexe sur la surface de coque.
+
+### 9.3 Ajouts visuels autour de l'eau
+
+La mousse et les eclaboussures sont utiles, mais elles doivent rester des couches de feedback et de masquage visuel. Elles ne doivent pas remplacer une correction du bake ou des bounds.
+
+Niveaux recommandes :
+
+1. **Intersection foam court terme**
+   - Mousse claire autour des intersections eau / coque / bulkhead / props.
+   - Implementable via `DepthFade`, `SceneDepth`, ou distance fields si disponibles.
+   - Avantage : masque vite les coupures de bord.
+   - Risque : peut mousser autour de tous les props, pas seulement la coque.
+
+2. **Foam issue du bake**
+   - Ajouter une donnee `DistanceToBoundary` ou equivalent dans le bake.
+   - Le material utilise ce masque : proche contour = mousse, loin contour = eau normale.
+   - Plus propre, parce que la mousse suit le contour authoritatif du compartiment.
+
+3. **Niagara pour evenements localises**
+   - Eclaboussures aux breaches.
+   - Gouttes et jets sur bulkheads.
+   - Impacts quand une menace tape la coque.
+   - Petites projections aux portes ou ouvertures.
+
+Decision de direction :
+
+- Foam = lecture visuelle des limites et contacts.
+- Niagara = evenements ponctuels.
+- Heightfield = propagation d'ondes liee au gameplay.
+- Gerstner = rides ambiantes seulement.
+
+### 9.4 Diagnostic HLSL / Gerstner actuel
+
+Les artefacts visibles en eventail au centre du plan d'eau ressemblent surtout a une topologie de mesh revelee par le WPO, pas a une erreur de formule Gerstner.
+
+Causes probables :
+
+- Amplitude initiale trop forte pour une eau interieure, notamment `A1 = 10` cm pour `L1 = 50` cm.
+- Deplacement horizontal Gerstner trop visible.
+- Mesh de cap avec structure radiale/concentric rings/fan.
+- Vagues actives des l'apparition du plan, sans fade-in.
+- Normales/geometrie qui rendent les triangles trop lisibles.
+
+Recommandations :
+
+- Reduire fortement les amplitudes ambiantes.
+- Reduire `Q`, surtout en interieur.
+- Garder le deplacement horizontal XY tres faible au debut.
+- Ajouter un fade-in temporel.
+- Ajouter un fade par profondeur d'eau.
+- Ajouter un fade pres des bords.
+
+Exemple d'intention shader :
+
+```hlsl
+float SpawnFade = saturate(TimeSinceCreated / 2.0);
+float DepthFade = saturate(WaterDepthCm / 25.0);
+float EdgeFade = saturate((DistanceToBoundaryCm - 10.0) / 40.0);
+
+float AmpMask = SpawnFade * DepthFade * EdgeFade;
+GerstnerOffset *= AmpMask;
+
+// Eau interieure : limiter le deplacement horizontal pour ne pas reveler le mesh.
+GerstnerOffset.xy *= 0.1;
+```
+
+Reglage de depart recommande pour une eau interieure :
+
+```hlsl
+// Petites rides ambiantes, pas houle oceanique.
+A1 = 1.2;  L1 = 90.0;  Q1 = 0.05;
+A2 = 0.6;  L2 = 140.0; Q2 = 0.03;
+A3 = 0.35; L3 = 220.0; Q3 = 0.02;
+```
+
+Note : l'utilisateur a deja reduit legerement les parametres. Le prochain test utile est de couper presque tout le XY displacement, puis de verifier si l'artefact radial disparait ou devient acceptable.
+
+### 9.5 Ondes realistes, rebonds et transmissions
+
+Gerstner seul ne doit pas porter les rebonds coque/bulkhead/portes. Le heightfield est le bon support pour les ondes gameplay.
+
+Direction proposee :
+
+- Chaque compartiment garde sa grille heightfield.
+- Les cellules solides reflechissent l'onde.
+- Les portes ouvertes transmettent une partie de l'onde.
+- Les portes fermees reflechissent presque tout.
+- Les breaches injectent de l'energie locale.
+- Les menaces accrochees peuvent injecter des pulses repetes.
+
+Coefficients de depart :
+
+```text
+Hull / bulkhead ferme : reflect 0.8 a 0.95
+Porte fermee          : transmit 0.0 a 0.05
+Porte entrouverte     : transmit 0.2 a 0.4
+Porte ouverte         : transmit 0.5 a 0.8
+Breach actif          : inject impulse + directional flow
+```
+
+Objectif : une vague issue d'un breach doit pouvoir taper un bulkhead, revenir, traverser partiellement une porte ouverte, ou s'amortir dans un autre compartiment.
+
+### 9.6 Regle de priorite
+
+Ordre recommande :
+
+1. Corriger la donnee de bake/bounds/contour. La mousse ne doit pas cacher une mauvaise containment.
+2. Calmer le Gerstner ambient pour ne pas exposer la topologie du cap mesh.
+3. Ajouter `EdgeFade` / `DistanceToBoundary` et foam de bord.
+4. Ajouter pulses heightfield pour breaches, impacts et portes.
+5. Prototyper `Attached Hull Threat` seulement apres que breach + visual feedback soient fiables.
+
+---
+
 **Fin du document. Bonne analyse.**

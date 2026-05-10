@@ -1,6 +1,7 @@
 #include "SubCrewCharacter.h"
 #include "Sub3DDebugSettings.h"
 #include "CompartmentVolumeComponent.h"
+#include "Debug/CrewAnimDebugComponent.h"
 #include "CrewUnderwaterPPComponent.h"
 #include "SubCrewNetTypes.h"
 #include "SubHullBoundaryComponent.h"
@@ -124,6 +125,8 @@ ASubCrewCharacter::ASubCrewCharacter(const FObjectInitializer& ObjectInitializer
 	InteractionComponent = CreateDefaultSubobject<USubInteractionComponent>(TEXT("InteractionComponent"));
 
 	UnderwaterPP = CreateDefaultSubobject<UCrewUnderwaterPPComponent>(TEXT("UnderwaterPP"));
+
+	CrewAnimDebugComponent = CreateDefaultSubobject<UCrewAnimDebugComponent>(TEXT("CrewAnimDebugComponent"));
 
 	if (UCapsuleComponent* Capsule = GetCapsuleComponent())
 	{
@@ -330,11 +333,10 @@ void ASubCrewCharacter::HandleHullCrossing(USubHullBoundaryComponent* Boundary, 
 		CrewMov->Velocity = V_crew_world + V_sub_world;
 		CrewMov->SetEmbarkState(ECrewEmbarkState::Outside);
 		CurrentCompartment = nullptr;
-
-		// FP EVA: no ocean water-volume in the level yet, so force Flying + zero gravity. Once
-		// a proper PhysicsVolume (water=true) is added, swap this for MOVE_Swimming with buoyancy.
-		CrewMov->SetMovementMode(MOVE_Flying);
-		CrewMov->GravityScale = 0.f;
+		CurrentCompartmentId = NAME_None;
+		CurrentWaterImmersion01 = 1.f;
+		bIsSwimmingByFlood = false;
+		ApplySwimmingMovementState(ExteriorSwimSpeedMultiplier);
 
 		// Mark the handoff event so FSavedMove_SubCrew captures it into the next move packet;
 		// the server mirrors the state flip on receive even if its own boundary missed the crossing.
@@ -355,6 +357,7 @@ void ASubCrewCharacter::HandleHullCrossing(USubHullBoundaryComponent* Boundary, 
 		// but not the authority.
 
 		// Restore walking + gravity so the crew lands on the sub floor.
+		CrewMov->MaxSwimSpeed = DefaultSwimSpeed;
 		CrewMov->SetMovementMode(MOVE_Walking);
 		CrewMov->GravityScale = 1.f;
 
@@ -377,11 +380,25 @@ USubCrewMovementComponent* ASubCrewCharacter::GetCrewMovement() const
 	return Cast<USubCrewMovementComponent>(GetCharacterMovement());
 }
 
+bool ASubCrewCharacter::IsCrewSwimming() const
+{
+	const UCharacterMovementComponent* MovementComponent = GetCharacterMovement();
+	return MovementComponent && MovementComponent->MovementMode == MOVE_Swimming;
+}
+
 void ASubCrewCharacter::ApplyCrewPlanarMoveInput(FVector2D MoveAxis)
 {
 	if (USubCrewMovementComponent* CrewMovement = GetCrewMovement())
 	{
 		CrewMovement->ApplyCrewPlanarMoveInput(MoveAxis);
+	}
+}
+
+void ASubCrewCharacter::ApplyCrewVerticalMoveInput(float Axis)
+{
+	if (USubCrewMovementComponent* CrewMovement = GetCrewMovement())
+	{
+		CrewMovement->ApplyCrewVerticalMoveInput(Axis);
 	}
 }
 
@@ -493,6 +510,8 @@ void ASubCrewCharacter::OnRep_CurrentSubmarine()
 		{
 			CrewMov->SetEmbarkState(ECrewEmbarkState::Outside);
 		}
+		CurrentWaterImmersion01 = 1.f;
+		ApplySwimmingMovementState(ExteriorSwimSpeedMultiplier);
 	}
 }
 
@@ -677,8 +696,10 @@ void ASubCrewCharacter::DisembarkSubmarine()
 		SetCurrentSubmarine(nullptr);
 	}
 	bIsAtHelm = false;
-	GetCharacterMovement()->SetMovementMode(EMovementMode::MOVE_Walking);
-	GetCharacterMovement()->GravityScale = 1.f;
+	CurrentCompartmentId = NAME_None;
+	CurrentWaterImmersion01 = 1.f;
+	bIsSwimmingByFlood = false;
+	ApplySwimmingMovementState(ExteriorSwimSpeedMultiplier);
 
 	UE_LOG(
 		LogSubCrew,
@@ -808,11 +829,20 @@ bool ASubCrewCharacter::ResolveCurrentCompartment(FCompartmentState& OutState, F
 
 	if (CurrentSubmarine->GeneratedDefinition)
 	{
-		const FGeneratedCompartmentDef* Comp = CurrentSubmarine->GeneratedDefinition->FindCompartmentAtLocalLocation(LocalPos);
-		if (Comp)
+		// Multi-volume aware: iterates UCompartmentVolumeComponent boxes (handles L-shapes
+		// where two CVs share the same CompartmentId). CV is the single source of truth
+		// for compartment geometry.
+		const FName CompartmentId = CurrentSubmarine->FindCompartmentIdAtLocalLocation(LocalPos);
+		if (!CompartmentId.IsNone())
 		{
-			OutState.CompartmentId = Comp->CompartmentId;
-			OutLocalBounds = FBox(Comp->HydroBoundsMin, Comp->HydroBoundsMax);
+			OutState.CompartmentId = CompartmentId;
+			// Encapsulating AABB of all CVs sharing this CompartmentId (sub-local space).
+			// For L-shapes this is the union; for single-CV compartments it's the lone box.
+			FBox CvBounds(ForceInit);
+			if (CurrentSubmarine->GetCompartmentLocalBounds(CompartmentId, CvBounds))
+			{
+				OutLocalBounds = CvBounds;
+			}
 			bFoundCompartment = true;
 		}
 	}
@@ -891,6 +921,51 @@ void ASubCrewCharacter::UpdateEnvironmentalEffects(float DeltaSeconds)
 	bPressureDangerous = false;
 
 	float AmbientPressureKPa = 101.325f;
+	if (const USubCrewMovementComponent* CrewMovement = GetCrewMovement())
+	{
+		const bool bOutsideSwimContext =
+			CrewMovement->EmbarkState == ECrewEmbarkState::Outside
+			&& (CurrentSubmarine || MovementComponent->MovementMode == MOVE_Swimming);
+		if (bOutsideSwimContext)
+		{
+			CurrentCompartment = nullptr;
+			CurrentCompartmentId = NAME_None;
+			CurrentWaterImmersion01 = 1.f;
+			if (CurrentSubmarine && CurrentSubmarine->SubMovement)
+			{
+				AmbientPressureKPa = CurrentSubmarine->SubMovement->GetPressureAtDepth(CurrentSubmarine->SubMovement->CurrentDepth) * 101.325f;
+			}
+
+			CurrentAmbientPressureKPa = AmbientPressureKPa;
+			ApplySwimmingMovementState(ExteriorSwimSpeedMultiplier);
+			ApplyPressureEffects(DeltaSeconds, CurrentAmbientPressureKPa);
+
+			if (GetDefault<USub3DDebugSettings>()->ShouldLogCrewEnvironmentState())
+			{
+				EnvironmentDebugLogTimer += DeltaSeconds;
+				if (EnvironmentDebugLogTimer >= FMath::Max(0.1f, EnvironmentDebugLogIntervalSeconds))
+				{
+					EnvironmentDebugLogTimer = 0.f;
+					UE_LOG(
+						LogSubCrew,
+						Log,
+						TEXT("EnvState | Sub=%s | Comp=<outside> | Pressure=%.2f kPa | WaterHeight=%.2f cm | Immersion=%.2f | Exposure=%.2f | Swim=%d"),
+						*GetNameSafe(CurrentSubmarine),
+						CurrentAmbientPressureKPa,
+						CurrentWaterHeightCm,
+						CurrentWaterImmersion01,
+						PressureExposureSeconds,
+						IsCrewSwimming() ? 1 : 0);
+				}
+			}
+			else
+			{
+				EnvironmentDebugLogTimer = 0.f;
+			}
+			return;
+		}
+	}
+
 	if (ResolveCurrentCompartment(CompartmentState, CompartmentBounds))
 	{
 		CurrentCompartmentId = CompartmentState.CompartmentId;
@@ -933,7 +1008,7 @@ void ASubCrewCharacter::UpdateEnvironmentalEffects(float DeltaSeconds)
 				CurrentWaterHeightCm,
 				CurrentWaterImmersion01,
 				PressureExposureSeconds,
-				bIsSwimmingByFlood ? 1 : 0);
+				IsCrewSwimming() ? 1 : 0);
 		}
 	}
 	else
@@ -989,13 +1064,9 @@ void ASubCrewCharacter::ApplyWaterMovementState(float WaterImmersion01)
 		CrewWalkSpeedMultiplier = CrewMovement->GetDesiredWalkSpeedMultiplier();
 	}
 
-	if (WaterImmersion01 >= SwimThreshold01)
+	if (WaterImmersion01 >= DeepWadeThreshold01)
 	{
-		bIsSwimmingByFlood = true;
-	}
-	else if (WaterImmersion01 >= DeepWadeThreshold01)
-	{
-		const float RangeAlpha = FMath::GetRangePct(DeepWadeThreshold01, FMath::Max(DeepWadeThreshold01 + KINDA_SMALL_NUMBER, SwimThreshold01), WaterImmersion01);
+		const float RangeAlpha = FMath::GetRangePct(DeepWadeThreshold01, FMath::Max(DeepWadeThreshold01 + KINDA_SMALL_NUMBER, 1.f), WaterImmersion01);
 		WalkSpeedMultiplier = FMath::Lerp(DeepWadeSpeedMultiplier, NearSwimSpeedMultiplier, RangeAlpha);
 	}
 	else if (WaterImmersion01 >= ShallowWadeThreshold01)
@@ -1006,17 +1077,30 @@ void ASubCrewCharacter::ApplyWaterMovementState(float WaterImmersion01)
 
 	MovementComponent->MaxWalkSpeed = DefaultWalkSpeed * CrewWalkSpeedMultiplier * WalkSpeedMultiplier * MovementProtection;
 	MovementComponent->MaxSwimSpeed = DefaultSwimSpeed * FMath::Max(0.f, SwimSpeedMultiplier) * MovementProtection;
-
-	if (bIsSwimmingByFlood)
-	{
-		if (MovementComponent->MovementMode != MOVE_Swimming)
-		{
-			MovementComponent->SetMovementMode(MOVE_Swimming);
-		}
-	}
-	else if (MovementComponent->MovementMode == MOVE_Swimming)
+	MovementComponent->BrakingDecelerationSwimming = FMath::Max(0.f, SwimBrakingDeceleration);
+	MovementComponent->GravityScale = 1.f;
+	if (MovementComponent->MovementMode == MOVE_Swimming)
 	{
 		MovementComponent->SetMovementMode(MOVE_Walking);
+	}
+}
+
+void ASubCrewCharacter::ApplySwimmingMovementState(float SpeedMultiplier)
+{
+	UCharacterMovementComponent* MovementComponent = GetCharacterMovement();
+	if (!MovementComponent)
+	{
+		return;
+	}
+
+	const float MovementProtection = FMath::Max(0.f, WaterMovementProtectionMultiplier);
+	MovementComponent->MaxSwimSpeed = DefaultSwimSpeed * FMath::Max(0.f, SpeedMultiplier) * MovementProtection;
+	MovementComponent->BrakingDecelerationSwimming = FMath::Max(0.f, SwimBrakingDeceleration);
+	MovementComponent->GravityScale = SwimGravityScale;
+
+	if (MovementComponent->MovementMode != MOVE_Swimming)
+	{
+		MovementComponent->SetMovementMode(MOVE_Swimming);
 	}
 }
 
@@ -1036,6 +1120,7 @@ void ASubCrewCharacter::ResetEnvironmentalState()
 		const float CrewWalkSpeedMultiplier = GetCrewMovement() ? GetCrewMovement()->GetDesiredWalkSpeedMultiplier() : 1.f;
 		MovementComponent->MaxWalkSpeed = DefaultWalkSpeed * CrewWalkSpeedMultiplier;
 		MovementComponent->MaxSwimSpeed = DefaultSwimSpeed;
+		MovementComponent->GravityScale = 1.f;
 		if (MovementComponent->MovementMode == MOVE_Swimming)
 		{
 			MovementComponent->SetMovementMode(MOVE_Walking);

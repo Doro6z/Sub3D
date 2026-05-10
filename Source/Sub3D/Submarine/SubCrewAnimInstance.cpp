@@ -147,7 +147,7 @@ void USubCrewAnimInstance::ReadInputState()
 	Speed = LocomotionFrame.Speed2D;
 	Direction = LocomotionFrame.DirectionDeg;
 	bIsMoving = LocomotionFrame.bIsMoving;
-	bIsSwimming = LocomotionFrame.bIsSwimming || Crew->bIsSwimmingByFlood;
+	bIsSwimming = LocomotionFrame.bIsSwimming || Crew->IsCrewSwimming();
 	bIsRunning = LocomotionFrame.bIsRunning;
 	PostureAlpha = LocomotionFrame.PostureAlpha;
 	Stance = LocomotionFrame.Stance;

@@ -85,14 +85,16 @@ void UCompartmentVolumeComponent::TickComponent(
 	const float Level01 = GetWaterLevel01();
 	const float HeightCm = GetWaterHeightCm();
 	const FString Label = FString::Printf(
-		TEXT("%s  H=%.0fcm  L=%.2f"),
+		TEXT("(CV) %s  H=%.0fcm  L=%.2f"),
 		*CompartmentId.ToString(),
 		HeightCm,
 		Level01);
 
+	// Position label inside the top of the volume rather than floating above it — keeps it
+	// inside the box wireframe so multiple compartments don't overlap labels above them.
 	DrawDebugString(
 		World,
-		WorldXform.GetLocation() + FVector(0.f, 0.f, GetScaledBoxExtent().Z + 20.f),
+		WorldXform.GetLocation() + FVector(0.f, 0.f, GetScaledBoxExtent().Z * 0.5f),
 		Label,
 		nullptr,
 		VolumeColor,

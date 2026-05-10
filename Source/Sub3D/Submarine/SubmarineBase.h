@@ -140,6 +140,16 @@ public:
 	TSubclassOf<ASubDoorActor> GeneratorDoorActorClass;
 
 	/**
+	 * Class used to spawn ASubHatchActor for connections of EConnectionType::Hatch
+	 * (horizontal trap-door between stacked decks). If left null, falls back to
+	 * GeneratorDoorActorClass so existing setups don't break — the visual will look
+	 * like a vertical door even on a horizontal opening, which is functionally fine
+	 * but visually wrong. Set this to a BP_Hatch subclass for proper visuals.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Submarine|Generator")
+	TSubclassOf<class ASubHatchActor> GeneratorHatchActorClass;
+
+	/**
 	 * Spawn ASubDoorActor instances for each traversable connection in
 	 * GeneratedDefinition. Called from BeginPlay after BuildFromDefinition.
 	 * Safe to call with a null world (returns silently).
@@ -192,6 +202,27 @@ public:
 
 	UFUNCTION(BlueprintCallable, Category = "Submarine")
 	void ClearPilot();
+
+	/**
+	 * Resolve which compartment a sub-local point falls inside, considering ALL placed
+	 * UCompartmentVolumeComponent boxes (union of boxes — handles multi-volume L-shaped
+	 * compartments where two CVs share the same CompartmentId).
+	 *
+	 * CV is the single source of truth for compartment geometry. Returns NAME_None if no
+	 * volume contains the point. (DA HydroBounds fallback removed 2026-05-10 — option B.)
+	 */
+	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Submarine|Compartments")
+	FName FindCompartmentIdAtLocalLocation(const FVector& LocalPosition) const;
+
+	/**
+	 * Compute the encapsulating AABB (sub-local space) of all UCompartmentVolumeComponent
+	 * boxes that share the given CompartmentId. CV is now the single source of truth for
+	 * compartment geometry — this replaces the legacy FGeneratedCompartmentDef::HydroBounds
+	 * reads at all live call sites (crew bounds, breach center, teleport target, etc.).
+	 *
+	 * Returns false if no CV matches.
+	 */
+	bool GetCompartmentLocalBounds(FName CompartmentId, FBox& OutLocalBounds) const;
 
 	/**
 	 * Inject a water perturbation at a world-space point. Iterates every UFloodWaterPlaneComponent
@@ -362,17 +393,6 @@ private:
 
 	/** Destroy any doors previously spawned by SpawnDoorsFromDefinition. */
 	void DestroySpawnedGeneratorDoors();
-
-	/**
-	 * For each compartment in GeneratedDefinition, ensure a UCompartmentVolumeComponent exists
-	 * with matching CompartmentId. If a BP-placed volume already covers the id, leave it alone
-	 * (BP-authored wins). Otherwise spawn a runtime UCompartmentVolumeComponent with bounds
-	 * derived from HydroBoundsMin/Max. Idempotent: safe to call multiple times.
-	 *
-	 * Called in BeginPlay after InitializeFromDefinition succeeds. Drives the per-compartment
-	 * water plane spawning (Step 6 of BeginPlay) without requiring manual BP placement.
-	 */
-	void EnsureCompartmentVolumesFromDefinition();
 
 	UPROPERTY(Transient)
 	TWeakObjectPtr<UPrimitiveComponent> BoundMovementCollisionComponent;

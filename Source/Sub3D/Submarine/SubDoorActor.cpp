@@ -14,18 +14,27 @@
 
 ASubDoorActor::ASubDoorActor()
 {
-	PrimaryActorTick.bCanEverTick = false;
+	// Tick is enabled at runtime only when an animation is in flight (SetDoorClosed kickstarts,
+	// Tick disables itself when OpenAlpha reaches its target). Idle door = zero tick cost.
+	PrimaryActorTick.bCanEverTick = true;
+	PrimaryActorTick.bStartWithTickEnabled = false;
 	bReplicates = true;
 
 	Root = CreateDefaultSubobject<USceneComponent>(TEXT("Root"));
 	SetRootComponent(Root);
 
+	// DoorMesh attached directly to Root. Designer is responsible for adding any pivot
+	// hierarchy (BattantPivot etc.) in BP and applying the OpenAlpha-driven transform via
+	// BP_OnOpenAlphaUpdated — keeps C++ free of component assumptions that conflict with
+	// existing BP setups.
 	DoorMesh = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("DoorMesh"));
 	DoorMesh->SetupAttachment(Root);
 	DoorMesh->SetCollisionProfileName(TEXT("BlockAll"));
 	DoorMesh->SetCollisionResponseToChannel(ECC_GameTraceChannel1, ECR_Ignore);
 	DoorMesh->SetCanEverAffectNavigation(false);
 
+	// DoorCollision is the authoritative passability volume — toggling it via OpenAlpha
+	// threshold is a single binary gate regardless of the leaf's animation path.
 	DoorCollision = CreateDefaultSubobject<UBoxComponent>(TEXT("DoorCollision"));
 	DoorCollision->SetupAttachment(Root);
 	DoorCollision->SetCollisionProfileName(TEXT("BlockAll"));
@@ -43,6 +52,10 @@ void ASubDoorActor::BeginPlay()
 	ApplySubmarineCollisionIgnoreToAllPrimitiveComponents();
 
 	bClosed = bStartsClosed;
+	// Snap OpenAlpha to current target so we don't animate from 0 → bStartsClosed at spawn.
+	OpenAlpha = bClosed ? 0.f : 1.f;
+	BP_OnOpenAlphaUpdated(OpenAlpha);
+
 	TryResolveOwningSubmarine();
 	RegisterWithCompartments();
 	ApplyDoorState();
@@ -51,6 +64,50 @@ void ASubDoorActor::BeginPlay()
 	{
 		Interactable->OnInteract.AddDynamic(this, &ASubDoorActor::HandleInteract);
 	}
+}
+
+void ASubDoorActor::Tick(float DeltaTime)
+{
+	Super::Tick(DeltaTime);
+
+	const float Target = bClosed ? 0.f : 1.f;
+	if (FMath::IsNearlyEqual(OpenAlpha, Target, 0.001f))
+	{
+		// Reached target — stop ticking until next state change.
+		OpenAlpha = Target;
+		SetActorTickEnabled(false);
+		return;
+	}
+
+	const float Direction = (Target > OpenAlpha) ? 1.f : -1.f;
+	const float Step = DeltaTime / FMath::Max(0.05f, OpenDurationSeconds);
+	const float Prev = OpenAlpha;
+	OpenAlpha = FMath::Clamp(OpenAlpha + Direction * Step, 0.f, 1.f);
+
+	// Threshold-cross: flip blocking collision once the door is past CollisionToggleAlpha.
+	const bool bWasBlocking = Prev <= CollisionToggleAlpha;
+	const bool bNowBlocking = OpenAlpha <= CollisionToggleAlpha;
+	if (bWasBlocking != bNowBlocking)
+	{
+		ApplyCollisionFromAlpha();
+	}
+
+	BP_OnOpenAlphaUpdated(OpenAlpha);
+}
+
+void ASubDoorActor::SetOpenAlphaFromTimeline(float NewAlpha)
+{
+	const float Prev = OpenAlpha;
+	OpenAlpha = FMath::Clamp(NewAlpha, 0.f, 1.f);
+
+	const bool bWasBlocking = Prev <= CollisionToggleAlpha;
+	const bool bNowBlocking = OpenAlpha <= CollisionToggleAlpha;
+	if (bWasBlocking != bNowBlocking)
+	{
+		ApplyCollisionFromAlpha();
+	}
+	// Note: BP_OnOpenAlphaUpdated is NOT fired here — Strategy B owns the update loop, calling
+	// this back would create a feedback chain. The BP timeline handles its own transform.
 }
 
 void ASubDoorActor::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const
@@ -67,7 +124,13 @@ void ASubDoorActor::SetDoorClosed(bool bNewClosed)
 		return;
 	}
 
-	bClosed = bNewClosed;
+	if (bClosed != bNewClosed)
+	{
+		bClosed = bNewClosed;
+		// Wake the tick so the animation runs toward the new target. Tick disables itself
+		// once OpenAlpha reaches the target.
+		SetActorTickEnabled(true);
+	}
 	ApplyDoorState();
 	RegisterWithCompartments();
 }
@@ -114,6 +177,9 @@ void ASubDoorActor::HandleInteract(ASubCrewCharacter* Interactor)
 
 void ASubDoorActor::OnRep_DoorClosed()
 {
+	// Wake the tick on the client so OpenAlpha animates toward the new replicated target.
+	// Mirror of SetDoorClosed (which runs on server).
+	SetActorTickEnabled(true);
 	ApplyDoorState();
 }
 
@@ -145,22 +211,59 @@ void ASubDoorActor::TryResolveOwningSubmarine()
 
 void ASubDoorActor::ApplyDoorState()
 {
+	// Visibility no longer toggled here — the leaf is always rendered, animated via OpenAlpha
+	// through BP_OnOpenAlphaUpdated. Collision is now driven by ApplyCollisionFromAlpha() based
+	// on the OpenAlpha threshold (so the door remains blocking until the leaf is visibly clear).
 	ApplySubmarineCollisionIgnoreToAllPrimitiveComponents();
+	ApplyCollisionFromAlpha();
 
-	if (DoorMesh)
+	// Push door state into the flood graph so opening/closing actually gates water flow.
+	// DoorId is the FName key matching FFloodEdgeState::ClosureId — set explicitly in BP or
+	// via InitializeFromConnectionDef. If unset, fall back to compartment-pair matching so
+	// BP-placed doors still gate water without requiring DoorId to be wired manually.
+	if (OwningSubmarine && OwningSubmarine->SubFlood)
 	{
-		DoorMesh->SetCollisionEnabled(bClosed ? ECollisionEnabled::QueryAndPhysics : ECollisionEnabled::NoCollision);
-		DoorMesh->SetCollisionResponseToChannel(ECC_GameTraceChannel1, ECR_Ignore);
-		DoorMesh->SetVisibility(bClosed);
-	}
+		UE_LOG(LogTemp, Log,
+			TEXT("Door[%s] state changed: bClosed=%d DoorId='%s' A='%s' B='%s'"),
+			*GetName(), bClosed ? 1 : 0,
+			*DoorId.ToString(), *CompartmentA.ToString(), *CompartmentB.ToString());
 
-	if (DoorCollision)
-	{
-		DoorCollision->SetCollisionEnabled(bClosed ? ECollisionEnabled::QueryAndPhysics : ECollisionEnabled::NoCollision);
-		DoorCollision->SetCollisionResponseToChannel(ECC_GameTraceChannel1, ECR_Ignore);
+		if (!DoorId.IsNone())
+		{
+			OwningSubmarine->SubFlood->SetDoorState(DoorId, bClosed);
+		}
+		else if (!CompartmentA.IsNone() && !CompartmentB.IsNone())
+		{
+			OwningSubmarine->SubFlood->SetDoorStateByCompartments(CompartmentA, CompartmentB, bClosed);
+		}
+		else
+		{
+			UE_LOG(LogTemp, Warning,
+				TEXT("Door[%s] has no DoorId nor CompartmentA/B set — flood graph will not be gated."),
+				*GetName());
+		}
 	}
 
 	BP_OnDoorStateChanged(bClosed);
+}
+
+void ASubDoorActor::ApplyCollisionFromAlpha()
+{
+	const bool bBlocking = OpenAlpha <= CollisionToggleAlpha;
+	const ECollisionEnabled::Type Mode = bBlocking
+		? ECollisionEnabled::QueryAndPhysics
+		: ECollisionEnabled::NoCollision;
+
+	if (DoorMesh)
+	{
+		DoorMesh->SetCollisionEnabled(Mode);
+		DoorMesh->SetCollisionResponseToChannel(ECC_GameTraceChannel1, ECR_Ignore);
+	}
+	if (DoorCollision)
+	{
+		DoorCollision->SetCollisionEnabled(Mode);
+		DoorCollision->SetCollisionResponseToChannel(ECC_GameTraceChannel1, ECR_Ignore);
+	}
 }
 
 void ASubDoorActor::ApplySubmarineCollisionIgnoreToAllPrimitiveComponents()

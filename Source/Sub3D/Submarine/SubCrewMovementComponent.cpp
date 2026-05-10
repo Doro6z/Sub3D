@@ -16,6 +16,7 @@
 #include "Engine/World.h"
 #include "GameFramework/Character.h"
 #include "GameFramework/Controller.h"
+#include "GameFramework/PhysicsVolume.h"
 #include "HAL/IConsoleManager.h"
 #include "HAL/PlatformTime.h"
 #include "Net/UnrealNetwork.h"
@@ -70,6 +71,11 @@ FVector2D ClampMoveAxis(FVector2D MoveAxis)
 	return MoveAxis;
 }
 
+float ClampInputAxis(float Axis)
+{
+	return FMath::Clamp(Axis, -1.f, 1.f);
+}
+
 ECrewLocomotionStance ResolveLocomotionStance(float PostureAlpha, bool bIsSwimming)
 {
 	if (bIsSwimming)
@@ -114,17 +120,32 @@ ECrewLocomotionGait ResolveLocomotionGait(ECrewLocomotionStance Stance, bool bIs
 
 	return bIsRunning ? ECrewLocomotionGait::Sprint : ECrewLocomotionGait::Walk;
 }
+
+const TCHAR* MovementModeToDebugName(EMovementMode Mode)
+{
+	switch (Mode)
+	{
+	case MOVE_None:       return TEXT("None");
+	case MOVE_Walking:    return TEXT("Walking");
+	case MOVE_NavWalking: return TEXT("NavWalking");
+	case MOVE_Falling:    return TEXT("Falling");
+	case MOVE_Swimming:   return TEXT("Swimming");
+	case MOVE_Flying:     return TEXT("Flying");
+	case MOVE_Custom:     return TEXT("Custom");
+	default:              return TEXT("Unknown");
+	}
+}
 }
 
 USubCrewMovementComponent::USubCrewMovementComponent()
 {
 	SetIsReplicatedByDefault(true);
 
-	// FP EVA swim stub: ocean is state-driven (ECrewEmbarkState::Outside), not PhysicsVolume-driven.
-	// We piggy-back on MOVE_Flying with water-tuned params so it reads as "swim" in game terms.
-	// Swap for MOVE_Swimming + buoyancy when a proper ocean sim lands.
-	MaxFlySpeed = 250.f;                  // below walking (300) → heavy-water feel
-	BrakingDecelerationFlying = 1200.f;   // quick decel on input release → water drag
+	// EVA swim is state-driven from hull-boundary crossings, not PhysicsVolume-driven.
+	MaxSwimSpeed = 240.f;
+	BrakingDecelerationSwimming = 900.f;
+	Buoyancy = 1.f;
+	NavAgentProps.bCanSwim = true;
 
 	// The rebase is the sole transport path. CMC must never impart the MovementBase's
 	// velocity into the crew's Velocity on base change (ladder -> deck, deck -> deck, etc.)
@@ -141,13 +162,49 @@ USubCrewMovementComponent::USubCrewMovementComponent()
 	SetNetworkMoveDataContainer(*SubCrewMoveDataContainer);
 }
 
+void USubCrewMovementComponent::SetMovementMode(EMovementMode NewMovementMode, uint8 NewCustomMode)
+{
+	if (EmbarkState == ECrewEmbarkState::Outside && NewMovementMode == MOVE_Falling)
+	{
+		UE_LOG(
+			LogSubCrewMovement,
+			Log,
+			TEXT("Exterior swim blocked native Falling fallback | Crew=%s | CurrentMode=%s | PhysicsVolume=%s water=%d"),
+			*GetNameSafe(CharacterOwner),
+			MovementModeToDebugName(MovementMode),
+			*GetNameSafe(GetPhysicsVolume()),
+			(GetPhysicsVolume() && GetPhysicsVolume()->bWaterVolume) ? 1 : 0);
+		NewMovementMode = MOVE_Swimming;
+		NewCustomMode = 0;
+	}
+
+	Super::SetMovementMode(NewMovementMode, NewCustomMode);
+}
+
+bool USubCrewMovementComponent::IsInWater() const
+{
+	return EmbarkState == ECrewEmbarkState::Outside || Super::IsInWater();
+}
+
 void USubCrewMovementComponent::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
 {
 	if (!bReceivedMoveInputThisFrame)
 	{
-		LastMoveIntent = BuildMoveIntent(FVector2D::ZeroVector);
+		PendingPlanarMoveAxis = FVector2D::ZeroVector;
 	}
+	if (!bReceivedVerticalMoveInputThisFrame)
+	{
+		PendingVerticalMoveAxis = 0.f;
+	}
+
+	LastMoveIntent = BuildMoveIntent(PendingPlanarMoveAxis, PendingVerticalMoveAxis);
+	if (CharacterOwner && LastMoveIntent.bHasMoveInput)
+	{
+		AddInputVector(LastMoveIntent.WorldMoveDirection * LastMoveIntent.MoveInputStrength, false);
+	}
+
 	bReceivedMoveInputThisFrame = false;
+	bReceivedVerticalMoveInputThisFrame = false;
 
 	// Lazy authority latch — RISING-EDGE ONLY.
 	// Fires only when submarine binding transitions false->true (spawn into sub, replication).
@@ -566,6 +623,101 @@ void USubCrewMovementComponent::SmoothCorrection(const FVector& OldLocation, con
 	Super::SmoothCorrection(OldLocation, OldRotation, NewLocation, NewRotation);
 }
 
+void USubCrewMovementComponent::PhysicsVolumeChanged(APhysicsVolume* NewVolume)
+{
+	if (EmbarkState == ECrewEmbarkState::Outside && (!NewVolume || !NewVolume->bWaterVolume))
+	{
+		return;
+	}
+
+	Super::PhysicsVolumeChanged(NewVolume);
+}
+
+void USubCrewMovementComponent::SetDefaultMovementMode()
+{
+	if (EmbarkState == ECrewEmbarkState::Outside)
+	{
+		SetMovementMode(MOVE_Swimming);
+		return;
+	}
+
+	Super::SetDefaultMovementMode();
+}
+
+void USubCrewMovementComponent::PhysSwimming(float DeltaTime, int32 Iterations)
+{
+	const APhysicsVolume* PhysicsVolume = GetPhysicsVolume();
+	if (EmbarkState != ECrewEmbarkState::Outside || (PhysicsVolume && PhysicsVolume->bWaterVolume))
+	{
+		Super::PhysSwimming(DeltaTime, Iterations);
+		return;
+	}
+
+	if (DeltaTime <= KINDA_SMALL_NUMBER || !CharacterOwner || !UpdatedComponent)
+	{
+		return;
+	}
+
+	RestorePreAdditiveRootMotionVelocity();
+	bJustTeleported = false;
+
+	if (!HasAnimRootMotion() && !CurrentRootMotion.HasOverrideVelocity())
+	{
+		CalcVelocity(
+			DeltaTime,
+			FMath::Max(0.f, Sub3DExteriorSwimFluidFriction),
+			true,
+			GetMaxBrakingDeceleration());
+	}
+
+	ApplyRootMotionToVelocity(DeltaTime);
+
+	const FVector Adjusted = Velocity * DeltaTime;
+	if (Adjusted.IsNearlyZero())
+	{
+		return;
+	}
+
+	const FVector OldLocation = UpdatedComponent->GetComponentLocation();
+	FHitResult Hit(1.f);
+	SafeMoveUpdatedComponent(Adjusted, UpdatedComponent->GetComponentQuat(), true, Hit);
+	if (Hit.IsValidBlockingHit())
+	{
+		HandleImpact(Hit, DeltaTime, Adjusted);
+		SlideAlongSurface(Adjusted, 1.f - Hit.Time, Hit.Normal, Hit, true);
+	}
+
+	if (!HasAnimRootMotion() && !CurrentRootMotion.HasOverrideVelocity() && !bJustTeleported)
+	{
+		Velocity = (UpdatedComponent->GetComponentLocation() - OldLocation) / DeltaTime;
+	}
+}
+
+void USubCrewMovementComponent::OnMovementModeChanged(EMovementMode PreviousMovementMode, uint8 PreviousCustomMode)
+{
+	Super::OnMovementModeChanged(PreviousMovementMode, PreviousCustomMode);
+
+	const ASubCrewCharacter* Crew = Cast<ASubCrewCharacter>(CharacterOwner);
+	const APhysicsVolume* PhysicsVolume = GetPhysicsVolume();
+	UE_LOG(
+		LogSubCrewMovement,
+		Log,
+		TEXT("MovementModeChanged | %s(%d/%u) -> %s(%d/%u) | Crew=%s | Role=%d | EmbarkState=%d | Sub=%s | Comp=%s | PhysicsVolume=%s water=%d"),
+		MovementModeToDebugName(PreviousMovementMode),
+		static_cast<int32>(PreviousMovementMode),
+		static_cast<uint32>(PreviousCustomMode),
+		MovementModeToDebugName(MovementMode),
+		static_cast<int32>(MovementMode),
+		static_cast<uint32>(CustomMovementMode),
+		*GetNameSafe(CharacterOwner),
+		CharacterOwner ? static_cast<int32>(CharacterOwner->GetLocalRole()) : -1,
+		static_cast<int32>(EmbarkState),
+		*GetNameSafe(GetCurrentSubmarine()),
+		Crew ? *Crew->CurrentCompartmentId.ToString() : TEXT("<no-crew>"),
+		*GetNameSafe(PhysicsVolume),
+		(PhysicsVolume && PhysicsVolume->bWaterVolume) ? 1 : 0);
+}
+
 bool USubCrewMovementComponent::ServerCheckClientError(
 	float ClientTimeStamp,
 	float DeltaTime,
@@ -636,11 +788,52 @@ void USubCrewMovementComponent::ResetGridFacingYaw()
 	bHasGridFacingYaw = false;
 }
 
-FCrewMoveIntent USubCrewMovementComponent::BuildMoveIntent(FVector2D MoveAxis) const
+bool USubCrewMovementComponent::IsCrewSwimming() const
+{
+	return MovementMode == MOVE_Swimming;
+}
+
+FVector USubCrewMovementComponent::BuildWorldMoveInput(FVector2D MoveAxis, float VerticalAxis) const
+{
+	const FVector2D ClampedMoveAxis = ClampMoveAxis(MoveAxis);
+	const float ClampedVerticalAxis = ClampInputAxis(VerticalAxis);
+
+	float ControlYawDeg = CharacterOwner ? CharacterOwner->GetActorRotation().Yaw : 0.f;
+	FRotator ControlRotation(0.f, ControlYawDeg, 0.f);
+	if (CharacterOwner)
+	{
+		if (const AController* Controller = CharacterOwner->GetController())
+		{
+			ControlRotation = Controller->GetControlRotation();
+			ControlYawDeg = ControlRotation.Yaw;
+		}
+	}
+
+	const FRotator ControlYawRot(0.f, FRotator::NormalizeAxis(ControlYawDeg), 0.f);
+	const FVector YawForward = ControlYawRot.Vector();
+	const FVector YawRight = FRotationMatrix(ControlYawRot).GetScaledAxis(EAxis::Y);
+
+	if (!IsCrewSwimming())
+	{
+		return (YawForward * ClampedMoveAxis.X + YawRight * ClampedMoveAxis.Y).GetClampedToMaxSize(1.f);
+	}
+
+	const FVector CameraForward = ControlRotation.Vector();
+	const FVector SwimInput =
+		(CameraForward * ClampedMoveAxis.X)
+		+ (YawRight * ClampedMoveAxis.Y)
+		+ (FVector::UpVector * ClampedVerticalAxis * FMath::Max(0.f, SwimVerticalInputScale));
+
+	return SwimInput.GetClampedToMaxSize(1.f);
+}
+
+FCrewMoveIntent USubCrewMovementComponent::BuildMoveIntent(FVector2D MoveAxis, float VerticalAxis) const
 {
 	FCrewMoveIntent Intent;
 	Intent.MoveAxis = ClampMoveAxis(MoveAxis);
-	Intent.MoveInputStrength = FMath::Clamp(Intent.MoveAxis.Size(), 0.f, 1.f);
+	Intent.VerticalAxis = IsCrewSwimming() ? ClampInputAxis(VerticalAxis) : 0.f;
+	const FVector RawMoveInput = BuildWorldMoveInput(Intent.MoveAxis, Intent.VerticalAxis);
+	Intent.MoveInputStrength = FMath::Clamp(RawMoveInput.Size(), 0.f, 1.f);
 	Intent.bHasMoveInput = Intent.MoveInputStrength > KINDA_SMALL_NUMBER;
 
 	float ControlYawDeg = CharacterOwner ? CharacterOwner->GetActorRotation().Yaw : 0.f;
@@ -653,13 +846,10 @@ FCrewMoveIntent USubCrewMovementComponent::BuildMoveIntent(FVector2D MoveAxis) c
 	}
 
 	Intent.ControlYawDeg = FRotator::NormalizeAxis(ControlYawDeg);
-	const FRotator ControlYawRot(0.f, Intent.ControlYawDeg, 0.f);
-	const FVector Forward = ControlYawRot.Vector();
-	const FVector Right = FRotationMatrix(ControlYawRot).GetScaledAxis(EAxis::Y);
 
 	if (Intent.bHasMoveInput)
 	{
-		Intent.WorldMoveDirection = (Forward * Intent.MoveAxis.X + Right * Intent.MoveAxis.Y).GetSafeNormal2D();
+		Intent.WorldMoveDirection = RawMoveInput.GetSafeNormal();
 	}
 
 	if (Intent.WorldMoveDirection.IsNearlyZero())
@@ -677,7 +867,7 @@ FCrewMoveIntent USubCrewMovementComponent::BuildMoveIntent(FVector2D MoveAxis) c
 	{
 		const float SubYawDeg = Sub->GetActorRotation().Yaw;
 		const FRotator SubYawRot(0.f, SubYawDeg, 0.f);
-		Intent.LocalMoveDirection = SubYawRot.UnrotateVector(Intent.WorldMoveDirection).GetSafeNormal2D();
+		Intent.LocalMoveDirection = SubYawRot.UnrotateVector(Intent.WorldMoveDirection).GetSafeNormal();
 		Intent.DesiredGridYawDeg = FRotator::NormalizeAxis(Intent.DesiredWorldYawDeg - SubYawDeg);
 	}
 	else
@@ -691,23 +881,23 @@ FCrewMoveIntent USubCrewMovementComponent::BuildMoveIntent(FVector2D MoveAxis) c
 
 void USubCrewMovementComponent::ApplyCrewPlanarMoveInput(FVector2D MoveAxis)
 {
-	LastMoveIntent = BuildMoveIntent(MoveAxis);
+	PendingPlanarMoveAxis = ClampMoveAxis(MoveAxis);
+	LastMoveIntent = BuildMoveIntent(PendingPlanarMoveAxis, PendingVerticalMoveAxis);
 	bReceivedMoveInputThisFrame = true;
+}
 
-	if (!CharacterOwner || !LastMoveIntent.bHasMoveInput)
-	{
-		return;
-	}
-
-	AddInputVector(LastMoveIntent.WorldMoveDirection * LastMoveIntent.MoveInputStrength, false);
+void USubCrewMovementComponent::ApplyCrewVerticalMoveInput(float Axis)
+{
+	PendingVerticalMoveAxis = ClampInputAxis(Axis);
+	LastMoveIntent = BuildMoveIntent(PendingPlanarMoveAxis, PendingVerticalMoveAxis);
+	bReceivedVerticalMoveInputThisFrame = true;
 }
 
 void USubCrewMovementComponent::UpdateLocomotionFrame()
 {
 	FCrewLocomotionFrame Frame;
-	const ASubCrewCharacter* Crew = Cast<ASubCrewCharacter>(CharacterOwner);
 	const ASubmarineBase* Sub = GetCurrentSubmarine();
-	const bool bSwimming = Crew && Crew->bIsSwimmingByFlood;
+	const bool bSwimming = IsCrewSwimming();
 	const bool bGrid = IsGridAuthoritative() && Sub != nullptr;
 
 	Frame.bIsGridAuthoritative = bGrid;
@@ -735,12 +925,11 @@ void USubCrewMovementComponent::UpdateLocomotionFrame()
 	{
 		Frame.LocalVelocity = RelativeLinearVelocity;
 		Frame.WorldVelocity = Sub->GetActorTransform().TransformVectorNoScale(RelativeLinearVelocity);
-		Frame.Speed2D = Frame.LocalVelocity.Size2D();
+		Frame.Speed2D = bSwimming ? Frame.LocalVelocity.Size() : Frame.LocalVelocity.Size2D();
 	}
 	else
 	{
 		Frame.WorldVelocity = Velocity;
-		Frame.Speed2D = Frame.WorldVelocity.Size2D();
 		if (Sub)
 		{
 			const FRotator SubYawRot(0.f, Sub->GetActorRotation().Yaw, 0.f);
@@ -750,17 +939,19 @@ void USubCrewMovementComponent::UpdateLocomotionFrame()
 		{
 			Frame.LocalVelocity = Frame.WorldVelocity;
 		}
+		Frame.Speed2D = bSwimming ? Frame.WorldVelocity.Size() : Frame.WorldVelocity.Size2D();
 	}
 
 	Frame.bIsMoving = Frame.Speed2D > 10.f;
 	Frame.Stance = ResolveLocomotionStance(PostureAlpha, bSwimming);
 	Frame.Gait = ResolveLocomotionGait(Frame.Stance, Frame.bIsMoving, bIsRunning);
 
-	if (Frame.bIsMoving)
+	if (Frame.bIsMoving && (!bSwimming || !Frame.LocalVelocity.IsNearlyZero()))
 	{
-		const float VelocityYawDeg = bGrid
-			? Frame.LocalVelocity.ToOrientationRotator().Yaw
-			: Frame.WorldVelocity.ToOrientationRotator().Yaw;
+		const FVector DirectionVelocity = bGrid ? Frame.LocalVelocity : Frame.WorldVelocity;
+		const float VelocityYawDeg = DirectionVelocity.Size2D() > KINDA_SMALL_NUMBER
+			? DirectionVelocity.ToOrientationRotator().Yaw
+			: (bGrid ? Frame.BodyLocalYawDeg : Frame.BodyWorldYawDeg);
 		const float BodyYawDeg = bGrid ? Frame.BodyLocalYawDeg : Frame.BodyWorldYawDeg;
 		Frame.DirectionDeg = FMath::FindDeltaAngleDegrees(BodyYawDeg, VelocityYawDeg);
 	}
@@ -833,46 +1024,76 @@ FNetworkPredictionData_Client* USubCrewMovementComponent::GetPredictionData_Clie
 
 void USubCrewMovementComponent::MoveAutonomous(float ClientTimeStamp, float DeltaTime, uint8 CompressedFlags, const FVector& NewAccel)
 {
+	const bool bServerRemoteAutonomousProxy =
+		CharacterOwner && CharacterOwner->GetLocalRole() == ROLE_Authority && !CharacterOwner->IsLocallyControlled();
+
+	bool bHasReportedSubMove = false;
+	FTransform ReportedGridSpaceTransform = FTransform::Identity;
+	ECrewEmbarkState ReportedState = ECrewEmbarkState::Outside;
+	ECrewHandoffKind ReportedHandoff = ECrewHandoffKind::None;
+
+	auto ApplyReportedSubMoveState = [&]()
+	{
+		GridSpaceTransform = ReportedGridSpaceTransform;
+		if (ReportedState == ECrewEmbarkState::Embarked || ReportedState == ECrewEmbarkState::Transitioning)
+		{
+			GridFacingYawDeg = FRotator::NormalizeAxis(GridSpaceTransform.Rotator().Yaw);
+			DesiredGridFacingYawDeg = GridFacingYawDeg;
+			GridFacingYawRateDegPerSec = 0.f;
+			bHasGridFacingYaw = true;
+		}
+		else
+		{
+			ResetGridFacingYaw();
+		}
+
+		if (ReportedState != EmbarkState)
+		{
+			SetEmbarkState(ReportedState);
+		}
+
+		if (ReportedState == ECrewEmbarkState::Outside && MovementMode != MOVE_Swimming)
+		{
+			if (const ASubCrewCharacter* Crew = Cast<ASubCrewCharacter>(CharacterOwner))
+			{
+				GravityScale = Crew->SwimGravityScale;
+			}
+			SetMovementMode(MOVE_Swimming);
+		}
+	};
+
+	if (bServerRemoteAutonomousProxy)
+	{
+		if (const FCharacterNetworkMoveData* CurrentMoveData = GetCurrentNetworkMoveData())
+		{
+			const FCharacterNetworkMoveData_SubCrew* SubMoveData = static_cast<const FCharacterNetworkMoveData_SubCrew*>(CurrentMoveData);
+			bHasReportedSubMove = true;
+			ReportedGridSpaceTransform = SubMoveData->GridSpaceTransform;
+			ReportedState = static_cast<ECrewEmbarkState>(SubMoveData->EmbarkStateByte);
+			ReportedHandoff = SubMoveData->Handoff;
+			ApplyReportedSubMoveState();
+		}
+	}
+
 	Super::MoveAutonomous(ClientTimeStamp, DeltaTime, CompressedFlags, NewAccel);
 
 	// Server-side: after CMC processes the client's move, apply the client's reported
 	// grid-space state directly (trust model for FP co-op — production would bound the
 	// per-tick delta). The replicated UPROPERTY(COND_SkipOwner) then broadcasts to peers.
-	if (CharacterOwner && CharacterOwner->GetLocalRole() == ROLE_Authority && !CharacterOwner->IsLocallyControlled())
+	if (bServerRemoteAutonomousProxy && bHasReportedSubMove)
 	{
-		if (const FCharacterNetworkMoveData* CurrentMoveData = GetCurrentNetworkMoveData())
+		ApplyReportedSubMoveState();
+
+		if (ReportedHandoff != ECrewHandoffKind::None)
 		{
-			const FCharacterNetworkMoveData_SubCrew* SubMoveData = static_cast<const FCharacterNetworkMoveData_SubCrew*>(CurrentMoveData);
-			GridSpaceTransform = SubMoveData->GridSpaceTransform;
-			const ECrewEmbarkState ReportedState = static_cast<ECrewEmbarkState>(SubMoveData->EmbarkStateByte);
-			if (ReportedState == ECrewEmbarkState::Embarked || ReportedState == ECrewEmbarkState::Transitioning)
-			{
-				GridFacingYawDeg = FRotator::NormalizeAxis(GridSpaceTransform.Rotator().Yaw);
-				DesiredGridFacingYawDeg = GridFacingYawDeg;
-				GridFacingYawRateDegPerSec = 0.f;
-				bHasGridFacingYaw = true;
-			}
-			else
-			{
-				ResetGridFacingYaw();
-			}
-
-			if (ReportedState != EmbarkState)
-			{
-				SetEmbarkState(ReportedState);
-			}
-
-			// Handoff event bit: server mirrors the state flip already fired by the client.
-			// Velocity blending was applied client-side; we just ensure the server state converges.
-			if (SubMoveData->Handoff != ECrewHandoffKind::None)
-			{
-				UE_LOG(
-					LogSubCrewMovement,
-					Log,
-					TEXT("ServerMove received handoff event | Kind=%d | Crew=%s"),
-					static_cast<int32>(SubMoveData->Handoff),
-					*GetNameSafe(CharacterOwner));
-			}
+			UE_LOG(
+				LogSubCrewMovement,
+				Log,
+				TEXT("ServerMove received handoff event | Kind=%d | Crew=%s | ReportedState=%d | Mode=%s"),
+				static_cast<int32>(ReportedHandoff),
+				*GetNameSafe(CharacterOwner),
+				static_cast<int32>(ReportedState),
+				MovementModeToDebugName(MovementMode));
 		}
 	}
 }
@@ -1776,7 +1997,7 @@ void USubCrewMovementComponent::SetRunningState(bool bNewRunning)
 	const bool bResolvedRunning =
 		bNewRunning
 		&& PostureTarget >= 0.75f
-		&& (!Crew || !Crew->bIsSwimmingByFlood);
+		&& !IsCrewSwimming();
 
 	if (bIsRunning == bResolvedRunning)
 	{
@@ -1853,8 +2074,7 @@ void USubCrewMovementComponent::UpdateHandIKProbes()
 
 bool USubCrewMovementComponent::ShouldEvaluateHandIK() const
 {
-	const ASubCrewCharacter* Crew = Cast<ASubCrewCharacter>(CharacterOwner);
-	if (!CharacterOwner || !HasSubmarineBinding() || (Crew && Crew->bIsSwimmingByFlood))
+	if (!CharacterOwner || !HasSubmarineBinding() || IsCrewSwimming())
 	{
 		return false;
 	}
@@ -1870,9 +2090,8 @@ void USubCrewMovementComponent::UpdateFootIKTraces()
 	FootIK_R = FVector::ZeroVector;
 	FootIK_L = FVector::ZeroVector;
 
-	const ASubCrewCharacter* Crew = Cast<ASubCrewCharacter>(CharacterOwner);
 	UWorld* World = GetWorld();
-	if (!CharacterOwner || !CharacterOwner->GetCapsuleComponent() || !World || (Crew && Crew->bIsSwimmingByFlood))
+	if (!CharacterOwner || !CharacterOwner->GetCapsuleComponent() || !World || IsCrewSwimming())
 	{
 		FootIK_R_State = FCrewFootIKState();
 		FootIK_L_State = FCrewFootIKState();

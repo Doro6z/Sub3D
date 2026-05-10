@@ -1,0 +1,209 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<title>Sub3D · G-CornerPips — 4 corner symbolic icons</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<style>
+  :root { --bg-deep:#0a0d12; --panel:#181c23; --border:#2a313b; --border-hi:#3a4452; --text:#d8d4ca; --dim:#8d9095; --faint:#5e636a; --teal:#6db4a3; --amber:#c89868; --gold:#d4b876; --leaf:#87a86b; --crimson:#b8554a; }
+  body { background: var(--bg-deep); color: var(--text); font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; overflow: hidden; }
+  .mono { font-family: "JetBrains Mono", Consolas, monospace; }
+  .num { font-variant-numeric: tabular-nums; }
+  .viewport { background: radial-gradient(ellipse at 50% 38%, #14202a 0%, #0a1218 38%, #050709 80%), var(--bg-deep); }
+  .crosshair { stroke: rgba(216,212,202,.4); stroke-width:1; }
+
+  .preview-bar { background: rgba(5,8,12,.98); border-bottom: 1px solid var(--border); }
+  .preview-btn { padding:3px 9px; border-radius:2px; font-size:11px; color:var(--dim); border:1px solid var(--border); background:rgba(15,20,28,.6); }
+  .preview-btn:hover { color:var(--text); border-color:var(--border-hi); }
+  .preview-btn-active { background:rgba(109,180,163,.12); border-color:var(--teal); color:var(--teal); }
+  .panel { background: rgba(24,28,35,.92); border: 1px solid var(--border); border-radius: 4px; }
+
+  /* Corner pip housing */
+  .pip {
+    position: absolute;
+    display: flex; align-items: center; gap: 8px;
+    padding: 7px 12px;
+    background: rgba(24,28,35,.88);
+    border: 1px solid var(--border);
+    border-radius: 3px;
+    transition: border-color .25s, box-shadow .25s, background .25s;
+  }
+  .pip-tl { top: 48px;     left: 16px; }
+  .pip-tr { top: 48px;     right: 16px; }
+  .pip-bl { bottom: 16px;  left: 16px; }
+  .pip-br { bottom: 16px;  right: 16px; }
+
+  .pip-icon { display: inline-flex; align-items: center; justify-content: center; width: 20px; height: 20px; }
+  .pip-icon svg { stroke: var(--text-faint); transition: stroke .25s; width: 18px; height: 18px; }
+  .pip-text {
+    font-family: "JetBrains Mono", monospace;
+    font-size: 10px; letter-spacing: .12em; text-transform: uppercase;
+    color: var(--dim);
+    transition: color .25s;
+  }
+
+  /* States: ok / warn / crit */
+  .pip.ok    { border-color: rgba(109,180,163,.35); }
+  .pip.ok    .pip-icon svg { stroke: var(--teal); }
+  .pip.ok    .pip-text     { color: var(--teal); }
+
+  .pip.warn  { border-color: rgba(200,152,104,.5); box-shadow: 0 0 12px rgba(200,152,104,.2); }
+  .pip.warn  .pip-icon svg { stroke: var(--amber); animation: pip-pulse-amber 1.4s ease-in-out infinite; }
+  .pip.warn  .pip-text     { color: var(--amber); }
+
+  .pip.crit  { border-color: var(--crimson); box-shadow: 0 0 18px rgba(184,85,74,.35); background: rgba(60,16,12,.4); }
+  .pip.crit  .pip-icon svg { stroke: var(--crimson); animation: pip-pulse-crim 0.8s ease-in-out infinite; }
+  .pip.crit  .pip-text     { color: var(--crimson); }
+
+  @keyframes pip-pulse-amber { 0%,100% { opacity: 1; } 50% { opacity: .55; } }
+  @keyframes pip-pulse-crim  { 0%,100% { opacity: 1; transform: scale(1); } 50% { opacity: .65; transform: scale(1.08); } }
+
+  /* Heart pulse (unchanged) */
+  .heart-icon { transform-origin:center; animation: heart-beat var(--hr,1s) ease-in-out infinite; }
+  @keyframes heart-beat { 0%,70%,100%{transform:scale(1);} 20%{transform:scale(1.18);} 40%{transform:scale(1.04);} }
+
+  /* Optional: detail tooltip on hover */
+  .pip:hover { background: rgba(24,28,35,.98); border-color: var(--border-hi); }
+  .pip-detail {
+    position: absolute; bottom: 100%; margin-bottom: 6px; left: 0;
+    padding: 6px 10px; background: rgba(8,12,17,.96); border: 1px solid var(--border-hi); border-radius: 3px;
+    white-space: nowrap; font-size: 11px; color: var(--text);
+    opacity: 0; pointer-events: none; transition: opacity .15s;
+  }
+  .pip-bl .pip-detail, .pip-br .pip-detail { bottom: auto; top: 100%; margin-bottom: 0; margin-top: 6px; }
+  .pip:hover .pip-detail { opacity: 1; }
+
+  .legend {
+    position: absolute; left: 50%; top: 50%;
+    transform: translate(-50%, calc(-50% + 200px));
+    text-align: center;
+    font-family: "JetBrains Mono", monospace;
+    font-size: 10px; letter-spacing: .14em; text-transform: uppercase;
+    color: var(--text-faint);
+    pointer-events: none;
+  }
+</style>
+</head>
+<body>
+
+<div class="preview-bar fixed top-0 left-0 right-0 z-50 px-4 py-2 flex items-center gap-5 text-xs flex-wrap">
+  <a href="index.html" class="text-teal-300 hover:underline mono font-bold text-xs">← gallery</a>
+  <span class="text-slate-700">·</span>
+  <span class="text-teal-300 mono font-bold">G-CORNERPIPS</span>
+  <span class="text-slate-700">·</span>
+  <span class="text-slate-500">4 corner icons · domain vocabulary · pulse on threshold</span>
+
+  <div class="flex items-center gap-2 ml-auto"><span class="text-slate-500 uppercase mono">tl mech:</span><div id="tl-buttons" class="flex gap-1"></div></div>
+  <div class="flex items-center gap-2"><span class="text-slate-500 uppercase mono">tr env:</span><div id="tr-buttons" class="flex gap-1"></div></div>
+  <div class="flex items-center gap-2"><span class="text-slate-500 uppercase mono">bl body:</span><div id="bl-buttons" class="flex gap-1"></div></div>
+  <div class="flex items-center gap-2"><span class="text-slate-500 uppercase mono">br kit:</span><div id="br-buttons" class="flex gap-1"></div></div>
+</div>
+
+<div class="viewport relative w-screen h-screen pt-9">
+  <svg class="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 pointer-events-none" width="14" height="14">
+    <line class="crosshair" x1="7" y1="0" x2="7" y2="4"/><line class="crosshair" x1="7" y1="10" x2="7" y2="14"/>
+    <line class="crosshair" x1="0" y1="7" x2="4" y2="7"/><line class="crosshair" x1="10" y1="7" x2="14" y2="7"/>
+  </svg>
+
+  <!-- TL · MECHANICAL (hull / breach / power) -->
+  <div id="pip-tl" class="pip pip-tl ok">
+    <div class="pip-icon">
+      <svg viewBox="0 0 24 24" fill="none" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M2 14c2-3 5-4 10-4s8 1 10 4"/><path d="M2 14c2 3 5 4 10 4s8-1 10-4"/></svg>
+    </div>
+    <span class="pip-text" id="tl-text">Mechanical</span>
+    <div class="pip-detail" id="tl-detail">Hull avg 79% · Power 74kW</div>
+  </div>
+
+  <!-- TR · ENVIRONMENT (depth / pressure / oxygen) -->
+  <div id="pip-tr" class="pip pip-tr ok">
+    <div class="pip-icon">
+      <svg viewBox="0 0 24 24" fill="none" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 0 1 18 0"/><path d="M12 12l4-3"/><circle cx="12" cy="12" r="1.5"/></svg>
+    </div>
+    <span class="pip-text" id="tr-text">Environment</span>
+    <div class="pip-detail" id="tr-detail">Depth −1240m · Pressure 128kPa · O₂ 87%</div>
+  </div>
+
+  <!-- BL · BODY (HP / bleeding / fatigue) -->
+  <div id="pip-bl" class="pip pip-bl ok">
+    <div class="pip-icon">
+      <svg viewBox="0 0 24 24" fill="none" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/></svg>
+    </div>
+    <span class="pip-text" id="bl-text">Body</span>
+    <div class="pip-detail" id="bl-detail">HP 92 · Pulse 72 bpm · No bleeding</div>
+  </div>
+
+  <!-- BR · EQUIPMENT (held / suit / battery) -->
+  <div id="pip-br" class="pip pip-br ok">
+    <div class="pip-icon">
+      <svg viewBox="0 0 24 24" fill="none" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/></svg>
+    </div>
+    <span class="pip-text" id="br-text">Kit</span>
+    <div class="pip-detail" id="br-detail">Wrench 88% · Suit OK</div>
+  </div>
+
+  <!-- Heart pulse (universal stamina) -->
+  <div class="absolute top-1/2 left-1/2 -translate-x-1/2 mt-12 flex items-center gap-1.5 pointer-events-none">
+    <span class="inline-flex items-center justify-center w-5 h-5 bg-slate-900/70 border border-slate-600 rounded text-[10px] mono">F</span>
+    <span class="text-slate-300 text-xs">Activate · Helm</span>
+  </div>
+
+  <!-- Vocabulary legend at bottom-center -->
+  <div class="legend">
+    TL · mechanical &nbsp;·&nbsp; TR · environment &nbsp;·&nbsp; BL · body &nbsp;·&nbsp; BR · equipment
+  </div>
+</div>
+
+<div class="fixed bottom-3 left-1/2 -translate-x-1/2 panel px-4 py-2 text-[11px] text-slate-400 max-w-2xl text-center pointer-events-none" style="z-index:60;">
+  <span class="text-teal-300 mono">G-CORNERPIPS</span> · 4 corners, 4 domains, never overlap.
+  Color + animation encode severity (ok / warn / crit). Hover for detail. No screen-wide tints.
+</div>
+
+<script>
+const STATES = ["ok","warn","crit"];
+const DETAILS = {
+  tl: {
+    ok:   "Hull avg 79% · Power 74 kW · all systems nominal",
+    warn: "Hull avg 62% · ENG-02 stressed · pump offline",
+    crit: "BREACH ENG-02 · 12 L/s · power dropping"
+  },
+  tr: {
+    ok:   "Depth −1240 m · Pressure 128 kPa · O₂ 87%",
+    warn: "Depth −1820 m · Pressure 192 kPa · O₂ 41%",
+    crit: "CRUSH DEPTH · O₂ 8% · ascend now"
+  },
+  bl: {
+    ok:   "HP 92 · Pulse 72 bpm · no bleeding",
+    warn: "HP 64 · Pulse 98 bpm · light bleeding · L arm bruised",
+    crit: "HP 22 · Pulse 138 bpm · heavy bleeding · unconscious in 60 s"
+  },
+  br: {
+    ok:   "Wrench 88% · Suit MK-IV nominal",
+    warn: "Suit battery 18% · Welder fuel low",
+    crit: "Suit COMPROMISED · sealing failure"
+  }
+};
+
+let s = { tl: "ok", tr: "ok", bl: "ok", br: "ok" };
+
+function pillBtns(host, opts, sel, cb) {
+  document.getElementById(host).innerHTML = opts
+    .map(o => `<button data-v="${o}" class="preview-btn ${o===sel?'preview-btn-active':''}">${o}</button>`).join("");
+  document.getElementById(host).querySelectorAll("button").forEach(b => b.addEventListener("click", () => cb(b.dataset.v)));
+}
+
+function renderPip(c) {
+  const pip = document.getElementById(`pip-${c}`);
+  pip.classList.remove("ok","warn","crit");
+  pip.classList.add(s[c]);
+  document.getElementById(`${c}-detail`).textContent = DETAILS[c][s[c]];
+}
+function renderAll() {
+  ["tl","tr","bl","br"].forEach(c => {
+    pillBtns(`${c}-buttons`, STATES, s[c], v => { s[c] = v; renderAll(); });
+    renderPip(c);
+  });
+}
+renderAll();
+</script>
+</body>
+</html>

@@ -1,0 +1,227 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<title>Sub3D · Concept C03 — Wrist Slate</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<style>
+  :root {
+    --bg-deep:#0a0d12; --panel:#181c23; --border:#2a313b; --border-hi:#3a4452;
+    --text:#d8d4ca; --dim:#8d9095; --faint:#5e636a;
+    --teal:#6db4a3; --amber:#c89868; --gold:#d4b876; --leaf:#87a86b; --crimson:#b8554a;
+    --slate-screen: #1a3530;
+  }
+  body { background: var(--bg-deep); color: var(--text); font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; overflow: hidden; }
+  .mono { font-family: "JetBrains Mono", Consolas, monospace; }
+  .num { font-variant-numeric: tabular-nums; }
+  .viewport { background: radial-gradient(ellipse at 50% 38%, #14202a 0%, #0a1218 38%, #050709 80%), var(--bg-deep); }
+  .crosshair { stroke: rgba(216,212,202,.4); stroke-width:1; }
+  .preview-bar { background: rgba(5,8,12,.98); border-bottom: 1px solid var(--border); }
+  .preview-btn { padding:3px 9px; border-radius:2px; font-size:11px; color:var(--dim); border:1px solid var(--border); background:rgba(15,20,28,.6); }
+  .preview-btn:hover { color:var(--text); border-color:var(--border-hi); }
+  .preview-btn-active { background:rgba(109,180,163,.12); border-color:var(--teal); color:var(--teal); }
+  .panel { background: rgba(24,28,35,.92); border: 1px solid var(--border); border-radius: 4px; }
+
+  /* Wrist slate — physical chassis */
+  .wrist {
+    position: absolute;
+    bottom: -180px;
+    left: 60px;
+    width: 380px; height: 240px;
+    transform: rotate(-8deg);
+    transform-origin: bottom left;
+    transition: bottom .35s cubic-bezier(.4, 0, .2, 1), left .35s cubic-bezier(.4, 0, .2, 1), transform .35s, width .35s, height .35s;
+    background: linear-gradient(135deg, #1a1f24 0%, #0d1116 100%);
+    border: 1px solid #2c333d;
+    border-radius: 14px;
+    padding: 16px;
+    box-shadow:
+      0 -10px 30px rgba(0,0,0,.6),
+      inset 0 1px 0 rgba(255,255,255,.04),
+      inset 0 0 0 1px rgba(0,0,0,.3);
+  }
+  .wrist::before { /* leather strap top */
+    content:""; position:absolute; top:-12px; left:30px; right:30px; height:14px;
+    background: linear-gradient(180deg, #1f1815, #2c1f1a);
+    border: 1px solid #150f0c; border-radius: 4px 4px 0 0;
+  }
+  .wrist::after { /* strap bottom */
+    content:""; position:absolute; bottom:-12px; left:30px; right:30px; height:14px;
+    background: linear-gradient(0deg, #1f1815, #2c1f1a);
+    border: 1px solid #150f0c; border-radius: 0 0 4px 4px;
+  }
+  .wrist.peek { bottom: -180px; }   /* default: edge visible */
+  .wrist.show { bottom: 60px; left: 50%; width: 540px; height: 360px; transform: translateX(-50%) rotate(0deg); }
+
+  .slate-screen {
+    background: var(--slate-screen);
+    border: 1px solid #0a1f1c;
+    border-radius: 8px;
+    height: 100%; width: 100%;
+    padding: 14px;
+    color: #aedccd;
+    font-family: "JetBrains Mono", monospace;
+    box-shadow: inset 0 0 30px rgba(0,0,0,.7), inset 0 0 0 1px rgba(174,220,205,.05);
+    position: relative; overflow: hidden;
+  }
+  .scanline {
+    position: absolute; left:0; right:0; height:1px;
+    background: rgba(174,220,205,.15);
+    animation: scan 6s linear infinite;
+  }
+  @keyframes scan { 0% { top:0; } 100% { top:100%; } }
+  .scrn-row { display:flex; justify-content:space-between; padding: 3px 0; font-size: 11px; }
+  .scrn-row .lbl { color: rgba(174,220,205,.6); letter-spacing: .1em; text-transform: uppercase; font-size:10px; }
+  .scrn-row .val { color: #aedccd; }
+
+  .led { width: 5px; height: 5px; border-radius: 50%; background: var(--leaf); box-shadow: 0 0 4px var(--leaf); }
+  .led-amber { background: var(--amber); box-shadow: 0 0 4px var(--amber); }
+  .led-crimson { background: var(--crimson); box-shadow: 0 0 4px var(--crimson); }
+  .led-off { background: #1a2026; box-shadow: none; }
+
+  /* Pulse heart in idle peek mode */
+  .heart-icon { transform-origin:center; animation: heart-beat var(--hr,1s) ease-in-out infinite; }
+  @keyframes heart-beat { 0%,70%,100%{transform:scale(1);} 20%{transform:scale(1.18);} 40%{transform:scale(1.04);} }
+
+  /* Center context prompt */
+  .ctx-prompt { position:absolute; left:50%; top:50%; transform: translate(-50%, calc(-50% + 56px)); pointer-events:none; text-align:center; }
+
+  .keymap { font-family:"JetBrains Mono",monospace; font-size:10px; color:#cbcab9; }
+</style>
+</head>
+<body>
+
+<div class="preview-bar fixed top-0 left-0 right-0 z-50 px-4 py-2 flex items-center gap-5 text-xs flex-wrap">
+  <a href="index.html" class="text-teal-300 hover:underline mono font-bold text-xs">← gallery</a>
+  <span class="text-slate-700">·</span>
+  <span class="text-teal-300 mono font-bold">C03 WRIST SLATE</span>
+  <span class="text-slate-700">·</span>
+  <span class="text-slate-500">diegetic personal device · hold Q to view</span>
+  <div class="flex items-center gap-2 ml-auto">
+    <span class="text-slate-500 uppercase mono">slate:</span>
+    <button id="peek-btn" class="preview-btn">peek</button>
+    <button id="show-btn" class="preview-btn">show</button>
+  </div>
+</div>
+
+<div class="viewport relative w-screen h-screen pt-9">
+
+  <svg class="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 pointer-events-none" width="14" height="14">
+    <line class="crosshair" x1="7" y1="0" x2="7" y2="4"/><line class="crosshair" x1="7" y1="10" x2="7" y2="14"/>
+    <line class="crosshair" x1="0" y1="7" x2="4" y2="7"/><line class="crosshair" x1="10" y1="7" x2="14" y2="7"/>
+  </svg>
+
+  <!-- Center prompt (still useful with diegetic UI) -->
+  <div class="ctx-prompt">
+    <div class="flex items-center justify-center gap-1.5">
+      <span class="inline-flex items-center justify-center w-5 h-5 bg-slate-900 border border-slate-600 rounded text-[10px] mono">F</span>
+      <span class="text-slate-300 text-xs">Activate · Helm console</span>
+    </div>
+  </div>
+
+  <!-- Tiny LED row at bottom-left as ambient peek indicator (visible always) -->
+  <div class="absolute bottom-2 left-3 flex items-center gap-2 mono text-[9px] uppercase tracking-wider text-slate-500" style="z-index:5;">
+    <span class="led" id="led-hp"></span>
+    <span class="led led-amber" id="led-fat"></span>
+    <span class="led" id="led-air"></span>
+    <span>HOLD Q FOR SLATE</span>
+  </div>
+
+  <!-- The wrist slate itself -->
+  <div id="wrist" class="wrist peek">
+    <div class="slate-screen">
+      <div class="scanline"></div>
+
+      <!-- Top status row: LEDs -->
+      <div class="flex items-center justify-between mb-3">
+        <div class="text-[10px] tracking-widest" style="color:rgba(174,220,205,.7)">SUIT · MK-IV</div>
+        <div class="flex items-center gap-1.5">
+          <span class="led"></span><span class="led"></span><span class="led led-amber"></span><span class="led led-off"></span>
+        </div>
+      </div>
+
+      <!-- Vitals readout -->
+      <div class="grid grid-cols-2 gap-x-6 gap-y-0.5">
+        <div class="scrn-row"><span class="lbl">Health</span><span class="val num">92</span></div>
+        <div class="scrn-row"><span class="lbl">Fatigue</span><span class="val num">23</span></div>
+        <div class="scrn-row"><span class="lbl">Pulse</span><span class="val num">72 bpm</span></div>
+        <div class="scrn-row"><span class="lbl">Hydration</span><span class="val num">68%</span></div>
+        <div class="scrn-row"><span class="lbl">O₂ reserve</span><span class="val num">— suit</span></div>
+        <div class="scrn-row"><span class="lbl">Body temp</span><span class="val num">36.4 °C</span></div>
+      </div>
+
+      <!-- Divider -->
+      <div class="my-3 h-px" style="background:rgba(174,220,205,.18)"></div>
+
+      <!-- Posture + environment -->
+      <div class="grid grid-cols-2 gap-x-6 items-center">
+        <div>
+          <div class="text-[9px] tracking-widest mb-1" style="color:rgba(174,220,205,.5)">POSTURE</div>
+          <div class="flex items-center gap-2.5">
+            <svg width="34" height="50" viewBox="0 0 34 50" fill="none" stroke="#aedccd" stroke-width="1.4" stroke-linecap="round">
+              <circle cx="17" cy="6" r="3"/><line x1="17" y1="9" x2="17" y2="28"/>
+              <line x1="17" y1="14" x2="11" y2="22"/><line x1="17" y1="14" x2="23" y2="22"/>
+              <line x1="17" y1="28" x2="13" y2="44"/><line x1="17" y1="28" x2="21" y2="44"/>
+            </svg>
+            <span class="val text-sm">Standing</span>
+          </div>
+        </div>
+        <div>
+          <div class="text-[9px] tracking-widest mb-1" style="color:rgba(174,220,205,.5)">ENV</div>
+          <div class="space-y-0.5">
+            <div class="scrn-row"><span class="lbl">Comp</span><span class="val">ENG-02</span></div>
+            <div class="scrn-row"><span class="lbl">Depth</span><span class="val num">−1 240 m</span></div>
+            <div class="scrn-row"><span class="lbl">Pressure</span><span class="val num">128 kPa</span></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Footer hotbar reference -->
+      <div class="absolute bottom-3 left-4 right-4 flex items-center justify-between">
+        <div class="flex gap-1">
+          <span class="w-5 h-5 rounded-sm border" style="border-color:rgba(174,220,205,.3); background:rgba(174,220,205,.05)"></span>
+          <span class="w-5 h-5 rounded-sm border" style="border-color:rgba(174,220,205,.3)"></span>
+          <span class="w-5 h-5 rounded-sm border" style="border-color:rgba(174,220,205,.3)"></span>
+          <span class="w-5 h-5 rounded-sm border" style="border-color:rgba(174,220,205,.3)"></span>
+        </div>
+        <div class="text-[9px] tracking-widest" style="color:rgba(174,220,205,.4)">HOLSTER · HOTKEY · MAP</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Hint when peeking -->
+  <div id="hint" class="absolute right-6 bottom-8 panel px-3 py-1.5 text-[10px] mono uppercase tracking-wider text-slate-500">
+    hold <span class="key inline-block px-1.5 bg-slate-900 border border-slate-700 rounded">Q</span> · slate
+  </div>
+
+</div>
+
+<div class="fixed bottom-3 left-1/2 -translate-x-1/2 panel px-4 py-2 text-[11px] text-slate-400 max-w-2xl text-center pointer-events-none" style="z-index:60;">
+  <span class="text-teal-300 mono">C03 WRIST SLATE</span> · most info on a wrist-mounted device.
+  Default screen is mostly empty (only LEDs + crosshair). Hold Q to bring slate into view. Pure diegetic.
+</div>
+
+<script>
+const wrist = document.getElementById("wrist");
+const hint  = document.getElementById("hint");
+
+function setMode(mode) {
+  wrist.classList.toggle("show", mode === "show");
+  wrist.classList.toggle("peek", mode === "peek");
+  hint.style.display = mode === "show" ? "none" : "";
+  document.getElementById("peek-btn").classList.toggle("preview-btn-active", mode === "peek");
+  document.getElementById("show-btn").classList.toggle("preview-btn-active", mode === "show");
+}
+document.getElementById("peek-btn").addEventListener("click", () => setMode("peek"));
+document.getElementById("show-btn").addEventListener("click", () => setMode("show"));
+
+document.addEventListener("keydown", e => {
+  if (e.key.toLowerCase() === "q") { e.preventDefault(); setMode("show"); }
+});
+document.addEventListener("keyup", e => {
+  if (e.key.toLowerCase() === "q") { e.preventDefault(); setMode("peek"); }
+});
+setMode("peek");
+</script>
+</body>
+</html>

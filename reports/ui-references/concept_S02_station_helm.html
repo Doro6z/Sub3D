@@ -1,0 +1,407 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Sub3D · S02 — Station Helm composite (L4)</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<style>
+  :root {
+    --bg-deep:#0a0d12; --panel:#181c23; --panel-soft:#1d222a; --border:#2a313b; --border-hi:#3a4452;
+    --text:#d8d4ca; --dim:#8d9095; --faint:#5e636a;
+    --teal:#6db4a3; --teal-soft:#4f8478; --amber:#c89868; --gold:#d4b876; --leaf:#87a86b; --crimson:#b8554a;
+    --ctx-yellow:#f4d03f;
+    --brass:#8a6f3f; --brass-hi:#c9a25f; --brass-lo:#5a4828;
+    --term-bg:#0d201d; --term:#aedccd;
+  }
+  body { background: var(--bg-deep); color: var(--text); font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; overflow: hidden; }
+  .mono { font-family: "JetBrains Mono", Consolas, monospace; }
+  .num { font-variant-numeric: tabular-nums; }
+  .viewport {
+    background:
+      radial-gradient(ellipse at 50% 50%, #14202a 0%, #0a1218 50%, #050709 100%),
+      var(--bg-deep);
+  }
+
+  .preview-bar { background: rgba(5,8,12,.98); border-bottom: 1px solid var(--border); }
+  .preview-btn { padding:3px 9px; border-radius:2px; font-size:11px; color:var(--dim); border:1px solid var(--border); background:rgba(15,20,28,.6); }
+  .preview-btn:hover { color:var(--text); border-color:var(--border-hi); }
+  .preview-btn-active { background:rgba(109,180,163,.12); border-color:var(--teal); color:var(--teal); }
+  .panel { background: rgba(24,28,35,.92); border: 1px solid var(--border); border-radius: 4px; }
+
+  /* ─── Cockpit chassis (the "console" you sit at) ───────── */
+  .cockpit {
+    position: absolute; inset: 36px 0 0 0;
+    perspective: 1400px;
+  }
+  .console-frame {
+    position: absolute;
+    inset: 60px 60px 100px 60px;
+    background:
+      linear-gradient(180deg, #1a1f24 0%, #0a0d12 100%);
+    border: 4px solid #11151b;
+    border-radius: 12px;
+    box-shadow:
+      0 0 0 1px var(--brass-lo),
+      0 16px 40px rgba(0,0,0,.7),
+      inset 0 1px 0 rgba(255,255,255,.04);
+  }
+  .console-frame::before { /* rivets top */
+    content:""; position:absolute; top:6px; left:14px; right:14px; height:8px;
+    background-image: radial-gradient(circle, #4a5260 1.5px, transparent 1.5px);
+    background-size: 28px 8px;
+  }
+  .console-frame::after { /* rivets bottom */
+    content:""; position:absolute; bottom:6px; left:14px; right:14px; height:8px;
+    background-image: radial-gradient(circle, #4a5260 1.5px, transparent 1.5px);
+    background-size: 28px 8px;
+  }
+
+  /* Brass nameplate (engraved label) */
+  .brass-plate {
+    background: linear-gradient(180deg, #4a3d22 0%, #2a2113 100%);
+    border: 1px solid var(--brass-lo);
+    border-radius: 2px;
+    padding: 4px 9px;
+    color: var(--brass-hi);
+    font-family: "Georgia", serif;
+    letter-spacing: .12em;
+    text-transform: uppercase;
+    font-size: 9px;
+    box-shadow: inset 0 1px 0 rgba(201,162,95,.3), 0 1px 2px rgba(0,0,0,.5);
+    display: inline-block;
+  }
+
+  /* Terminal screen — green CRT feel */
+  .terminal {
+    background: linear-gradient(180deg, var(--term-bg) 0%, #0a1816 100%);
+    border: 2px solid #0a1816;
+    border-radius: 4px;
+    color: var(--term);
+    font-family: "JetBrains Mono", monospace;
+    box-shadow:
+      inset 0 0 30px rgba(0,0,0,.7),
+      inset 0 0 0 1px rgba(174,220,205,.06);
+    position: relative;
+    overflow: hidden;
+  }
+  .terminal::before { /* scan line */
+    content:""; position: absolute; left:0; right:0; height:1px;
+    background: rgba(174,220,205,.1);
+    animation: scan 5s linear infinite;
+  }
+  @keyframes scan { 0% { top: 0; } 100% { top: 100%; } }
+
+  .term-header {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 6px 12px;
+    border-bottom: 1px solid rgba(174,220,205,.18);
+    font-size: 10px; letter-spacing: .14em; color: rgba(174,220,205,.6);
+  }
+  .term-led {
+    width: 7px; height: 7px; border-radius: 50%;
+    background: var(--leaf); box-shadow: 0 0 6px var(--leaf);
+  }
+  .term-row {
+    display: flex; justify-content: space-between; padding: 2px 12px;
+    font-size: 11px;
+  }
+  .term-row .lbl { color: rgba(174,220,205,.55); letter-spacing: .1em; text-transform: uppercase; font-size: 9px; }
+
+  /* Annotation badge — shows which existing widget powers this */
+  .anno {
+    position: absolute;
+    background: rgba(212,184,118,.12);
+    border: 1px dashed rgba(212,184,118,.5);
+    border-radius: 2px;
+    padding: 3px 7px;
+    font-family: "JetBrains Mono", monospace;
+    font-size: 9px;
+    color: var(--gold);
+    pointer-events: none;
+    transition: opacity .25s;
+  }
+  .anno.hidden { opacity: 0; }
+
+  /* Instrument placeholder card (mocks the helm instruments) */
+  .instrument {
+    background: linear-gradient(180deg, #1a1f24 0%, #0c1015 100%);
+    border: 1px solid #2c333d;
+    border-radius: 3px;
+    padding: 8px;
+    color: var(--dim);
+    font-family: "JetBrains Mono", monospace;
+    font-size: 10px;
+    text-align: center;
+    flex: 1;
+    position: relative;
+  }
+  .instrument-name {
+    color: var(--gold);
+    font-size: 10px; letter-spacing: .1em; text-transform: uppercase;
+    margin-bottom: 6px;
+  }
+
+  /* L5 entry prompt (when player is approaching the station) */
+  .ctx-prompt {
+    position: absolute;
+    bottom: 24px; left: 50%;
+    transform: translateX(-50%);
+    background: rgba(8, 12, 17, .94);
+    border: 1px solid rgba(244, 208, 63, .6);
+    border-left-width: 2px;
+    padding: 6px 12px;
+    border-radius: 2px;
+    pointer-events: none;
+  }
+
+  /* Sub volumetric SVG anim */
+  .breach-pulse { animation: breach-blink 1.4s ease-in-out infinite; }
+  @keyframes breach-blink { 0%, 70%, 100% { opacity: 1; } 35% { opacity: .35; } }
+
+  /* Esc hint */
+  .key { display:inline-flex; align-items:center; justify-content:center; min-width:22px; height:22px; padding:0 5px; background:#0e1218; border:1px solid #2e3640; border-bottom-width:2px; border-radius:3px; font-family:"JetBrains Mono",monospace; font-size:10px; font-weight:600; color:#cbcab9; text-transform:uppercase; }
+
+  /* heart pulse */
+  .heart-icon { transform-origin:center; animation: heart-beat 1s ease-in-out infinite; }
+  @keyframes heart-beat { 0%,70%,100%{transform:scale(1);} 20%{transform:scale(1.18);} 40%{transform:scale(1.04);} }
+</style>
+</head>
+<body>
+
+<!-- Preview toolbar -->
+<div class="preview-bar fixed top-0 left-0 right-0 z-50 px-4 py-2 flex items-center gap-4 text-xs flex-wrap">
+  <a href="index.html" class="text-teal-300 hover:underline mono font-bold text-xs">← gallery</a>
+  <span class="text-slate-700">·</span>
+  <span class="text-teal-300 mono font-bold">S02 STATION HELM</span>
+  <span class="text-slate-700">·</span>
+  <span class="text-slate-500">L4 · station prop hosts multiple terminals</span>
+
+  <div class="flex items-center gap-2 ml-auto">
+    <span class="text-slate-500 uppercase mono">annotations:</span>
+    <button id="anno-toggle" class="preview-btn preview-btn-active">on</button>
+  </div>
+  <span class="text-slate-700 mono text-[10px]">Esc to leave station</span>
+</div>
+
+<div class="viewport relative w-screen h-screen pt-9">
+
+  <div class="cockpit">
+
+    <!-- The console frame (3D prop = the helm station) -->
+    <div class="console-frame">
+
+      <!-- Station nameplate -->
+      <div style="position:absolute; top:-18px; left:50%; transform: translateX(-50%); z-index: 5;">
+        <div class="brass-plate" style="font-size:11px; letter-spacing: .2em;">STATION · HELM</div>
+      </div>
+
+      <!-- Terminal layout grid -->
+      <div style="position: relative; width: 100%; height: 100%; padding: 24px;">
+
+        <!-- ─── Terminal Sensor (top-left) ───────────────── -->
+        <div class="terminal" style="position:absolute; top:24px; left:24px; width: 280px; height: 200px;">
+          <div class="term-header">
+            <span>TERMINAL · SENSOR</span>
+            <div class="flex items-center gap-2"><span class="term-led"></span></div>
+          </div>
+          <div style="padding: 10px 12px;">
+            <div class="term-row"><span class="lbl">Depth</span><span class="num text-base">−1 240 m</span></div>
+            <div class="term-row"><span class="lbl">Heading</span><span class="num">047°</span></div>
+            <div class="term-row"><span class="lbl">Speed</span><span class="num">6.2 kn</span></div>
+            <div class="term-row"><span class="lbl">Trim</span><span class="num">+2.3°</span></div>
+            <div class="term-row"><span class="lbl">Roll</span><span class="num">+0.8°</span></div>
+            <div class="term-row"><span class="lbl">Compartment</span><span style="font-weight:500">ENG-02</span></div>
+            <!-- Trim indicator visualization -->
+            <div style="margin-top: 8px; padding-top: 8px; border-top: 1px solid rgba(174,220,205,.15);">
+              <div style="display:flex; justify-content: space-between; font-size:9px; color: rgba(174,220,205,.5); letter-spacing: .12em; margin-bottom: 4px;">
+                <span>BOW DOWN</span><span>LEVEL</span><span>BOW UP</span>
+              </div>
+              <div style="position:relative; height: 8px; background: rgba(0,0,0,.4); border: 1px solid rgba(174,220,205,.2); border-radius: 1px;">
+                <div style="position:absolute; left:0; right:0; top: 50%; height:1px; background: rgba(174,220,205,.18);"></div>
+                <div style="position:absolute; left: 50%; top: 0; bottom: 0; width: 1px; background: rgba(174,220,205,.4);"></div>
+                <div style="position:absolute; left: 56%; top: 1px; bottom: 1px; width: 4px; background: var(--term); box-shadow: 0 0 6px var(--term);"></div>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="anno" style="top: 18px; left: 312px;" data-anno="WBP_TerminalSensor (NEW asset)">↤ NEW · WBP_TerminalSensor</div>
+
+        <!-- ─── Terminal Hull Integrity (top-right) ──────── -->
+        <div class="terminal" style="position:absolute; top:24px; right:24px; width: 360px; height: 280px;">
+          <div class="term-header">
+            <span>TERMINAL · HULL INTEGRITY</span>
+            <div class="flex items-center gap-2">
+              <span class="term-led" style="background: var(--amber); box-shadow: 0 0 6px var(--amber);"></span>
+            </div>
+          </div>
+
+          <!-- Volumetric sub view -->
+          <svg viewBox="0 0 360 200" style="width:100%; height: 200px; padding: 8px;">
+            <defs>
+              <linearGradient id="hullgrad" x1="0" y1="0" x2="1" y2="1">
+                <stop offset="0%" stop-color="rgba(174,220,205,.4)"/>
+                <stop offset="100%" stop-color="rgba(174,220,205,.1)"/>
+              </linearGradient>
+            </defs>
+            <!-- Sub silhouette -->
+            <g stroke="rgba(174,220,205,.7)" stroke-width="1.5" fill="none">
+              <path d="M 30 100 Q 45 50 110 50 L 280 50 Q 320 52 335 80 Q 345 100 335 120 Q 320 148 280 150 L 110 150 Q 45 150 30 100 Z" fill="rgba(174,220,205,.05)"/>
+              <!-- Conning tower -->
+              <path d="M 150 50 L 145 24 L 220 24 L 215 50" fill="rgba(174,220,205,.08)"/>
+              <!-- Compartment dividers -->
+              <line x1="100" y1="52" x2="100" y2="148" stroke-dasharray="3 3"/>
+              <line x1="180" y1="52" x2="180" y2="148" stroke-dasharray="3 3"/>
+              <line x1="250" y1="52" x2="250" y2="148" stroke-dasharray="3 3"/>
+            </g>
+            <!-- Compartment integrity colors (overlay) -->
+            <rect x="32" y="55" width="65" height="92" fill="rgba(109,180,163,.18)"/>
+            <rect x="103" y="55" width="74" height="92" fill="rgba(200,152,104,.30)"/>
+            <rect x="183" y="55" width="64" height="92" fill="rgba(109,180,163,.18)"/>
+            <rect x="253" y="55" width="80" height="92" fill="rgba(109,180,163,.18)"/>
+            <!-- Compartment labels -->
+            <g font-family="JetBrains Mono, monospace" font-size="9" fill="rgba(174,220,205,.85)" text-anchor="middle">
+              <text x="65" y="98">BOW</text>
+              <text x="65" y="112">88%</text>
+              <text x="140" y="98" fill="var(--amber)">ENG-02</text>
+              <text x="140" y="112" fill="var(--amber)">62%</text>
+              <text x="215" y="98">ENG-03</text>
+              <text x="215" y="112">91%</text>
+              <text x="290" y="98">STERN</text>
+              <text x="290" y="112">74%</text>
+            </g>
+            <!-- Breach marker -->
+            <g class="breach-pulse" transform="translate(118 80)">
+              <circle r="8" fill="none" stroke="var(--crimson)" stroke-width="1.5"/>
+              <line x1="-5" y1="-5" x2="5" y2="5" stroke="var(--crimson)" stroke-width="1.5"/>
+              <line x1="5" y1="-5" x2="-5" y2="5" stroke="var(--crimson)" stroke-width="1.5"/>
+            </g>
+            <text x="118" y="68" font-family="JetBrains Mono, monospace" font-size="9" fill="var(--crimson)" text-anchor="middle">BREACH 12 L/s</text>
+          </svg>
+
+          <div style="padding: 4px 12px 8px; border-top: 1px solid rgba(174,220,205,.15); display: flex; justify-content: space-between; font-size: 10px;">
+            <span style="color: rgba(174,220,205,.55); letter-spacing: .1em; text-transform: uppercase;">Avg integrity</span>
+            <span style="color: var(--amber); font-weight: 500;" class="num">79%</span>
+          </div>
+        </div>
+        <div class="anno" style="top: 18px; right: 392px;" data-anno="WBP_TerminalHullIntegrity (NEW asset)">↦ NEW · WBP_TerminalHullIntegrity</div>
+
+        <!-- ─── Terminal Helm Controls (bottom, large) ──── -->
+        <div style="position:absolute; bottom:32px; left:24px; right:24px; height: 180px;">
+          <!-- Plate label -->
+          <div style="position:absolute; top: -22px; left: 12px;">
+            <div class="brass-plate">TERMINAL · HELM CONTROLS</div>
+          </div>
+          <div class="terminal" style="height: 100%; padding: 12px;">
+            <div class="term-header" style="border-bottom:none; padding: 0 0 8px 0;">
+              <span>4 INSTRUMENTS · COCKPIT v2 · PIE-VALIDATED</span>
+              <span style="color: var(--leaf);">●●●● ONLINE</span>
+            </div>
+            <div style="display: flex; gap: 12px; height: calc(100% - 26px);">
+
+              <!-- Telegraph instrument placeholder -->
+              <div class="instrument">
+                <div class="instrument-name">TELEGRAPH</div>
+                <svg viewBox="0 0 80 80" width="100%" height="60%" style="display:block; margin: 0 auto;">
+                  <circle cx="40" cy="40" r="32" fill="rgba(0,0,0,.4)" stroke="rgba(174,220,205,.3)" stroke-width="1"/>
+                  <g stroke="rgba(174,220,205,.5)" stroke-width="1">
+                    <line x1="40" y1="14" x2="40" y2="20"/>
+                    <line x1="40" y1="60" x2="40" y2="66"/>
+                    <line x1="14" y1="40" x2="20" y2="40"/>
+                    <line x1="60" y1="40" x2="66" y2="40"/>
+                  </g>
+                  <line x1="40" y1="40" x2="58" y2="28" stroke="var(--gold)" stroke-width="2" stroke-linecap="round"/>
+                  <circle cx="40" cy="40" r="3" fill="var(--brass-hi)" stroke="var(--brass-lo)"/>
+                </svg>
+                <div style="font-size: 9px; color: var(--teal-soft); margin-top: 2px;">AHEAD ⅔</div>
+                <div style="font-size: 8px; color: rgba(141,144,149,.5); margin-top: 1px;">HelmThrottleTelegraphWidget</div>
+              </div>
+
+              <!-- Yoke instrument placeholder -->
+              <div class="instrument">
+                <div class="instrument-name">YOKE</div>
+                <svg viewBox="0 0 80 80" width="100%" height="60%" style="display:block; margin: 0 auto;">
+                  <line x1="20" y1="40" x2="60" y2="40" stroke="rgba(174,220,205,.4)" stroke-width="1.5"/>
+                  <circle cx="40" cy="40" r="14" fill="none" stroke="rgba(174,220,205,.5)" stroke-width="1.5" transform="rotate(8 40 40)"/>
+                  <line x1="26" y1="40" x2="54" y2="40" stroke="var(--gold)" stroke-width="1.5" transform="rotate(8 40 40)"/>
+                  <line x1="40" y1="26" x2="40" y2="54" stroke="var(--gold)" stroke-width="1.5" transform="rotate(8 40 40)"/>
+                  <circle cx="40" cy="40" r="3" fill="var(--brass-hi)"/>
+                </svg>
+                <div style="font-size: 9px; color: var(--teal-soft); margin-top: 2px;">HEADING 047°</div>
+                <div style="font-size: 8px; color: rgba(141,144,149,.5); margin-top: 1px;">HelmRudderYokeWidget</div>
+              </div>
+
+              <!-- Dive board instrument placeholder -->
+              <div class="instrument">
+                <div class="instrument-name">DIVE BOARD</div>
+                <svg viewBox="0 0 80 80" width="100%" height="60%" style="display:block; margin: 0 auto;">
+                  <rect x="14" y="14" width="52" height="52" fill="rgba(0,0,0,.4)" stroke="rgba(174,220,205,.3)"/>
+                  <line x1="20" y1="40" x2="60" y2="40" stroke="rgba(174,220,205,.4)"/>
+                  <line x1="40" y1="20" x2="40" y2="60" stroke="rgba(174,220,205,.2)" stroke-dasharray="2 2"/>
+                  <circle cx="48" cy="46" r="3" fill="var(--gold)"/>
+                  <text x="40" y="74" text-anchor="middle" font-family="JetBrains Mono" font-size="7" fill="rgba(174,220,205,.5)">−1240 / −2000</text>
+                </svg>
+                <div style="font-size: 9px; color: var(--teal-soft); margin-top: 2px;">AUTO DEPTH</div>
+                <div style="font-size: 8px; color: rgba(141,144,149,.5); margin-top: 1px;">HelmDiveBoardWidget</div>
+              </div>
+
+              <!-- Kill switch instrument placeholder -->
+              <div class="instrument">
+                <div class="instrument-name">KILL SWITCH</div>
+                <svg viewBox="0 0 80 80" width="100%" height="60%" style="display:block; margin: 0 auto;">
+                  <rect x="22" y="20" width="36" height="44" fill="rgba(184,85,74,.15)" stroke="var(--crimson)" stroke-width="1.5" rx="3"/>
+                  <circle cx="40" cy="42" r="8" fill="rgba(184,85,74,.3)" stroke="var(--crimson)" stroke-width="1.5"/>
+                  <text x="40" y="46" text-anchor="middle" font-family="JetBrains Mono" font-size="9" fill="var(--crimson)" font-weight="bold">KILL</text>
+                </svg>
+                <div style="font-size: 9px; color: rgba(184,85,74,.7); margin-top: 2px;">ARMED</div>
+                <div style="font-size: 8px; color: rgba(141,144,149,.5); margin-top: 1px;">HelmKillSwitchWidget</div>
+              </div>
+
+            </div>
+          </div>
+        </div>
+        <div class="anno" style="bottom: 220px; left: 32px;" data-anno="HelmCockpitWidget compositor">↧ EXISTING · HelmCockpitWidget (4 instruments preserved)</div>
+
+      </div>
+    </div>
+
+    <!-- L5 prompt at bottom (since we're at a station, ESC leaves) -->
+    <div class="ctx-prompt">
+      <div style="font-family: 'JetBrains Mono', monospace; font-size: 9px; letter-spacing: .18em; color: var(--ctx-yellow); text-transform: uppercase;">STATION · HELM</div>
+      <div style="font-size: 12px; color: #e8e5dc; margin-top: 1px;">Seated at console</div>
+      <div style="display:flex; align-items:center; gap:6px; margin-top: 4px; font-size: 10px;">
+        <span class="key">ESC</span><span style="color: var(--text);">Leave station</span>
+      </div>
+    </div>
+
+    <!-- Minimal L1 still visible: heart pulse + posture pip top-left -->
+    <div class="absolute top-12 left-5 flex items-center gap-2 mono text-[10px] uppercase tracking-wider text-slate-500">
+      <svg class="heart-icon" width="13" height="13" viewBox="0 0 24 24" fill="#b8554a"><path d="M12 21s-7-4.35-7-10a4.5 4.5 0 0 1 8.5-2 4.5 4.5 0 0 1 8.5 2c0 5.65-7 10-7 10z"/></svg>
+      <span>72 bpm · seated</span>
+    </div>
+  </div>
+
+</div>
+
+<!-- Notes panel -->
+<div class="fixed bottom-1 left-1/2 -translate-x-1/2 panel px-3 py-1 text-[10px] text-slate-500 max-w-3xl text-center pointer-events-none mono uppercase tracking-wider" style="z-index: 60;">
+  <span class="text-teal-300">S02</span> · station = console 3D · terminals = écrans qui y vivent · Hull Integrity émet popups au crew
+</div>
+
+<script>
+let annoOn = true;
+function renderAnno() {
+  document.querySelectorAll(".anno").forEach(a => a.classList.toggle("hidden", !annoOn));
+  document.getElementById("anno-toggle").classList.toggle("preview-btn-active", annoOn);
+  document.getElementById("anno-toggle").textContent = annoOn ? "on" : "off";
+}
+document.getElementById("anno-toggle").addEventListener("click", () => { annoOn = !annoOn; renderAnno(); });
+renderAnno();
+
+// Esc redirects to gallery (since user "leaves station")
+document.addEventListener("keydown", e => {
+  if (e.key === "Escape") { e.preventDefault(); window.location.href = "index.html"; }
+});
+</script>
+</body>
+</html>

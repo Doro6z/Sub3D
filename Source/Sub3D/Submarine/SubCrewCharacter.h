@@ -14,6 +14,7 @@ class USubCrewMovementComponent;
 class UCompartmentVolumeComponent;
 class USubHullBoundaryComponent;
 class UCrewUnderwaterPPComponent;
+class UCrewAnimDebugComponent;
 class UMaterialInterface;
 
 /**
@@ -55,6 +56,9 @@ public:
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
 	UCrewUnderwaterPPComponent* UnderwaterPP;
 
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
+	UCrewAnimDebugComponent* CrewAnimDebugComponent;
+
 	/** Default underwater post-process material applied to UnderwaterPP at BeginPlay. Art designer sets this on the BP class. */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "Crew|Underwater")
 	TObjectPtr<UMaterialInterface> DefaultUnderwaterPPMaterial = nullptr;
@@ -66,6 +70,10 @@ public:
 	/** Blueprint input wrapper. MoveAxis.X = forward/back, MoveAxis.Y = right/left. */
 	UFUNCTION(BlueprintCallable, Category = "Crew|Movement")
 	void ApplyCrewPlanarMoveInput(FVector2D MoveAxis);
+
+	/** Blueprint input wrapper for swim vertical movement. Axis +1 = up, -1 = down. */
+	UFUNCTION(BlueprintCallable, Category = "Crew|Movement")
+	void ApplyCrewVerticalMoveInput(float Axis);
 
 	UFUNCTION(BlueprintCallable, Category = "Crew|Camera")
 	void ToggleCameraMode();
@@ -167,8 +175,9 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crew|Environment|Water", meta = (ClampMin = "0.0", ClampMax = "1.0"))
 	float DeepWadeThreshold01 = 0.5f;
 
+	/** Reserved for the future immersion-based swim transition. Not used by the current water movement path. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crew|Environment|Water", meta = (ClampMin = "0.0", ClampMax = "1.0"))
-	float SwimThreshold01 = 0.85f;
+	float SwimThreshold01 = 0.7f;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crew|Environment|Water", meta = (ClampMin = "0.0", ClampMax = "1.0"))
 	float ShallowWadeSpeedMultiplier = 0.85f;
@@ -184,6 +193,15 @@ public:
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crew|Environment|Water", meta = (ClampMin = "0.0", ClampMax = "5.0"))
 	float WaterMovementProtectionMultiplier = 1.f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crew|Environment|Swim", meta = (ClampMin = "0.0", ClampMax = "5.0"))
+	float ExteriorSwimSpeedMultiplier = 1.f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crew|Environment|Swim", meta = (ClampMin = "0.0"))
+	float SwimBrakingDeceleration = 900.f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crew|Environment|Swim")
+	float SwimGravityScale = 0.f;
 
 	/** Hide head bone for local player in FPS mode */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crew|Camera")
@@ -295,6 +313,9 @@ public:
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Crew|Environment")
 	bool bIsSwimmingByFlood = false;
 
+	UFUNCTION(BlueprintPure, Category = "Crew|Environment")
+	bool IsCrewSwimming() const;
+
 	UFUNCTION(BlueprintCallable, Category = "Crew|Environment")
 	void SetPressureProtectionKPa(float NewPressureProtectionKPa);
 
@@ -329,6 +350,7 @@ private:
 	bool ResolveCurrentCompartment(FCompartmentState& OutState, FBox& OutLocalBounds) const;
 	void ApplyPressureEffects(float DeltaSeconds, float AmbientPressureKPa);
 	void ApplyWaterMovementState(float WaterImmersion01);
+	void ApplySwimmingMovementState(float SpeedMultiplier);
 	void ResetEnvironmentalState();
 	void UpdateCameraMode(float DeltaSeconds);
 	void UpdateCameraRig();

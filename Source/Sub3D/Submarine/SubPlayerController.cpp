@@ -1159,9 +1159,19 @@ void ASubPlayerController::DevCheat_TeleportToCompartment(FName CompartmentId)
 	}
 
 	// Compartment center in sub local space, lifted to floor level + 100cm crew clearance.
+	// CV-derived (HydroBounds was deprecated 2026-05-10).
+	FBox CvBounds(ForceInit);
+	if (!Sub->GetCompartmentLocalBounds(CompartmentId, CvBounds))
+	{
+		UE_LOG(LogSubController, Warning,
+			TEXT("[DevCheat_TeleportToCompartment] No CV bounds for '%s' — place a UCompartmentVolumeComponent in the BP."),
+			*CompartmentId.ToString());
+		return;
+	}
+	const FVector CvCenter = CvBounds.GetCenter();
 	const FVector LocalCenter(
-		(Comp->HydroBoundsMin.X + Comp->HydroBoundsMax.X) * 0.5f,
-		(Comp->HydroBoundsMin.Y + Comp->HydroBoundsMax.Y) * 0.5f,
+		CvCenter.X,
+		CvCenter.Y,
 		Comp->WalkableFloorZCm + 100.f);
 	const FVector WorldCenter = Sub->GetActorTransform().TransformPosition(LocalCenter);
 

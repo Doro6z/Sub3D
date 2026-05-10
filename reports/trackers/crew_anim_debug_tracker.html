@@ -1,0 +1,530 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Crew Anim Debug — Implementation Tracker</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<style>
+  body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+  code, .mono { font-family: "JetBrains Mono", "Fira Code", Consolas, monospace; }
+  .phase-card { transition: transform .15s, border-color .15s; }
+  .phase-card:hover { transform: translateY(-2px); border-color: #475569 !important; }
+  .status-pill { user-select: none; }
+  details > summary { list-style: none; cursor: pointer; }
+  details > summary::-webkit-details-marker { display: none; }
+  details[open] > summary .chev { transform: rotate(90deg); }
+  .chev { transition: transform .15s; }
+  .arrow { stroke: #64748b; fill: none; stroke-width: 1.5; marker-end: url(#arrowhead); }
+  .arrow-dim { stroke: #334155; }
+  .grid-bg {
+    background-image:
+      linear-gradient(rgba(148,163,184,.05) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(148,163,184,.05) 1px, transparent 1px);
+    background-size: 24px 24px;
+  }
+</style>
+</head>
+<body class="bg-slate-950 text-slate-200 min-h-screen grid-bg">
+
+<div class="max-w-6xl mx-auto p-6 md:p-10">
+
+  <!-- ─── Header ─────────────────────────────────────────── -->
+  <header class="mb-10">
+    <div class="flex items-start justify-between flex-wrap gap-4">
+      <div>
+        <div class="flex items-center gap-3 text-xs text-slate-500 mb-2">
+          <span class="px-2 py-0.5 bg-slate-800/80 rounded mono">water-proto</span>
+          <span>·</span>
+          <span>Plan 2026-05-08</span>
+          <span>·</span>
+          <span>Sub3D / FP</span>
+        </div>
+        <h1 class="text-3xl md:text-4xl font-bold text-white">Crew Animation — Debug System</h1>
+        <p class="text-slate-400 mt-2 max-w-3xl">
+          Unified per-frame snapshot, UMG diagnostic panel, 3D draw and CSV trace
+          for the procedural crew anim stack. Built on existing
+          <code class="text-emerald-300/90">USubCrewAnimInstance</code>,
+          <code class="text-emerald-300/90">FAnimNode_CrewProcedural</code>,
+          and <code class="text-emerald-300/90">USub3DDebugSettings</code>.
+        </p>
+      </div>
+      <div class="text-right">
+        <div class="text-xs text-slate-500 uppercase tracking-wide">Progress</div>
+        <div class="flex items-baseline gap-2 justify-end">
+          <span id="progress-num" class="text-4xl font-bold text-emerald-400">0</span>
+          <span class="text-slate-500 text-lg">/ 10</span>
+        </div>
+        <div class="mt-2 w-40 h-1.5 bg-slate-800 rounded-full overflow-hidden">
+          <div id="progress-bar" class="h-full bg-emerald-500 transition-all" style="width:0%"></div>
+        </div>
+      </div>
+    </div>
+  </header>
+
+  <!-- ─── Quick legend ──────────────────────────────────── -->
+  <section class="mb-10 grid md:grid-cols-3 gap-3 text-sm">
+    <div class="p-4 bg-slate-900/60 border border-slate-800 rounded-lg">
+      <div class="text-slate-500 text-xs uppercase mb-1">Click status</div>
+      <div class="flex items-center gap-2">
+        <span class="status-pill px-2 py-0.5 rounded text-xs bg-slate-800 text-slate-400">todo</span>
+        <span class="text-slate-600">→</span>
+        <span class="status-pill px-2 py-0.5 rounded text-xs bg-amber-500/20 text-amber-300">wip</span>
+        <span class="text-slate-600">→</span>
+        <span class="status-pill px-2 py-0.5 rounded text-xs bg-emerald-500/20 text-emerald-300">done</span>
+      </div>
+    </div>
+    <div class="p-4 bg-slate-900/60 border border-slate-800 rounded-lg">
+      <div class="text-slate-500 text-xs uppercase mb-1">Persistence</div>
+      <div class="text-slate-300">Status saved in browser localStorage. Use <button id="reset-btn" class="text-rose-400 hover:underline">reset all</button>.</div>
+    </div>
+    <div class="p-4 bg-slate-900/60 border border-slate-800 rounded-lg">
+      <div class="text-slate-500 text-xs uppercase mb-1">Authority-max plan</div>
+      <div class="text-slate-300 mono text-xs">2026-04-10_first_playable_strategic_analysis.md</div>
+    </div>
+  </section>
+
+  <!-- ─── Data flow ──────────────────────────────────────── -->
+  <section class="mb-12">
+    <h2 class="text-lg font-semibold text-white mb-4 flex items-center gap-2">
+      <span class="w-1 h-5 bg-emerald-500 rounded"></span>
+      Data flow
+    </h2>
+    <div class="bg-slate-900/60 border border-slate-800 rounded-lg p-6">
+      <svg viewBox="0 0 980 380" class="w-full">
+        <defs>
+          <marker id="arrowhead" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
+            <polygon points="0 0, 10 3.5, 0 7" fill="#64748b" />
+          </marker>
+        </defs>
+
+        <!-- Layer label: SOURCES -->
+        <text x="20" y="30" fill="#475569" font-size="11" font-family="monospace" letter-spacing="2">SOURCES (game thread)</text>
+
+        <!-- Top sources -->
+        <g>
+          <rect x="20" y="48" width="280" height="92" rx="8" fill="#0f172a" stroke="#1e293b" stroke-width="1.5"/>
+          <text x="36" y="72" fill="#a5f3fc" font-size="13" font-weight="600">USubCrewMovementComponent</text>
+          <text x="36" y="92" fill="#94a3b8" font-size="11">EmbarkState · MovementMode</text>
+          <text x="36" y="108" fill="#94a3b8" font-size="11">MoveIntent · LocomotionFrame</text>
+          <text x="36" y="124" fill="#94a3b8" font-size="11">Hand probes · Foot IK traces</text>
+        </g>
+        <g>
+          <rect x="350" y="48" width="280" height="92" rx="8" fill="#0f172a" stroke="#1e293b" stroke-width="1.5"/>
+          <text x="366" y="72" fill="#fef08a" font-size="13" font-weight="600">ASubCrewCharacter</text>
+          <text x="366" y="92" fill="#94a3b8" font-size="11">CurrentCompartment · Pressure</text>
+          <text x="366" y="108" fill="#94a3b8" font-size="11">WaterImmersion · Oxygen</text>
+          <text x="366" y="124" fill="#94a3b8" font-size="11">Hull crossing events</text>
+        </g>
+        <g>
+          <rect x="680" y="48" width="280" height="92" rx="8" fill="#0f172a" stroke="#1e293b" stroke-width="1.5"/>
+          <text x="696" y="72" fill="#fbcfe8" font-size="13" font-weight="600">USubCrewAnimInstance + Node</text>
+          <text x="696" y="92" fill="#94a3b8" font-size="11">Anim inputs · Walk/Swim/Posture</text>
+          <text x="696" y="108" fill="#94a3b8" font-size="11">FinalPose (18 bones) · IK targets</text>
+          <text x="696" y="124" fill="#94a3b8" font-size="11">Node health (PreUpdate)</text>
+        </g>
+
+        <!-- Arrows source → snapshot -->
+        <path class="arrow" d="M 160 142 L 380 200" />
+        <path class="arrow" d="M 490 142 L 490 200" />
+        <path class="arrow" d="M 820 142 L 600 200" />
+
+        <!-- Layer label: SNAPSHOT -->
+        <text x="20" y="186" fill="#475569" font-size="11" font-family="monospace" letter-spacing="2">SNAPSHOT (debug component)</text>
+
+        <!-- Snapshot box -->
+        <g>
+          <rect x="220" y="200" width="540" height="84" rx="10" fill="#064e3b22" stroke="#10b981" stroke-width="1.5"/>
+          <text x="240" y="226" fill="#6ee7b7" font-size="14" font-weight="700">UCrewAnimDebugComponent</text>
+          <text x="240" y="248" fill="#a7f3d0" font-size="11">CurrentSnapshot · RecentSnapshots ring (default 60s @ 0.1s)</text>
+          <text x="240" y="266" fill="#a7f3d0" font-size="11">Warnings[] (stable IDs) · Contribution capture (opt)</text>
+        </g>
+
+        <!-- Arrows snapshot → consumers -->
+        <path class="arrow" d="M 350 284 L 130 330" />
+        <path class="arrow" d="M 430 284 L 380 330" />
+        <path class="arrow" d="M 550 284 L 620 330" />
+        <path class="arrow" d="M 650 284 L 870 330" />
+
+        <!-- Layer label: CONSUMERS -->
+        <text x="20" y="320" fill="#475569" font-size="11" font-family="monospace" letter-spacing="2">CONSUMERS</text>
+
+        <!-- Consumers -->
+        <g>
+          <rect x="20" y="330" width="200" height="42" rx="6" fill="#0f172a" stroke="#1e293b"/>
+          <text x="36" y="356" fill="#cbd5e1" font-size="12">WBP_CrewAnimDebugPanel</text>
+        </g>
+        <g>
+          <rect x="240" y="330" width="200" height="42" rx="6" fill="#0f172a" stroke="#1e293b"/>
+          <text x="256" y="356" fill="#cbd5e1" font-size="12">3D Draw debug</text>
+        </g>
+        <g>
+          <rect x="460" y="330" width="200" height="42" rx="6" fill="#0f172a" stroke="#1e293b"/>
+          <text x="476" y="356" fill="#cbd5e1" font-size="12">Gameplay Debugger ANIM</text>
+        </g>
+        <g>
+          <rect x="680" y="330" width="280" height="42" rx="6" fill="#0f172a" stroke="#1e293b"/>
+          <text x="696" y="356" fill="#cbd5e1" font-size="12">CSV trace · Saved/Sub3D/CrewAnimDebug/</text>
+        </g>
+      </svg>
+      <p class="text-xs text-slate-500 mt-3">
+        Snapshot is built once per debug tick on the game thread. Anim node never reads UObject state in
+        <code>Evaluate_AnyThread</code>.
+      </p>
+    </div>
+  </section>
+
+  <!-- ─── Phases ────────────────────────────────────────── -->
+  <section class="mb-12">
+    <h2 class="text-lg font-semibold text-white mb-4 flex items-center gap-2">
+      <span class="w-1 h-5 bg-emerald-500 rounded"></span>
+      Implementation phases
+    </h2>
+    <div id="phases-grid" class="grid md:grid-cols-2 gap-4"></div>
+  </section>
+
+  <!-- ─── Warnings catalog ─────────────────────────────── -->
+  <section class="mb-12">
+    <h2 class="text-lg font-semibold text-white mb-4 flex items-center gap-2">
+      <span class="w-1 h-5 bg-rose-500 rounded"></span>
+      Warnings catalog
+    </h2>
+    <div class="bg-slate-900/60 border border-slate-800 rounded-lg overflow-hidden">
+      <table class="w-full text-sm">
+        <thead class="bg-slate-900 text-slate-500 text-xs uppercase">
+          <tr>
+            <th class="text-left px-4 py-2">ID</th>
+            <th class="text-left px-4 py-2">Trigger</th>
+          </tr>
+        </thead>
+        <tbody id="warnings-body" class="divide-y divide-slate-800"></tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- ─── Console commands ─────────────────────────────── -->
+  <section class="mb-12">
+    <h2 class="text-lg font-semibold text-white mb-4 flex items-center gap-2">
+      <span class="w-1 h-5 bg-sky-500 rounded"></span>
+      Console commands (ASubPlayerController)
+    </h2>
+    <div id="commands-grid" class="grid md:grid-cols-2 gap-2"></div>
+  </section>
+
+  <!-- ─── Compatibility ────────────────────────────────── -->
+  <section class="mb-12">
+    <h2 class="text-lg font-semibold text-white mb-4 flex items-center gap-2">
+      <span class="w-1 h-5 bg-violet-500 rounded"></span>
+      Compatibility &amp; future-proofing
+    </h2>
+    <div class="grid md:grid-cols-2 gap-4">
+      <div class="p-5 bg-slate-900/60 border border-slate-800 rounded-lg">
+        <div class="text-xs text-violet-300 uppercase tracking-wide mb-2">Migration hook</div>
+        <div class="text-slate-200 font-medium mb-2">2026-04-23 procedural anim plan</div>
+        <p class="text-slate-400 text-sm">
+          Snapshot wraps current types (<code>EmbarkState</code>, <code>Stance</code>, <code>Gait</code>,
+          <code>MovementMode</code>). When the canonical state model lands, fields rename to
+          <code>ReferenceFrame</code>, <code>TraversalDomain</code>, <code>GaitState</code>,
+          <code>PostureState</code>. Reserve names early in <code>FCrewAnimDebugSnapshot</code>.
+        </p>
+      </div>
+      <div class="p-5 bg-slate-900/60 border border-slate-800 rounded-lg">
+        <div class="text-xs text-violet-300 uppercase tracking-wide mb-2">Migration hook</div>
+        <div class="text-slate-200 font-medium mb-2">2026-05-07 water locomotion plan</div>
+        <p class="text-slate-400 text-sm">
+          Reserve <code>ECrewWaterContactState WaterContactState</code>
+          (Dry / ShallowWade / DeepWade / Swimming / Ocean) in the snapshot now,
+          even if derived from <code>WaterImmersion01</code> at first. Lets
+          <code>HandIKActiveDuringSwim</code> etc. remain stable when the water solver lands.
+        </p>
+      </div>
+    </div>
+  </section>
+
+  <footer class="mt-16 pt-6 border-t border-slate-800 text-xs text-slate-600">
+    Single-file tracker · Tailwind via CDN · localStorage persistence ·
+    <a href="../../reports/plans/2026-05-08_crew_animation_procedural_debug_plan.md" class="hover:text-slate-400 underline">source plan</a>
+  </footer>
+</div>
+
+<script>
+// ────────────────────────────────────────────────────────
+// Data
+// ────────────────────────────────────────────────────────
+const PHASES = [
+  {
+    id: "A", title: "Baseline & types",
+    files: ["CrewAnimDebugTypes.h", "Sub3DDebugSettings.h"],
+    tasks: [
+      "Add FCrewAnimDebugSnapshot struct",
+      "Add EWarning enum (stable IDs)",
+      "Add per-category debug toggles to USub3DDebugSettings",
+      "Helper string conversions (mode, embark, stance, gait)"
+    ],
+    exit: "Project compiles. No gameplay change. BlueprintType only where needed."
+  },
+  {
+    id: "B", title: "Debug component",
+    files: ["CrewAnimDebugComponent.h/.cpp", "SubCrewCharacter.h/.cpp"],
+    tasks: [
+      "UCrewAnimDebugComponent default subobject on ASubCrewCharacter",
+      "Tick prerequisite: SkeletalMesh + CrewMovement",
+      "Build base snapshot from crew/movement/environment",
+      "Compute warning list",
+      "Ring buffer (default 600 frames @ 0.1s)"
+    ],
+    exit: "CrewAnimDump logs a complete snapshot. No crash on missing sub/compartment/mesh/anim."
+  },
+  {
+    id: "C", title: "Movement debug hooks",
+    files: ["SubCrewMovementComponent.h/.cpp"],
+    tasks: [
+      "Getters: hand probes, last mode change, last embark transition",
+      "Last hull handoff kind/time",
+      "Swim context: outside swim, physics volume water, fallback blocked"
+    ],
+    exit: "Snapshot answers WHY the crew is swimming/walking/falling/blocked. OutsideNotSwimming deterministic."
+  },
+  {
+    id: "D", title: "AnimInstance debug hooks",
+    files: ["SubCrewAnimInstance.h/.cpp"],
+    tasks: [
+      "Copy all final procedural rotations into a debug array",
+      "Expose pelvis offset and walk/swim/breath phases",
+      "Optional contribution capture (Reset, Walk, Swim, Posture, SubMotion, Aim, Rest, Final)",
+      "Track if hand/foot IK were calculated"
+    ],
+    exit: "Contribution breakdown can prove which branch produced bad arm/spine/leg. Disabled path negligible."
+  },
+  {
+    id: "E", title: "Procedural node health",
+    files: ["AnimNode_CrewProcedural.h/.cpp"],
+    tasks: [
+      "Track resolved bone count + missing expected bones",
+      "Track if PreUpdate copied a snapshot",
+      "Expand GatherDebugData with missing bones when relevant"
+    ],
+    exit: "ShowDebug Animation reports node health. Snapshot exposes via AnimInstance."
+  },
+  {
+    id: "J", title: "Editor validation checklist",
+    files: ["reports/guides/2026-05-08_crew_anim_debug_editor_handoff.md"],
+    tasks: [
+      "ABP_Crew parent class = USubCrewAnimInstance",
+      "AnimGraphNode_CrewProcedural present in final pose path",
+      "Foot IK / Hand IK variables wired (or explicitly marked unwired)",
+      "SK_Crew_Basic preview pose + arm bone axes",
+      "BP_SubmarineCrew uses expected mesh + ABP_Crew"
+    ],
+    exit: "Panel can distinguish 'IK not computed' from 'IK computed but not applied'. Run BEFORE Phase F."
+  },
+  {
+    id: "F", title: "UMG diagnostic panel",
+    files: ["WBP_CrewAnimDebugPanel.uasset", "WBP_CrewAnimDebugRow.uasset", "SubPlayerController.cpp"],
+    tasks: [
+      "Editor-assigned WBP with BindWidget meta",
+      "Tabs: Summary · Input · Anim · Procedural · IK · Water/EVA · Network · Tuning",
+      "Warnings shown FIRST",
+      "No widget tree rebuild per tick",
+      "Migrate sliders from legacy CrewAnimDebugWidget"
+    ],
+    exit: "Panel opens in PIE. Updates without realloc. Existing tuning still works."
+  },
+  {
+    id: "G", title: "3D draw debug",
+    files: ["CrewAnimDebugComponent.cpp"],
+    tasks: [
+      "Frame axes (world / sub-local / camera / move / velocity)",
+      "Hand probe rays + selected target",
+      "Foot trace start/end + impact + offset",
+      "Selected bone axes from GetBoneTransform",
+      "Water/immersion markers reusing flood debug"
+    ],
+    exit: "Bad swim/walk transition diagnosed visually without log reading."
+  },
+  {
+    id: "H", title: "Trace recording (CSV)",
+    files: ["CrewAnimDebugComponent.cpp", "SubPlayerController.cpp"],
+    tasks: [
+      "CrewAnimTraceStart / CrewAnimTraceStop",
+      "CrewAnimDumpRecent <seconds>",
+      "Write Saved/Sub3D/CrewAnimDebug/CrewAnimTrace_*.csv",
+      "Stable warning IDs as columns",
+      "Optional second CSV: per-bone columns"
+    ],
+    exit: "10s repro can be saved + diffed across tuning changes. No editor asset dependency."
+  },
+  {
+    id: "I", title: "Gameplay Debugger summary",
+    files: ["Sub3DGameplayDebugger.cpp"],
+    tasks: [
+      "ANIM block under each crew",
+      "Warnings on top",
+      "Mode/Embark/Swim/Stance/Gait + IK summary"
+    ],
+    exit: "Gameplay Debugger key shows enough to diagnose remote/peer crew."
+  }
+];
+
+const WARNINGS = [
+  ["OutsideNotSwimming",          "EmbarkState=Outside AND MovementMode!=Swimming"],
+  ["SwimmingButEmbarkedDry",      "MovementMode=Swimming, EmbarkState=Embarked, Immersion≈0"],
+  ["AnimSwimMismatch",            "Anim bIsSwimming differs from movement swim state"],
+  ["InvalidCompartmentOutside",   "EmbarkState=Outside but CurrentCompartmentId is set"],
+  ["NoAnimInstance",              "Crew mesh has no USubCrewAnimInstance"],
+  ["NoProceduralSnapshot",        "Anim node reports no copied pose snapshot"],
+  ["NoResolvedBones",             "Procedural node resolved 0 bones"],
+  ["IKComputedButNoAnimGraphUse", "IK weights non-zero but ABP validation flag says not wired"],
+  ["HandIKActiveDuringSwim",      "Hand IK weight above threshold while swimming"],
+  ["FootIKActiveDuringSwim",      "Foot IK weight above threshold while swimming"],
+  ["RestPoseDominatesArm",        "Arm rest magnitude > threshold AND movement contrib small"],
+  ["GridVelocitySpike",           "Relative velocity > CrewJitterWarnVelocityCmPerSec (1200)"]
+];
+
+const COMMANDS = [
+  ["CrewAnimDebug 0/1",            "master toggle for the whole local debug system"],
+  ["CrewAnimPanel 0/1",            "show/hide diagnostic UMG panel"],
+  ["CrewAnimDraw 0/1",             "master 3D debug draw toggle"],
+  ["CrewAnimDrawBones 0/1",        "draw selected bone axes + labels"],
+  ["CrewAnimDrawIK 0/1",           "draw hand probes, foot traces, weights"],
+  ["CrewAnimDrawFrames 0/1",       "draw world/sub/camera/move axes"],
+  ["CrewAnimDump",                 "dump current snapshot to log"],
+  ["CrewAnimDumpRecent <seconds>", "dump last N seconds from ring buffer to CSV"],
+  ["CrewAnimTraceStart",           "start recording snapshots to memory"],
+  ["CrewAnimTraceStop",            "stop recording and write CSV"],
+  ["CrewAnimFreeze 0/1",           "freeze displayed snapshot while gameplay continues"],
+  ["CrewAnimSelectBone <name>",    "focus one bone for detailed panel + 3D axis"],
+  ["CrewAnimResetParams",          "reset runtime anim tuning to class defaults"],
+  ["Anim <param> <value>",         "[existing] tune one param live"],
+  ["AnimList",                     "[existing] list all anim params with current value"]
+];
+
+// ────────────────────────────────────────────────────────
+// Render
+// ────────────────────────────────────────────────────────
+const STORAGE_KEY = "sub3d_crew_anim_debug_tracker_v1";
+const STATUS_CYCLE = ["todo", "wip", "done"];
+const STATUS_STYLE = {
+  todo: "bg-slate-800 text-slate-400",
+  wip:  "bg-amber-500/20 text-amber-300",
+  done: "bg-emerald-500/20 text-emerald-300"
+};
+const STATUS_LABEL = { todo: "todo", wip: "wip", done: "done" };
+
+let state = loadState();
+
+function loadState() {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if (raw) return JSON.parse(raw);
+  } catch (_) {}
+  const initial = {};
+  PHASES.forEach(p => initial[p.id] = "todo");
+  return initial;
+}
+
+function saveState() {
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+}
+
+function cycle(id) {
+  const cur = state[id] || "todo";
+  const idx = STATUS_CYCLE.indexOf(cur);
+  state[id] = STATUS_CYCLE[(idx + 1) % STATUS_CYCLE.length];
+  saveState();
+  renderPhases();
+  renderProgress();
+}
+
+function renderPhases() {
+  const grid = document.getElementById("phases-grid");
+  grid.innerHTML = "";
+  PHASES.forEach(p => {
+    const status = state[p.id] || "todo";
+    const card = document.createElement("div");
+    card.className = "phase-card bg-slate-900/60 border border-slate-800 rounded-lg p-5";
+    card.innerHTML = `
+      <div class="flex items-start justify-between gap-3 mb-3">
+        <div class="flex items-center gap-3">
+          <div class="w-9 h-9 rounded-lg bg-slate-800 border border-slate-700 flex items-center justify-center text-emerald-400 font-bold mono">${p.id}</div>
+          <div>
+            <div class="text-white font-semibold">${escapeHtml(p.title)}</div>
+            <div class="text-xs text-slate-500 mono">${p.files.map(escapeHtml).join(" · ")}</div>
+          </div>
+        </div>
+        <button data-id="${p.id}" class="status-pill px-2.5 py-1 rounded text-xs ${STATUS_STYLE[status]}">${STATUS_LABEL[status]}</button>
+      </div>
+      <details>
+        <summary class="text-xs text-slate-500 hover:text-slate-300 flex items-center gap-1">
+          <span class="chev inline-block">▸</span> details
+        </summary>
+        <div class="mt-3 space-y-2">
+          <div>
+            <div class="text-xs uppercase text-slate-500 mb-1">Tasks</div>
+            <ul class="text-sm text-slate-300 space-y-1">
+              ${p.tasks.map(t => `<li class="flex gap-2"><span class="text-slate-600">·</span><span>${escapeHtml(t)}</span></li>`).join("")}
+            </ul>
+          </div>
+          <div class="pt-2 border-t border-slate-800">
+            <div class="text-xs uppercase text-slate-500 mb-1">Exit criteria</div>
+            <p class="text-sm text-slate-300">${escapeHtml(p.exit)}</p>
+          </div>
+        </div>
+      </details>
+    `;
+    grid.appendChild(card);
+  });
+
+  grid.querySelectorAll(".status-pill").forEach(btn => {
+    btn.addEventListener("click", e => {
+      e.stopPropagation();
+      cycle(btn.dataset.id);
+    });
+  });
+}
+
+function renderProgress() {
+  const done = Object.values(state).filter(s => s === "done").length;
+  document.getElementById("progress-num").textContent = done;
+  document.getElementById("progress-bar").style.width = `${(done / PHASES.length) * 100}%`;
+}
+
+function renderWarnings() {
+  const body = document.getElementById("warnings-body");
+  body.innerHTML = WARNINGS.map(([id, cond]) => `
+    <tr class="hover:bg-slate-900/40">
+      <td class="px-4 py-2 mono text-rose-300 align-top">${escapeHtml(id)}</td>
+      <td class="px-4 py-2 text-slate-300">${escapeHtml(cond)}</td>
+    </tr>
+  `).join("");
+}
+
+function renderCommands() {
+  const grid = document.getElementById("commands-grid");
+  grid.innerHTML = COMMANDS.map(([cmd, desc]) => `
+    <div class="p-3 bg-slate-900/60 border border-slate-800 rounded-lg flex items-baseline gap-3">
+      <code class="text-sky-300 mono text-xs whitespace-nowrap">${escapeHtml(cmd)}</code>
+      <span class="text-slate-400 text-xs">${escapeHtml(desc)}</span>
+    </div>
+  `).join("");
+}
+
+function escapeHtml(s) {
+  return String(s).replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+}
+
+document.getElementById("reset-btn").addEventListener("click", () => {
+  if (!confirm("Reset all phase status to 'todo'?")) return;
+  PHASES.forEach(p => state[p.id] = "todo");
+  saveState();
+  renderPhases();
+  renderProgress();
+});
+
+renderPhases();
+renderProgress();
+renderWarnings();
+renderCommands();
+</script>
+</body>
+</html>

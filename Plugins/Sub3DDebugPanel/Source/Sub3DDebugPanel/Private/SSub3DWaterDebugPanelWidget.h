@@ -4,11 +4,16 @@
 #include "Widgets/SCompoundWidget.h"
 
 class ASubmarineBase;
-class UFloodWaterPlaneComponent;
+class AWaterBakeViewer;
 class UCompartmentVolumeComponent;
+class UCompartmentWaterBake;
+class UFloodWaterPlaneComponent;
+class USubmarineDefinition;
 class STextBlock;
 class SVerticalBox;
 class SEditableTextBox;
+class SMultiLineEditableTextBox;
+struct FAssetData;
 
 /**
  * Editor-only Water Debug Panel. Distinct from the main Sub3D Debug Panel.
@@ -43,6 +48,10 @@ private:
 
 	void RebuildSubmarineList();
 	FReply OnRefreshClicked();
+	FReply OnDumpFloodGraphClicked();
+	FReply OnDumpSubDefClicked();
+	FReply OnOpenAllInternalClicked();
+	FReply OnCloseAllInternalClicked();
 	FText GetStatusText() const;
 
 	TSharedPtr<STextBlock> StatusTextBlock;
@@ -109,4 +118,21 @@ private:
 	static constexpr int32 MaxHistoryEntries = 30;
 	TSharedPtr<class SMultiLineEditableTextBox> LogTextBox;
 	FText GetLogText() const;
+
+	// ── Authoring section (moved from Sub3D Debug Panel) ─────────────────────
+	// Bake water + spawn debug viewers. Lives at the bottom of this panel so it doesn't push
+	// the per-compartment + tunables sections off-screen during normal water-debug work.
+	TWeakObjectPtr<USubmarineDefinition> SelectedDefinition;
+	FString LastBakeReport;
+	TSharedPtr<SMultiLineEditableTextBox> BakeReportTextBox;
+	TArray<TWeakObjectPtr<UCompartmentWaterBake>> LastBakedAssets;
+	TArray<TWeakObjectPtr<AWaterBakeViewer>> SpawnedViewers;
+	FText ViewerStatus;
+
+	FReply OnBakeWaterClicked();
+	FReply OnCopyBakeReportClicked();
+	FReply OnSpawnAllViewersClicked();
+	FReply OnDespawnAllViewersClicked();
+	void OnDefinitionPicked(const FAssetData& Asset);
+	FString GetSelectedDefinitionPath() const;
 };

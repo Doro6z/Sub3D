@@ -13,7 +13,6 @@
 #include "Submarine/SubMovementComponent.h"
 #include "Submarine/SubPlayerController.h"
 #include "Submarine/SubmarineBase.h"
-#include "WorldGen/TraversalRouteActor.h"
 
 namespace
 {
@@ -80,12 +79,10 @@ void FSub3DGameplayDebuggerCategory::CollectData(APlayerController* OwnerPC, AAc
 	AddTextLine(TEXT("{yellow}== GAMEMODE =="));
 	if (ASubGameMode* GM = Cast<ASubGameMode>(World->GetAuthGameMode()))
 	{
-		AddTextLine(FString::Printf(TEXT("  BootstrapPhase=%s  RunPhase=%s"),
-			*StaticEnum<ESubBootstrapPhase>()->GetNameStringByValue(static_cast<int64>(GM->BootstrapPhase)),
-			*StaticEnum<ESubRunPhase>()->GetNameStringByValue(static_cast<int64>(GM->RunPhase))));
-		AddTextLine(FString::Printf(TEXT("  ActiveSubmarine=%s  ActiveRoute=%s"),
-			*GetNameSafe(GM->ActiveSubmarine),
-			*GetNameSafe(GM->ActiveRoute)));
+		AddTextLine(FString::Printf(TEXT("  BootstrapPhase=%s"),
+			*StaticEnum<ESubBootstrapPhase>()->GetNameStringByValue(static_cast<int64>(GM->BootstrapPhase))));
+		AddTextLine(FString::Printf(TEXT("  ActiveSubmarine=%s"),
+			*GetNameSafe(GM->ActiveSubmarine)));
 	}
 	else
 	{

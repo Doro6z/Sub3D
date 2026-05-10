@@ -1,0 +1,184 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="1000" viewBox="0 0 1600 1000" role="img" aria-labelledby="title desc">
+  <title id="title">Crew animation debug UI concept</title>
+  <desc id="desc">Conceptual layout for the Sub3D crew animation and water debug UMG panel.</desc>
+  <defs>
+    <style>
+      .bg { fill: #101417; }
+      .app { fill: #151c20; stroke: #344249; stroke-width: 2; }
+      .sidebar { fill: #11191d; stroke: #2c3940; stroke-width: 2; }
+      .topbar { fill: #172127; stroke: #344249; stroke-width: 1.5; }
+      .card { fill: #182126; stroke: #3a4b52; stroke-width: 1.5; }
+      .card-alt { fill: #1b2028; stroke: #594f78; stroke-width: 1.5; }
+      .card-water { fill: #142326; stroke: #3db9c5; stroke-width: 1.5; }
+      .card-warn { fill: #2b2115; stroke: #e3a448; stroke-width: 2; }
+      .card-good { fill: #14281d; stroke: #3cc779; stroke-width: 2; }
+      .timeline { fill: #11181b; stroke: #314047; stroke-width: 1.5; }
+      .txt { fill: #e8f0f2; font-family: Segoe UI, Arial, sans-serif; font-size: 17px; }
+      .small { fill: #b8c6ca; font-family: Segoe UI, Arial, sans-serif; font-size: 14px; }
+      .tiny { fill: #93a5ab; font-family: Segoe UI, Arial, sans-serif; font-size: 12px; }
+      .title { fill: #f5fbfc; font-family: Segoe UI, Arial, sans-serif; font-size: 31px; font-weight: 700; }
+      .subtitle { fill: #b8c6ca; font-family: Segoe UI, Arial, sans-serif; font-size: 16px; }
+      .section { fill: #f5fbfc; font-family: Segoe UI, Arial, sans-serif; font-size: 19px; font-weight: 700; }
+      .tab { fill: #192226; }
+      .tab-active { fill: #223039; stroke: #64c7de; stroke-width: 1.5; }
+      .tab-text { fill: #b8c6ca; font-family: Segoe UI, Arial, sans-serif; font-size: 15px; font-weight: 600; }
+      .tab-active-text { fill: #f5fbfc; font-family: Segoe UI, Arial, sans-serif; font-size: 15px; font-weight: 700; }
+      .chip-text { fill: #101417; font-family: Segoe UI, Arial, sans-serif; font-size: 11px; font-weight: 700; letter-spacing: 0.35px; }
+      .chip-green { fill: #40c878; }
+      .chip-orange { fill: #e4a747; }
+      .chip-blue { fill: #69bbe9; }
+      .chip-purple { fill: #b18be8; }
+      .chip-gray { fill: #9da8ad; }
+      .chip-red { fill: #e26565; }
+      .line { stroke: #314047; stroke-width: 1; }
+      .axis-x { stroke: #e66b54; stroke-width: 3; marker-end: url(#arrow-red); }
+      .axis-y { stroke: #54c36b; stroke-width: 3; marker-end: url(#arrow-green); }
+      .axis-z { stroke: #61a8e8; stroke-width: 3; marker-end: url(#arrow-blue); }
+      .trace { fill: none; stroke: #e4a747; stroke-width: 2.5; }
+      .trace2 { fill: none; stroke: #61a8e8; stroke-width: 2.5; }
+      .trace3 { fill: none; stroke: #40c878; stroke-width: 2.5; }
+    </style>
+    <marker id="arrow-red" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto" markerUnits="strokeWidth">
+      <path d="M0,0 L0,6 L9,3 z" fill="#e66b54" />
+    </marker>
+    <marker id="arrow-green" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto" markerUnits="strokeWidth">
+      <path d="M0,0 L0,6 L9,3 z" fill="#54c36b" />
+    </marker>
+    <marker id="arrow-blue" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto" markerUnits="strokeWidth">
+      <path d="M0,0 L0,6 L9,3 z" fill="#61a8e8" />
+    </marker>
+  </defs>
+
+  <rect class="bg" x="0" y="0" width="1600" height="1000" />
+  <text class="title" x="64" y="58">Crew Anim Debug Panel - UI concept</text>
+  <text class="subtitle" x="64" y="86">Validation-only panel concept. Not implemented yet. It waits for CrewAnimDump PIE validation, then reads the shared snapshot.</text>
+
+  <rect class="app" x="64" y="120" width="1472" height="820" rx="12" />
+  <rect class="sidebar" x="64" y="120" width="230" height="820" rx="12" />
+  <rect class="topbar" x="294" y="120" width="1242" height="84" rx="12" />
+
+  <text class="section" x="92" y="160">Crew Debug</text>
+  <text class="tiny" x="92" y="184">WBP_CrewAnimDebugPanel</text>
+
+  <g transform="translate(88 222)">
+    <rect class="tab-active" x="0" y="0" width="178" height="42" rx="7" />
+    <text class="tab-active-text" x="16" y="27">Summary</text>
+    <rect class="tab" x="0" y="52" width="178" height="42" rx="7" />
+    <text class="tab-text" x="16" y="79">Input / Move</text>
+    <rect class="tab" x="0" y="104" width="178" height="42" rx="7" />
+    <text class="tab-text" x="16" y="131">Anim State</text>
+    <rect class="tab" x="0" y="156" width="178" height="42" rx="7" />
+    <text class="tab-text" x="16" y="183">Procedural</text>
+    <rect class="tab" x="0" y="208" width="178" height="42" rx="7" />
+    <text class="tab-text" x="16" y="235">IK</text>
+    <rect class="tab" x="0" y="260" width="178" height="42" rx="7" />
+    <text class="tab-text" x="16" y="287">Water / EVA</text>
+    <rect class="tab" x="0" y="312" width="178" height="42" rx="7" />
+    <text class="tab-text" x="16" y="339">Network</text>
+    <rect class="tab" x="0" y="364" width="178" height="42" rx="7" />
+    <text class="tab-text" x="16" y="391">Tuning</text>
+  </g>
+
+  <g transform="translate(322 144)">
+    <text class="section" x="0" y="24">BP_SubmarineCrew_0</text>
+    <text class="small" x="0" y="50">Frame 18420 | AutonomousProxy | Snapshot source: UCrewAnimDebugComponent | UI target after text dump validation</text>
+    <rect class="chip-gray" x="770" y="10" width="76" height="24" rx="12" />
+    <text class="chip-text" x="786" y="27">CIBLE</text>
+    <rect class="chip-blue" x="902" y="10" width="86" height="24" rx="12" />
+    <text class="chip-text" x="918" y="27">IN CODE</text>
+    <rect class="chip-gray" x="1004" y="10" width="70" height="24" rx="12" />
+    <text class="chip-text" x="1018" y="27">CIBLE</text>
+    <rect class="chip-green" x="1090" y="10" width="76" height="24" rx="12" />
+    <text class="chip-text" x="1103" y="27">VALIDE</text>
+  </g>
+
+  <g transform="translate(322 232)">
+    <rect class="card-warn" x="0" y="0" width="1186" height="76" rx="10" />
+    <text class="section" x="20" y="30">Warnings first</text>
+    <rect class="chip-orange" x="20" y="42" width="154" height="22" rx="11" />
+    <text class="chip-text" x="35" y="58">OutsideNotSwimming</text>
+    <rect class="chip-orange" x="188" y="42" width="140" height="22" rx="11" />
+    <text class="chip-text" x="204" y="58">AnimSwimMismatch</text>
+    <rect class="chip-gray" x="342" y="42" width="190" height="22" rx="11" />
+    <text class="chip-text" x="360" y="58">IKComputedButNotApplied</text>
+    <text class="small" x="650" y="51">CrewAnimDump validates this list before this panel is built.</text>
+  </g>
+
+  <g transform="translate(322 332)">
+    <rect class="card" x="0" y="0" width="372" height="178" rx="10" />
+    <text class="section" x="20" y="32">State summary</text>
+    <text class="small" x="20" y="66">TraversalDomain</text><rect class="chip-orange" x="196" y="49" width="130" height="22" rx="11" /><text class="chip-text" x="214" y="65">OutsideSwim</text>
+    <text class="small" x="20" y="96">ReferenceFrameState</text><rect class="chip-blue" x="196" y="79" width="130" height="22" rx="11" /><text class="chip-text" x="218" y="95">WorldSpace</text>
+    <text class="small" x="20" y="126">WaterContactState</text><rect class="chip-purple" x="196" y="109" width="130" height="22" rx="11" /><text class="chip-text" x="236" y="125">Ocean</text>
+    <text class="small" x="20" y="156">Raw mode</text><text class="small" x="196" y="156">Embark=Outside | CMC=Swimming</text>
+  </g>
+
+  <g transform="translate(720 332)">
+    <rect class="card-water" x="0" y="0" width="372" height="178" rx="10" />
+    <text class="section" x="20" y="32">Water / EVA</text>
+    <text class="small" x="20" y="66">ImmersionSample</text><text class="small" x="202" y="66">Ocean valid</text>
+    <text class="small" x="20" y="96">Compartment</text><text class="small" x="202" y="96">&lt;none&gt;</text>
+    <text class="small" x="20" y="126">Oxygen / pressure</text><text class="small" x="202" y="126">O2: no | kPa: 101.3</text>
+    <text class="small" x="20" y="156">Last handoff</text><text class="small" x="202" y="156">Outgoing airlock</text>
+  </g>
+
+  <g transform="translate(1118 332)">
+    <rect class="card" x="0" y="0" width="390" height="178" rx="10" />
+    <text class="section" x="20" y="32">Input / Move</text>
+    <text class="small" x="20" y="66">MoveAxis: X 0.82 / Y -0.10</text>
+    <text class="small" x="20" y="96">VerticalAxis: +0.00</text>
+    <text class="small" x="20" y="126">Speed: 226 cm/s | Direction: -8 deg</text>
+    <text class="small" x="20" y="156">Camera forward drives swim direction</text>
+  </g>
+
+  <g transform="translate(322 536)">
+    <rect class="card-alt" x="0" y="0" width="584" height="230" rx="10" />
+    <text class="section" x="20" y="32">RequestedFinalPose</text>
+    <text class="tiny" x="20" y="56">Values requested by USubCrewAnimInstance</text>
+    <path class="line" d="M20 78 H560" />
+    <text class="small" x="28" y="106">Bone</text>
+    <text class="small" x="190" y="106">Pitch</text>
+    <text class="small" x="290" y="106">Yaw</text>
+    <text class="small" x="390" y="106">Roll</text>
+    <text class="small" x="28" y="136">upperarm_r</text><text class="small" x="190" y="136">0.0</text><text class="small" x="290" y="136">8.2</text><text class="small" x="390" y="136">-85.0</text>
+    <text class="small" x="28" y="166">upperarm_l</text><text class="small" x="190" y="166">0.0</text><text class="small" x="290" y="166">-8.2</text><text class="small" x="390" y="166">85.0</text>
+    <text class="small" x="28" y="196">pelvis</text><text class="small" x="190" y="196">0.0</text><text class="small" x="290" y="196">0.0</text><text class="small" x="390" y="196">1.5</text>
+    <rect class="chip-orange" x="438" y="121" width="100" height="22" rx="11" /><text class="chip-text" x="455" y="137">REST POSE</text>
+  </g>
+
+  <g transform="translate(924 536)">
+    <rect class="card-alt" x="0" y="0" width="584" height="230" rx="10" />
+    <text class="section" x="20" y="32">AppliedBoneTransforms</text>
+    <text class="tiny" x="20" y="56">Values read from the skeletal mesh after evaluation</text>
+    <g transform="translate(70 118)">
+      <circle cx="0" cy="0" r="8" fill="#e8f0f2" />
+      <line class="axis-x" x1="0" y1="0" x2="86" y2="0" />
+      <line class="axis-y" x1="0" y1="0" x2="0" y2="-74" />
+      <line class="axis-z" x1="0" y1="0" x2="58" y2="-52" />
+      <text class="tiny" x="96" y="5">X</text>
+      <text class="tiny" x="-6" y="-88">Y</text>
+      <text class="tiny" x="68" y="-60">Z</text>
+    </g>
+    <text class="small" x="196" y="112">Selected bone: upperarm_r</text>
+    <text class="small" x="196" y="142">Applied differs from requested?</text>
+    <rect class="chip-gray" x="408" y="126" width="98" height="22" rx="11" /><text class="chip-text" x="424" y="142">PAS ENCORE</text>
+    <text class="small" x="196" y="176">Use this to separate procedural error</text>
+    <text class="small" x="196" y="204">from AnimGraph / import / IK wiring.</text>
+  </g>
+
+  <g transform="translate(322 790)">
+    <rect class="card" x="0" y="0" width="372" height="110" rx="10" />
+    <text class="section" x="20" y="32">IK status</text>
+    <text class="small" x="20" y="64">Hand: computed 0 | wired ? | applied ?</text>
+    <text class="small" x="20" y="90">Foot: computed 1 | wired ? | applied ?</text>
+  </g>
+
+  <g transform="translate(720 790)">
+    <rect class="timeline" x="0" y="0" width="788" height="110" rx="10" />
+    <text class="section" x="20" y="32">Recent trace</text>
+    <path class="trace" d="M28 76 C90 42, 130 42, 186 70 S290 102, 348 62 S468 28, 540 60 S670 104, 746 54" />
+    <path class="trace2" d="M28 84 C116 86, 164 38, 246 54 S378 96, 456 74 S606 40, 746 78" />
+    <path class="trace3" d="M28 58 C120 70, 200 72, 286 58 S462 36, 546 50 S674 82, 746 66" />
+    <text class="tiny" x="612" y="28">warning ids + state changes</text>
+  </g>
+</svg>

@@ -32,6 +32,10 @@ struct SUB3D_API FCrewMoveIntent
 	UPROPERTY(BlueprintReadOnly, Category = "Crew|Locomotion")
 	FVector2D MoveAxis = FVector2D::ZeroVector;
 
+	/** Vertical swim input. +1 = up, -1 = down. Ignored while walking. */
+	UPROPERTY(BlueprintReadOnly, Category = "Crew|Locomotion")
+	float VerticalAxis = 0.f;
+
 	UPROPERTY(BlueprintReadOnly, Category = "Crew|Locomotion")
 	FVector WorldMoveDirection = FVector::ZeroVector;
 

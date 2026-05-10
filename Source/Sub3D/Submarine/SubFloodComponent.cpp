@@ -30,6 +30,11 @@ constexpr float WaterDensityKgPerLiter = 1.025f; // seawater
 USubFloodComponent::USubFloodComponent()
 {
 	PrimaryComponentTick.bCanEverTick = true;
+	// Tick in editor preview viewports too — used only for the debug-label drawing block at the
+	// top of TickComponent (compartment/connection markers must be visible in the BP editor and
+	// level editor without needing PIE). The simulation block below is gated behind
+	// `HasAuthority + CompartmentStates.Num() > 0`, both false in editor preview, so no sim runs.
+	bTickInEditor = true;
 	SetIsReplicatedByDefault(true);
 }
 
@@ -62,25 +67,38 @@ void USubFloodComponent::InitializeFromDefinition(const USubmarineDefinition* De
 		State.CompartmentId = Comp.CompartmentId;
 		State.CapacityLiters = Comp.CapacityLiters;
 		State.MaxWaterHeightCm = FMath::Max(MinCompartmentHeightCm, Comp.MaxWaterHeightCm);
+		State.WalkableFloorZCm = Comp.WalkableFloorZCm;
 		State.CurrentWaterLiters = 0.f;
 		CompartmentStates.Add(State);
 	}
 
 	// Build edge states from flood graph
+	constexpr float MinimumPassageAreaCm2 = 1000.f; // floor for Area-derived flow scale; some
+	// import paths (vertical hatches) compute width*height = 0 and need a sensible default.
 	for (const FFloodGraphEdge& Edge : Definition->FloodGraph.Edges)
 	{
 		FFloodEdgeState ES;
 		ES.ClosureId = Edge.ClosureId;
 		ES.VolumeA = Edge.VolumeA;
 		ES.VolumeB = Edge.VolumeB;
-		ES.PassageAreaCm2 = Edge.PassageAreaCm2;
+		ES.PassageAreaCm2 = FMath::Max(Edge.PassageAreaCm2, MinimumPassageAreaCm2);
 		ES.bExteriorEdge = Edge.bExteriorEdge;
 
-		// Set initial door state from connection definition
+		// Initial closed state. Resolution rules:
+		//  1. If the connection is typed Open → permanently bClosed=false (never closable).
+		//  2. Otherwise → use the connection's bStartsClosed (Door / Hatch / ExteriorHatch).
+		//  3. No matching connection → bClosed=true (safe default; an unknown edge stays sealed).
 		if (!Edge.ClosureId.IsNone())
 		{
 			const FGeneratedConnectionDef* Conn = Definition->FindConnection(Edge.ClosureId);
-			ES.bClosed = Conn ? Conn->bStartsClosed : true;
+			if (Conn && Conn->ConnectionType == EConnectionType::Open)
+			{
+				ES.bClosed = false;
+			}
+			else
+			{
+				ES.bClosed = Conn ? Conn->bStartsClosed : true;
+			}
 		}
 		else
 		{
@@ -258,6 +276,60 @@ void USubFloodComponent::TickComponent(float DeltaTime, ELevelTick TickType, FAc
 	Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
 
 #if !UE_BUILD_SHIPPING
+	// Authoring debug labels — compartments + connections drawn on ALL net roles. Outside the
+	// authority guard so clients see them too.
+	if (const USub3DDebugSettings* SettingsLabels = GetDefault<USub3DDebugSettings>())
+	{
+		UWorld* W = GetWorld();
+		const AActor* Owner = GetOwner();
+		const FTransform SubXf = Owner ? Owner->GetActorTransform() : FTransform::Identity;
+
+		// 1) Compartment labels at each volume's center
+		if (W && Owner && SettingsLabels->bDrawCompartmentLabels)
+		{
+			TArray<UCompartmentVolumeComponent*> Volumes;
+			Owner->GetComponents<UCompartmentVolumeComponent>(Volumes);
+			for (const UCompartmentVolumeComponent* Vol : Volumes)
+			{
+				if (!Vol || Vol->CompartmentId.IsNone()) continue;
+				const FVector Center = Vol->GetComponentLocation();
+				DrawDebugString(W, Center, Vol->CompartmentId.ToString(), nullptr,
+					FColor(180, 220, 255), 0.f, true, 1.3f);
+			}
+		}
+
+		// 2) Connection markers at each Conn.LocalTransform from the DA
+		const ASubmarineBase* SubAsBase = Cast<ASubmarineBase>(Owner);
+		if (W && SubAsBase && SubAsBase->GeneratedDefinition && SettingsLabels->bDrawConnectionMarkers)
+		{
+			for (const FGeneratedConnectionDef& Conn : SubAsBase->GeneratedDefinition->Connections)
+			{
+				const FVector LocalLoc = Conn.LocalTransform.GetLocation();
+				const FVector WorldPos = SubXf.TransformPosition(LocalLoc);
+				FColor Color = FColor::White;
+				FString TypeTag;
+				switch (Conn.ConnectionType)
+				{
+					case EConnectionType::Door:          Color = FColor::Red;    TypeTag = TEXT("Door");          break;
+					case EConnectionType::Hatch:         Color = FColor::Orange; TypeTag = TEXT("Hatch");         break;
+					case EConnectionType::ExteriorHatch: Color = FColor::Blue;   TypeTag = TEXT("ExteriorHatch"); break;
+					case EConnectionType::Open:          Color = FColor::Green;  TypeTag = TEXT("Open");          break;
+					default:                                                    TypeTag = TEXT("?");             break;
+				}
+				DrawDebugSphere(W, WorldPos, 12.f, 12, Color, false, -1.f, SDPG_World, 1.f);
+				const FString CompBStr = Conn.CompartmentB.IsNone() ? TEXT("(EXT)") : Conn.CompartmentB.ToString();
+				const FString Label = FString::Printf(
+					TEXT("[%s] %s\n%s ↔ %s"),
+					*TypeTag,
+					*Conn.ConnectionId.ToString(),
+					*Conn.CompartmentA.ToString(),
+					*CompBStr);
+				DrawDebugString(W, WorldPos + FVector(0, 0, 25.f), Label, nullptr,
+					Color, 0.f, true, 1.f);
+			}
+		}
+	}
+
 	// Breach markers — drawn on ALL net roles (Breaches is replicated). Outside the authority
 	// guard below so clients also visualise. Disabled by default; toggle in Project Settings >
 	// Game > Sub3D Debug > Submarine|Flood > Draw Breach Markers.
@@ -329,12 +401,43 @@ void USubFloodComponent::SetDoorState(FName ConnectionId, bool bClosed)
 	if (Edge)
 	{
 		Edge->bClosed = bClosed;
+		UE_LOG(LogSubFlood, Log, TEXT("SetDoorState: edge '%s' bClosed=%d"),
+			*ConnectionId.ToString(), bClosed ? 1 : 0);
 	}
 	else
 	{
 		UE_LOG(LogSubFlood, Warning, TEXT("SetDoorState: no edge found for ConnectionId '%s'"),
 			*ConnectionId.ToString());
 	}
+}
+
+void USubFloodComponent::SetDoorStateByCompartments(FName CompA, FName CompB, bool bClosed)
+{
+	if (!HasAuthority(this) || CompA.IsNone() || CompB.IsNone())
+	{
+		return;
+	}
+
+	for (FFloodEdgeState& Edge : EdgeStates)
+	{
+		const bool bMatch =
+			(Edge.VolumeA == CompA && Edge.VolumeB == CompB) ||
+			(Edge.VolumeA == CompB && Edge.VolumeB == CompA);
+		if (bMatch)
+		{
+			Edge.bClosed = bClosed;
+			UE_LOG(LogSubFlood, Log,
+				TEXT("SetDoorStateByCompartments: edge '%s' (A=%s B=%s) bClosed=%d"),
+				*Edge.ClosureId.ToString(),
+				*Edge.VolumeA.ToString(), *Edge.VolumeB.ToString(),
+				bClosed ? 1 : 0);
+			return;
+		}
+	}
+
+	UE_LOG(LogSubFlood, Warning,
+		TEXT("SetDoorStateByCompartments: no edge found for compartments A='%s' B='%s'"),
+		*CompA.ToString(), *CompB.ToString());
 }
 
 // --- Breach --------------------------------------------------------------
@@ -642,7 +745,38 @@ void USubFloodComponent::AdvanceFlooding(float DeltaTime)
 			continue;
 		}
 
-		const float HeightDeltaCm = CompA->WaterHeightCm - CompB->WaterHeightCm;
+		// Absolute Z of each compartment's water surface (sub-local space). This includes
+		// the compartment floor offset so vertical connections respect gravity: water in a
+		// lower compartment only flows up to a higher one when its surface actually exceeds
+		// the higher compartment's floor (otherwise the lower one fills up first).
+		const float SurfaceA = CompA->WalkableFloorZCm + CompA->WaterHeightCm;
+		const float SurfaceB = CompB->WalkableFloorZCm + CompB->WaterHeightCm;
+		float HeightDeltaCm = SurfaceA - SurfaceB;
+
+		// FP overflow rule for vertical connections: if one compartment sits significantly
+		// higher than the other, the strict absolute-Z gate may block any flow even when the
+		// lower compartment is full (e.g. Main_Hub max water = 112, Upper_Hub floor = 130 →
+		// gap of 18cm physically unreachable). In that case, once the lower compartment is
+		// essentially full and the higher one has headroom, force an overflow flow upward.
+		// Models "water spills up the open staircase when the source can't hold any more."
+		constexpr float VerticalThresholdCm = 50.f;
+		constexpr float ForcedOverflowDeltaCm = 30.f;
+		const float FloorDelta = CompA->WalkableFloorZCm - CompB->WalkableFloorZCm;
+		const bool bAHigher = FloorDelta >  VerticalThresholdCm;
+		const bool bBHigher = FloorDelta < -VerticalThresholdCm;
+		if (bAHigher || bBHigher)
+		{
+			const FFloodCompartmentState* Lower  = bAHigher ? CompB : CompA;
+			const FFloodCompartmentState* Higher = bAHigher ? CompA : CompB;
+			const bool bLowerFull  = (Lower->WaterLevelNormalized  >= 0.99f);
+			const bool bHigherFull = (Higher->WaterLevelNormalized >= 1.0f - KINDA_SMALL_NUMBER);
+			if (bLowerFull && !bHigherFull)
+			{
+				// Drive a flow Lower → Higher. Sign matches whichever side is the source.
+				HeightDeltaCm = (Lower == CompA) ? ForcedOverflowDeltaCm : -ForcedOverflowDeltaCm;
+			}
+		}
+
 		if (FMath::IsNearlyZero(HeightDeltaCm, KINDA_SMALL_NUMBER))
 		{
 			continue;

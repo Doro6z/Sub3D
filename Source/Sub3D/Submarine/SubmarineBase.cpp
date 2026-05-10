@@ -7,6 +7,7 @@
 #include "DoorFloodVfxComponent.h"
 #include "GeneratedGeometry/SubmarineGeneratedGeometryComponent.h"
 #include "ProceduralMeshComponent.h"
+#include "SubHatchActor.h"
 #include "Components/BoxReflectionCaptureComponent.h"
 #include "Components/PostProcessComponent.h"
 #include "Generator/SubmarineDefinition.h"
@@ -342,14 +343,9 @@ void ASubmarineBase::BeginPlay()
 		}
 	}
 
-	// [Phase 1 P1.4] Auto-spawn missing UCompartmentVolumeComponents from the DA.
-	// Runs on ALL net roles (server + clients), idempotent against BP-placed volumes.
-	// Ensures Step 6 (water plane spawning) finds a volume per compartment whether
-	// the BP authored them or not.
-	if (GeneratedDefinition)
-	{
-		EnsureCompartmentVolumesFromDefinition();
-	}
+	// HydroBounds-based auto-spawn of UCompartmentVolumeComponents removed 2026-05-10
+	// (option B). CVs are placed manually in BP_Submarine_Craniata; the DA's HydroBounds
+	// field is no longer read at runtime.
 
 	// ── Flood Visuals: spawn one UFloodWaterPlaneComponent per compartment volume ─
 	// Runs on ALL net roles so each client renders water locally without needing
@@ -555,7 +551,7 @@ void ASubmarineBase::SpawnDoorsFromDefinition()
 	for (const FGeneratedConnectionDef& Conn : GeneratedDefinition->Connections)
 	{
 		// Only spawn actors for traversable connection types. Skip Open
-		// (no physical door needed) and any future passive connection types.
+		// (no physical door — water flows freely, see SubFloodComponent::AdvanceFlooding).
 		const bool bIsDoorLike =
 			(Conn.ConnectionType == EConnectionType::Door) ||
 			(Conn.ConnectionType == EConnectionType::Hatch) ||
@@ -563,6 +559,15 @@ void ASubmarineBase::SpawnDoorsFromDefinition()
 		if (!bIsDoorLike)
 		{
 			continue;
+		}
+
+		// Pick the right actor class for this connection type. Hatch uses its own class
+		// (horizontal trap-door) when set; otherwise falls back to the door class so the
+		// connection still gets a physical actor (visually wrong but functional).
+		TSubclassOf<ASubDoorActor> ClassToSpawn = GeneratorDoorActorClass;
+		if (Conn.ConnectionType == EConnectionType::Hatch && GeneratorHatchActorClass)
+		{
+			ClassToSpawn = GeneratorHatchActorClass;
 		}
 
 		// Local transform lives in submarine local space; convert to world.
@@ -575,7 +580,7 @@ void ASubmarineBase::SpawnDoorsFromDefinition()
 		// SpawnActor would leave the door with DoorId=None on first tick and
 		// fail to register against the flood graph.
 		ASubDoorActor* Door = World->SpawnActorDeferred<ASubDoorActor>(
-			GeneratorDoorActorClass,
+			ClassToSpawn,
 			WorldTransform,
 			/*Owner=*/this,
 			/*Instigator=*/nullptr,
@@ -1079,14 +1084,14 @@ float ASubmarineBase::TakeDamage(float DamageAmount, const FDamageEvent& DamageE
 		&& SubHull->GetStructuralSheets().Num() == 0
 		&& GeneratedDefinition)
 	{
-		const FGeneratedCompartmentDef* Comp = GeneratedDefinition->FindCompartmentAtLocalLocation(LocalHitPosition);
-		if (Comp)
+		const FName CompartmentId = FindCompartmentIdAtLocalLocation(LocalHitPosition);
+		if (!CompartmentId.IsNone())
 		{
 			const float Inflow = FMath::Clamp(
 				DamageAmount * DamageToBreachInflowScale,
 				0.f,
 				GeneratedDefinition->MaxExteriorInflowLitersPerSec);
-			SubFlood->CreateBreach(Comp->CompartmentId, Inflow, LocalHitPosition);
+			SubFlood->CreateBreach(CompartmentId, Inflow, LocalHitPosition);
 		}
 	}
 
@@ -1119,6 +1124,46 @@ void ASubmarineBase::ClearPilot()
 	{
 		CurrentPilot = nullptr;
 	}
+}
+
+FName ASubmarineBase::FindCompartmentIdAtLocalLocation(const FVector& LocalPosition) const
+{
+	// CV-based lookup: iterate every UCompartmentVolumeComponent and return the CompartmentId
+	// of any box that contains LocalPosition. This natively handles multi-volume L-shaped
+	// compartments — two CVs sharing the same CompartmentId means either box matches.
+	TArray<UCompartmentVolumeComponent*> Volumes;
+	GetComponents<UCompartmentVolumeComponent>(Volumes);
+
+	for (const UCompartmentVolumeComponent* Vol : Volumes)
+	{
+		if (!Vol || Vol->CompartmentId.IsNone())
+		{
+			continue;
+		}
+
+		// Transform sub-local point into the volume's local frame so a rotated CV (rare in
+		// Craniata but allowed) is handled correctly.
+		const FTransform VolXf = Vol->GetRelativeTransform();
+		const FVector PosInVol = VolXf.InverseTransformPosition(LocalPosition);
+		const FVector HalfExtent = Vol->GetUnscaledBoxExtent();
+
+		if (FMath::Abs(PosInVol.X) <= HalfExtent.X
+			&& FMath::Abs(PosInVol.Y) <= HalfExtent.Y
+			&& FMath::Abs(PosInVol.Z) <= HalfExtent.Z)
+		{
+			return Vol->CompartmentId;
+		}
+	}
+
+	// Fallback: legacy DA-based AABB lookup (subs without UCompartmentVolumeComponent placed).
+	if (GeneratedDefinition)
+	{
+		if (const FGeneratedCompartmentDef* Comp = GeneratedDefinition->FindCompartmentAtLocalLocation(LocalPosition))
+		{
+			return Comp->CompartmentId;
+		}
+	}
+	return NAME_None;
 }
 
 bool ASubmarineBase::InjectWaterAtWorldPoint(FVector WorldPos, float Force, float Radius)
@@ -1214,14 +1259,14 @@ void ASubmarineBase::OnHullHit(
 		&& SubHull && SubHull->GetStructuralSheets().Num() == 0
 		&& GeneratedDefinition)
 	{
-		const FGeneratedCompartmentDef* Comp = GeneratedDefinition->FindCompartmentAtLocalLocation(LocalHitPosition);
-		if (Comp)
+		const FName CompartmentId = FindCompartmentIdAtLocalLocation(LocalHitPosition);
+		if (!CompartmentId.IsNone())
 		{
 			const float Inflow = FMath::Clamp(
 				Damage * DamageToBreachInflowScale,
 				0.f,
 				GeneratedDefinition->MaxExteriorInflowLitersPerSec);
-			SubFlood->CreateBreach(Comp->CompartmentId, Inflow, LocalHitPosition);
+			SubFlood->CreateBreach(CompartmentId, Inflow, LocalHitPosition);
 		}
 	}
 
@@ -1569,91 +1614,35 @@ void ASubmarineBase::HandleBreachesUpdatedForFlood(const TArray<FBreachClusterSt
 	}
 }
 
-void ASubmarineBase::EnsureCompartmentVolumesFromDefinition()
+bool ASubmarineBase::GetCompartmentLocalBounds(FName CompartmentId, FBox& OutLocalBounds) const
 {
-	if (!GeneratedDefinition)
+	if (CompartmentId.IsNone())
 	{
-		return;
+		return false;
 	}
 
-	// Index BP-placed (and previously auto-spawned) volumes by CompartmentId.
-	TArray<UCompartmentVolumeComponent*> ExistingVolumes;
-	GetComponents<UCompartmentVolumeComponent>(ExistingVolumes);
+	TArray<UCompartmentVolumeComponent*> Volumes;
+	GetComponents<UCompartmentVolumeComponent>(Volumes);
 
-	TSet<FName> CoveredCompartments;
-	CoveredCompartments.Reserve(ExistingVolumes.Num());
-	for (const UCompartmentVolumeComponent* Vol : ExistingVolumes)
+	bool bAny = false;
+	FBox Accum(ForceInit);
+	for (const UCompartmentVolumeComponent* Vol : Volumes)
 	{
-		if (Vol && !Vol->CompartmentId.IsNone())
+		if (!Vol || Vol->CompartmentId != CompartmentId)
 		{
-			CoveredCompartments.Add(Vol->CompartmentId);
-		}
-	}
-
-	int32 NumSpawned = 0;
-	for (const FGeneratedCompartmentDef& Comp : GeneratedDefinition->Compartments)
-	{
-		if (Comp.CompartmentId.IsNone() || CoveredCompartments.Contains(Comp.CompartmentId))
-		{
-			// BP-authored wins (or already auto-spawned).
 			continue;
 		}
-
-		const FVector Min = Comp.HydroBoundsMin;
-		const FVector Max = Comp.HydroBoundsMax;
-		if (Max.X <= Min.X || Max.Y <= Min.Y || Max.Z <= Min.Z)
-		{
-			UE_LOG(LogTemp, Warning,
-				TEXT("EnsureCompartmentVolumesFromDefinition: invalid HydroBounds for %s (Min=%s Max=%s) — skipping auto-spawn"),
-				*Comp.CompartmentId.ToString(), *Min.ToString(), *Max.ToString());
-			continue;
-		}
-
-		// Sanity check: HydroBounds Z extent must include walkable headroom above water cap.
-		// If Z extent ≤ MaxWaterHeightCm, the bounds were authored as water-volume only —
-		// auto-spawned volume will be too tight, crew detection at ceiling level may miss,
-		// and Phase 2 bake will cut the cap mesh below the actual ceiling.
-		const float ZExtent = Max.Z - Min.Z;
-		if (Comp.MaxWaterHeightCm > 0.f && ZExtent <= Comp.MaxWaterHeightCm + 1.f)
-		{
-			UE_LOG(LogTemp, Warning,
-				TEXT("EnsureCompartmentVolumesFromDefinition: %s HydroBounds Z extent (%.1f cm) <= MaxWaterHeightCm (%.1f cm). ")
-				TEXT("Bounds likely authored as water-volume only — must include full floor-to-ceiling interior. ")
-				TEXT("Update DA values (HydroBoundsMin/Max) to enclose the entire compartment with door/deck cutoffs."),
-				*Comp.CompartmentId.ToString(), ZExtent, Comp.MaxWaterHeightCm);
-		}
-
-		const FVector Center = (Min + Max) * 0.5f;
-		const FVector HalfExtent = (Max - Min) * 0.5f;
-
-		// NewObject + RegisterComponent pattern (cohérent avec UFloodWaterPlaneComponent spawn).
-		const FName ComponentName(*FString::Printf(TEXT("AutoCV_%s"), *Comp.CompartmentId.ToString()));
-		UCompartmentVolumeComponent* NewVol = NewObject<UCompartmentVolumeComponent>(this, ComponentName);
-		if (!NewVol)
-		{
-			UE_LOG(LogTemp, Warning,
-				TEXT("EnsureCompartmentVolumesFromDefinition: NewObject failed for %s"),
-				*Comp.CompartmentId.ToString());
-			continue;
-		}
-
-		// Constructor defaults already configure: CompartmentProbe collision profile,
-		// GenerateOverlapEvents=true, ECC_CompartmentProbe channel (crew overlap detection).
-		// DO NOT override those — crew embark detection depends on them.
-		NewVol->CompartmentId = Comp.CompartmentId;
-		NewVol->SetBoxExtent(HalfExtent, false);
-		NewVol->SetMobility(EComponentMobility::Movable);
-		NewVol->SetupAttachment(SubmarineRoot);
-		NewVol->RegisterComponent();
-		NewVol->SetRelativeLocation(Center);
-
-		++NumSpawned;
+		// CV box in its own local frame, transformed to sub-local frame.
+		const FVector HalfExtent = Vol->GetUnscaledBoxExtent();
+		const FBox LocalAABB(-HalfExtent, HalfExtent);
+		const FBox SubLocalAABB = LocalAABB.TransformBy(Vol->GetRelativeTransform());
+		Accum += SubLocalAABB;
+		bAny = true;
 	}
 
-	if (NumSpawned > 0)
+	if (bAny)
 	{
-		UE_LOG(LogTemp, Display,
-			TEXT("EnsureCompartmentVolumesFromDefinition: auto-spawned %d UCompartmentVolumeComponent(s) on %s"),
-			NumSpawned, *GetName());
+		OutLocalBounds = Accum;
 	}
+	return bAny;
 }
