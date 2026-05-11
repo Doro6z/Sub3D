@@ -150,6 +150,15 @@ struct FFloodEdgeState
 	 */
 	UPROPERTY()
 	float CurrentFlowRateLitersPerSec = 0.f;
+
+	/**
+	 * Signed head delta in cm between the two water surfaces at the door's spill plane. Positive
+	 * = SurfaceA above SurfaceB. Used by visual systems (door cascade Niagara) to drive intensity
+	 * via a smoothstep on |Δh| — more direct/visual signal than the Bernoulli-derived flow rate
+	 * for VFX authoring (5cm = barely visible, 120cm = full cascade). Replicated.
+	 */
+	UPROPERTY()
+	float CurrentHeadDeltaCm = 0.f;
 };
 
 /**

@@ -850,6 +850,7 @@ void USubFloodComponent::AdvanceFlooding(float DeltaTime)
 	for (FFloodEdgeState& EdgeReset : EdgeStates)
 	{
 		EdgeReset.CurrentFlowRateLitersPerSec = 0.f;
+		EdgeReset.CurrentHeadDeltaCm = 0.f;
 	}
 
 	// Tunables (Project Settings → Game → Sub3D Debug → Submarine|Flood|SimTuning).
@@ -886,6 +887,11 @@ void USubFloodComponent::AdvanceFlooding(float DeltaTime)
 		// World-Z surfaces and effective sills.
 		const float SurfaceA = ComputeSurfaceWorldZ(*CompA, SubWorldXf);
 		const float SurfaceB = ComputeSurfaceWorldZ(*CompB, SubWorldXf);
+
+		// Expose the signed head delta (A − B) to visual systems (door cascade Niagara).
+		// More direct/predictable signal than the Bernoulli flow rate for VFX authoring —
+		// |Δh| maps naturally onto a smoothstep for FlowIntensity01.
+		EdgeStates[EdgeIdx].CurrentHeadDeltaCm = SurfaceA - SurfaceB;
 
 		const float DoorWorldZ = SubWorldXf.TransformPosition(Edge.LocalSpillPosition).Z;
 
