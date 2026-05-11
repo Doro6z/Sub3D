@@ -161,6 +161,30 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Flood|Water|CapMesh")
 	bool bFlipCapMeshWinding = true;
 
+	/**
+	 * Generate vertical "skirt" geometry below the cap perimeter. Scenario: sub tilted bow-up,
+	 * Main_Hub contains water reaching the door level; the player stands in the dry Main_Bow
+	 * adjacent compartment and opens the door. Without skirts, looking through the door at
+	 * Main_Hub shows nothing (the flat cap disc is thinner than the door height and the camera's
+	 * sight line passes under it). The skirt is a vertical strip dropping from the cap perimeter
+	 * down to the compartment floor, **outward-facing** so it's visible from the dry side.
+	 *
+	 * Inside-the-compartment views see backfaces (culled) — fine because once the camera is
+	 * submerged the underwater PP takes over and the cap is mostly seen from below.
+	 *
+	 * See `2026-05-10_underwater_rendering_plan.md` §6.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Flood|Water|CapMesh")
+	bool bGenerateSkirts = true;
+
+	/** Vertical extent of the skirt below the water surface (cm). Must reach below the door's
+	 *  lower edge for the water column to appear contiguous when viewed through an open doorway.
+	 *  Default 600cm covers Craniata's tallest compartments + 20° tilt margin. The skirt pokes
+	 *  below the floor on most cases — fine because the floor mesh occludes it from the inside;
+	 *  outside views (camera in adjacent dry compartment) see only the portion within the door. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Flood|Water|CapMesh", meta = (ClampMin = "10.0"))
+	float SkirtHeightCm = 600.f;
+
 	// ── Slosh modal (P3.6) ──────────────────────────────────────────────────
 	// Spring-damper that pushes the cap mesh's vertical offset + tilt in response to the sub's
 	// linear accel (sub-local frame). Forward accel → water tilts rear, lateral accel → water rolls,

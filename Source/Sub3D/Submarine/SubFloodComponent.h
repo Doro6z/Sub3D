@@ -58,6 +58,21 @@ struct FFloodCompartmentState
 	UPROPERTY()
 	float WalkableFloorZCm = 0.f;
 
+	/**
+	 * Sub-local AABB of the compartment, populated from the encapsulating union of its
+	 * UCompartmentVolumeComponent boxes at init time. Used by `ComputeSurfaceWorldZ` to
+	 * find the world-horizontal water surface elevation: surface = MinWorldZ_corners +
+	 * fraction · (MaxWorldZ_corners − MinWorldZ_corners) where corners are the 8 box
+	 * corners transformed to world by the sub's current transform. This is the
+	 * tilt-aware Approach 1 from `2026-05-10_tilt_aware_flood_algorithms.md`.
+	 *
+	 * For multi-volume (L-shape) compartments this is the encapsulating AABB across all
+	 * CVs sharing the CompartmentId. Approximate — slightly overestimates volume vs the
+	 * actual L-volume but acceptable for FP. Per-CV box list is post-FP polish.
+	 */
+	UPROPERTY()
+	FBox LocalBox = FBox(ForceInit);
+
 	UPROPERTY()
 	float CurrentWaterLiters = 0.f;
 
@@ -235,6 +250,14 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Submarine|Flood")
 	float GetCompartmentWaterHeightCm(FName CompartmentId) const;
 
+	/**
+	 * World-Z elevation of the compartment's water surface under the sub's current transform.
+	 * Tilt-aware (Approach 1). At zero tilt this matches `sub.world.Z + WalkableFloorZCm + WaterHeightCm`.
+	 * Returns `NaN` semantics aren't used — caller gets the sub's world Z if compartment missing.
+	 */
+	UFUNCTION(BlueprintPure, Category = "Submarine|Flood")
+	float GetCompartmentSurfaceWorldZ(FName CompartmentId) const;
+
 	UFUNCTION(BlueprintPure, Category = "Submarine|Flood")
 	float GetTotalWaterLiters() const;
 
@@ -251,6 +274,10 @@ public:
 	/** Read-only access to the runtime edge states for diagnostics. Edges drive AdvanceFlooding's
 	 *  internal transfers between compartments and exterior hatch inflows. */
 	const TArray<FFloodEdgeState>& GetEdgeStates() const { return EdgeStates; }
+
+	/** Read-only access to per-compartment runtime state — used by visual systems (e.g. cap mesh
+	 *  / skirt builders that need WalkableFloorZCm + LocalBox to clamp geometry to authored bounds). */
+	const TArray<FFloodCompartmentState>& GetCompartmentStates() const { return CompartmentStates; }
 
 	// --- Events ----------------------------------------------------------
 
@@ -297,6 +324,21 @@ private:
 	FFloodCompartmentState* FindState(FName CompartmentId);
 	const FFloodCompartmentState* FindState(FName CompartmentId) const;
 	FFloodEdgeState* FindEdge(FName ClosureId);
+
+	/**
+	 * Compute the world-Z elevation of a compartment's water surface, treating water as a
+	 * world-horizontal plane sitting at a fraction of the box's world-Z range. Linear
+	 * approximation (Approach 1 of tilt-aware research): correct at 0% / 100% fill, slightly
+	 * approximate in between but accurate for the fully-immersed regime. Tilt-aware because
+	 * the box corners are transformed by the sub's current world transform, so a tilted sub
+	 * produces a world-horizontal surface at a different elevation per compartment based on
+	 * each box's geometry under tilt.
+	 */
+	static float ComputeSurfaceWorldZ(const FFloodCompartmentState& Comp, const FTransform& SubXf);
+
+	/** World-Z of the lowest corner of a compartment's box under the sub's current transform —
+	 *  used as the effective sill floor on each side of an edge (water can't be below it). */
+	static float ComputeBoxMinWorldZ(const FFloodCompartmentState& Comp, const FTransform& SubXf);
 	TArray<FCompartmentState> GetExportedStates() const;
 
 	UFUNCTION()

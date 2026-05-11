@@ -61,6 +61,7 @@ void USubFloodComponent::InitializeFromDefinition(const USubmarineDefinition* De
 	}
 
 	// Build compartment states from definition
+	ASubmarineBase* SubBase = Cast<ASubmarineBase>(GetOwner());
 	for (const FGeneratedCompartmentDef& Comp : Definition->Compartments)
 	{
 		FFloodCompartmentState State;
@@ -69,6 +70,28 @@ void USubFloodComponent::InitializeFromDefinition(const USubmarineDefinition* De
 		State.MaxWaterHeightCm = FMath::Max(MinCompartmentHeightCm, Comp.MaxWaterHeightCm);
 		State.WalkableFloorZCm = Comp.WalkableFloorZCm;
 		State.CurrentWaterLiters = 0.f;
+
+		// Populate the sub-local AABB from CV components (Approach 1 tilt-aware sim).
+		// Falls back to a synthetic box derived from WalkableFloorZCm + MaxWaterHeightCm if
+		// no CV is found — sim still runs but tilt response degrades to "uniform sub-local"
+		// (the pre-tilt-aware behavior). Logged as warning so it's visible during init.
+		FBox CvBox(ForceInit);
+		if (SubBase && SubBase->GetCompartmentLocalBounds(Comp.CompartmentId, CvBox))
+		{
+			State.LocalBox = CvBox;
+		}
+		else
+		{
+			const float HalfXY = 200.f; // arbitrary 2m-wide column fallback
+			const FVector Mn(-HalfXY, -HalfXY, Comp.WalkableFloorZCm);
+			const FVector Mx(+HalfXY, +HalfXY, Comp.WalkableFloorZCm + State.MaxWaterHeightCm);
+			State.LocalBox = FBox(Mn, Mx);
+			UE_LOG(LogSubFlood, Warning,
+				TEXT("InitializeFromDefinition: %s has no CV — tilt response will degrade to sub-local. ")
+				TEXT("Place a UCompartmentVolumeComponent for this compartment in the BP."),
+				*Comp.CompartmentId.ToString());
+		}
+
 		CompartmentStates.Add(State);
 	}
 
@@ -452,6 +475,72 @@ void USubFloodComponent::SetDoorStateByCompartments(FName CompA, FName CompB, bo
 	SetDoorOpenRatioByCompartments(CompA, CompB, bClosed ? 0.f : 1.f);
 }
 
+// --- World-Z surface helpers (tilt-aware, Approach 1) --------------------
+
+namespace
+{
+	/**
+	 * Compute the 8 corners of the **water-volume** sub-box for a compartment, transformed to world.
+	 * The water-volume box uses LocalBox.XY (full compartment footprint) but a restricted Z range of
+	 * [WalkableFloorZCm, WalkableFloorZCm + MaxWaterHeightCm] — the actual fillable volume, ignoring
+	 * any air headroom present in the CV component's full extent. Critical because LocalBox often
+	 * spans well above MaxWaterHeightCm (ceiling), and using its full Z range would place the surface
+	 * way too high for low fill fractions.
+	 *
+	 * Writes the min and max world Z observed across the 8 corners. Returns false if the LocalBox
+	 * isn't valid; caller falls back to the sub-local approximation.
+	 */
+	bool BuildWaterVolumeBoxWorldZRange(const FFloodCompartmentState& Comp, const FTransform& SubXf, float& OutMinZ, float& OutMaxZ)
+	{
+		if (!Comp.LocalBox.IsValid)
+		{
+			return false;
+		}
+		const float FloorZ = Comp.WalkableFloorZCm;
+		const float CeilZ  = Comp.WalkableFloorZCm + FMath::Max(1.f, Comp.MaxWaterHeightCm);
+		OutMinZ = +FLT_MAX;
+		OutMaxZ = -FLT_MAX;
+		for (int32 i = 0; i < 8; ++i)
+		{
+			const FVector Corner(
+				(i & 1) ? Comp.LocalBox.Max.X : Comp.LocalBox.Min.X,
+				(i & 2) ? Comp.LocalBox.Max.Y : Comp.LocalBox.Min.Y,
+				(i & 4) ? CeilZ : FloorZ);
+			const float Z = SubXf.TransformPosition(Corner).Z;
+			OutMinZ = FMath::Min(OutMinZ, Z);
+			OutMaxZ = FMath::Max(OutMaxZ, Z);
+		}
+		return true;
+	}
+}
+
+float USubFloodComponent::ComputeBoxMinWorldZ(const FFloodCompartmentState& Comp, const FTransform& SubXf)
+{
+	float MinZ = 0.f, MaxZ = 0.f;
+	if (BuildWaterVolumeBoxWorldZRange(Comp, SubXf, MinZ, MaxZ))
+	{
+		return MinZ;
+	}
+	return SubXf.GetTranslation().Z + Comp.WalkableFloorZCm;
+}
+
+float USubFloodComponent::ComputeSurfaceWorldZ(const FFloodCompartmentState& Comp, const FTransform& SubXf)
+{
+	float MinZ = 0.f, MaxZ = 0.f;
+	if (!BuildWaterVolumeBoxWorldZRange(Comp, SubXf, MinZ, MaxZ))
+	{
+		// Fallback to sub-local interpretation when no box was populated.
+		const FVector Surface = SubXf.TransformPosition(
+			FVector(0.f, 0.f, Comp.WalkableFloorZCm + Comp.WaterHeightCm));
+		return Surface.Z;
+	}
+
+	const float Fraction = (Comp.CapacityLiters > KINDA_SMALL_NUMBER)
+		? FMath::Clamp(Comp.CurrentWaterLiters / Comp.CapacityLiters, 0.f, 1.f)
+		: 0.f;
+	return MinZ + Fraction * (MaxZ - MinZ);
+}
+
 // --- Breach --------------------------------------------------------------
 
 void USubFloodComponent::CreateBreach(FName CompartmentId, float InflowRateLitersPerSec, FVector BreachLocalCenter)
@@ -651,6 +740,17 @@ float USubFloodComponent::GetCompartmentWaterHeightCm(FName CompartmentId) const
 	return State ? State->WaterHeightCm : 0.f;
 }
 
+float USubFloodComponent::GetCompartmentSurfaceWorldZ(FName CompartmentId) const
+{
+	const FFloodCompartmentState* State = FindState(CompartmentId);
+	if (!State)
+	{
+		return GetOwner() ? GetOwner()->GetActorLocation().Z : 0.f;
+	}
+	const FTransform SubXf = GetOwner() ? GetOwner()->GetActorTransform() : FTransform::Identity;
+	return ComputeSurfaceWorldZ(*State, SubXf);
+}
+
 float USubFloodComponent::GetTotalWaterLiters() const
 {
 	float Total = 0.f;
@@ -760,11 +860,13 @@ void USubFloodComponent::AdvanceFlooding(float DeltaTime)
 
 	constexpr float Gravity_cm_s2 = 981.f;
 
-	// Sub-local sim. Sim and visual both run in sub-local (water surface = horizontal-in-sub-local
-	// plane). Inaccurate beyond ~10° tilt because real water redistributes in world-horizontal
-	// space; deferred to post-FP "intra-compartment water redistribution" where sim and cap mesh
-	// rendering must be reworked together. Keeping both sub-local now ensures sim/visual coherence:
-	// what you see in the cap mesh is what the sim transmits.
+	// World-Z tilt-aware sim (Approach 1 from research). Each compartment's water surface
+	// elevation is the world-horizontal plane corresponding to its current volume given its
+	// box geometry and the sub's current world transform. Door positions transformed to world
+	// the same way. Heads above effective sill (max of compartment min-corner-Z and door Z).
+	// At zero tilt this reduces to the previous sub-local formula plus a constant SubZ offset
+	// — flow rates and behavior identical to before; tilt cases now physically correct.
+	const FTransform SubWorldXf = GetOwner() ? GetOwner()->GetActorTransform() : FTransform::Identity;
 
 	for (int32 EdgeIdx = 0; EdgeIdx < EdgeStates.Num(); ++EdgeIdx)
 	{
@@ -781,17 +883,21 @@ void USubFloodComponent::AdvanceFlooding(float DeltaTime)
 			continue;
 		}
 
-		// Heads above the effective sill on each side. EffSill = max(floor_subZ, spill_subZ).
-		// This handles the "empty compartment with floor above spill" case (e.g. empty Upper_Hub
-		// with floor=130 connected to a vertical access at spillZ=0). Without it, the formula
-		// would treat the empty floor as a water surface and produce a bogus head — blocking the
-		// Main → Upper flow when Main is full.
-		const float SpillZ = Edge.LocalSpillPosition.Z;
+		// World-Z surfaces and effective sills.
+		const float SurfaceA = ComputeSurfaceWorldZ(*CompA, SubWorldXf);
+		const float SurfaceB = ComputeSurfaceWorldZ(*CompB, SubWorldXf);
 
-		const float SurfaceA = CompA->WalkableFloorZCm + CompA->WaterHeightCm;
-		const float SurfaceB = CompB->WalkableFloorZCm + CompB->WaterHeightCm;
-		const float EffSillA = FMath::Max(CompA->WalkableFloorZCm, SpillZ);
-		const float EffSillB = FMath::Max(CompB->WalkableFloorZCm, SpillZ);
+		const float DoorWorldZ = SubWorldXf.TransformPosition(Edge.LocalSpillPosition).Z;
+
+		// Effective sill on each side = max(this compartment's lowest world-Z corner, door world-Z).
+		// When a compartment's box bottom sits above the door (e.g. Upper_Hub floor=130 connected
+		// via a vertical hatch at spillZ=0 below it), the box's MinWorldZ is the relevant sill —
+		// water below it doesn't physically exist (no floor below it).
+		const float MinZA = ComputeBoxMinWorldZ(*CompA, SubWorldXf);
+		const float MinZB = ComputeBoxMinWorldZ(*CompB, SubWorldXf);
+		const float EffSillA = FMath::Max(MinZA, DoorWorldZ);
+		const float EffSillB = FMath::Max(MinZB, DoorWorldZ);
+
 		const float HeadA = FMath::Max(0.f, SurfaceA - EffSillA);
 		const float HeadB = FMath::Max(0.f, SurfaceB - EffSillB);
 

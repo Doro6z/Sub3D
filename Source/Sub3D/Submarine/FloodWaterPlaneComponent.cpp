@@ -413,11 +413,131 @@ bool UFloodWaterPlaneComponent::RefreshBakeCapMesh(float WaterHeightLocalCm)
 				BakeCapMeshComp->SetMaterial(0, BakeCapMID);
 			}
 
+			// ── Vertical skirt (mesh section 1) ─────────────────────────────
+			// Outward-facing strip dropped from the cap perimeter down to the compartment floor.
+			// Visible from a camera OUTSIDE the compartment looking in through a doorway.
+			//
+			// Per-vertex bottom Z: clamped to the compartment's authored floor in cap-local Z.
+			// Cap-local Z = world Z - SurfaceWorldZ (cap component has yaw-only rotation, so Z
+			// axis is world-aligned). Floor world Z at perimeter vertex (Vx, Vy):
+			//   = sub.TransformPosition(Vx, Vy, WalkableFloorZCm).Z
+			// Cap-local floor Z = FloorWorldZ - SurfaceWorldZ.
+			// This prevents the skirt from poking past the floor and into adjacent compartments
+			// or outside the hull. Under sub tilt, floor cap-local Z varies per perimeter vertex
+			// (the floor is tilted in world), so the skirt naturally follows the tilted floor.
+			//
+			// See 2026-05-10_underwater_rendering_plan.md §6.
+			if (bGenerateSkirts && Bake->Slices.IsValidIndex(BestIdx))
+			{
+				const TArray<FVector2D>& Contour = Bake->Slices[BestIdx].ContourPolygon;
+				const int32 N = Contour.Num();
+				if (N >= 3)
+				{
+					// Resolve sub transform + compartment floor + current surface world Z for
+					// per-vertex bottom Z computation. Fall back gracefully if any link is missing.
+					const ASubmarineBase* OwnerSub = Cast<ASubmarineBase>(GetOwner());
+					const FTransform SubWorldXf = OwnerSub ? OwnerSub->GetActorTransform() : FTransform::Identity;
+					float WalkableFloorZ_SubLocal = 0.f;
+					float CurrentSurfaceWorldZ = 0.f;
+					bool bHaveFloorInfo = false;
+					if (OwnerSub && OwnerSub->SubFlood && SourceVolume.IsValid())
+					{
+						const FName CompId = SourceVolume->CompartmentId;
+						const TArray<FFloodCompartmentState>& States = OwnerSub->SubFlood->GetCompartmentStates();
+						for (const FFloodCompartmentState& S : States)
+						{
+							if (S.CompartmentId == CompId)
+							{
+								WalkableFloorZ_SubLocal = S.WalkableFloorZCm;
+								CurrentSurfaceWorldZ = OwnerSub->SubFlood->GetCompartmentSurfaceWorldZ(CompId);
+								bHaveFloorInfo = true;
+								break;
+							}
+						}
+					}
+
+					TArray<FVector> SkirtVerts;
+					TArray<int32> SkirtTris;
+					TArray<FVector> SkirtNormals;
+					TArray<FVector2D> SkirtUV0;
+					SkirtVerts.Reserve(N * 2);
+					SkirtNormals.Reserve(N * 2);
+					SkirtUV0.Reserve(N * 2);
+					SkirtTris.Reserve(N * 6);
+
+					// Polygon centroid for outward normal direction.
+					FVector2D Centroid(0.f, 0.f);
+					for (const FVector2D& P : Contour) { Centroid += P; }
+					Centroid /= static_cast<float>(N);
+
+					for (int32 i = 0; i < N; ++i)
+					{
+						const FVector2D& P = Contour[i];
+
+						// Per-vertex skirt bottom: clamp to the compartment's floor in cap-local Z.
+						// If floor info is missing (init race / missing CV), fall back to the legacy
+						// fixed SkirtHeightCm so we always emit a visible skirt.
+						float BottomCapLocalZ = -SkirtHeightCm;
+						if (bHaveFloorInfo)
+						{
+							const FVector FloorSubLocal(P.X, P.Y, WalkableFloorZ_SubLocal);
+							const float FloorWorldZ = SubWorldXf.TransformPosition(FloorSubLocal).Z;
+							// 2cm buffer below floor to avoid z-fighting with floor mesh.
+							BottomCapLocalZ = FMath::Min(0.f, (FloorWorldZ - CurrentSurfaceWorldZ) - 2.f);
+						}
+
+						SkirtVerts.Add(FVector(P.X, P.Y, 0.f));                    // top (water surface)
+						SkirtVerts.Add(FVector(P.X, P.Y, BottomCapLocalZ));        // bottom at floor
+
+						// Outward normal: points away from compartment center.
+						const FVector2D Outward = (P - Centroid).GetSafeNormal();
+						const FVector N3D(Outward.X, Outward.Y, 0.f);
+						SkirtNormals.Add(N3D);
+						SkirtNormals.Add(N3D);
+
+						const float V = static_cast<float>(i) / static_cast<float>(N);
+						SkirtUV0.Add(FVector2D(V, 0.f));  // top UV at water line
+						SkirtUV0.Add(FVector2D(V, 1.f));  // bottom UV at depth
+					}
+
+					// Outward-facing winding (reversed vs inward variant): visible from outside.
+					for (int32 i = 0; i < N; ++i)
+					{
+						const int32 Next = (i + 1) % N;
+						const int32 TopI = i * 2;
+						const int32 BotI = i * 2 + 1;
+						const int32 TopN = Next * 2;
+						const int32 BotN = Next * 2 + 1;
+
+						SkirtTris.Add(TopI);
+						SkirtTris.Add(TopN);
+						SkirtTris.Add(BotN);
+
+						SkirtTris.Add(TopI);
+						SkirtTris.Add(BotN);
+						SkirtTris.Add(BotI);
+					}
+
+					BakeCapMeshComp->CreateMeshSection(1,
+						SkirtVerts, SkirtTris, SkirtNormals, SkirtUV0,
+						EmptyColors, EmptyTangents, /*bCreateCollision*/ false);
+					if (BakeCapMID)
+					{
+						BakeCapMeshComp->SetMaterial(1, BakeCapMID);
+					}
+				}
+			}
+			else if (BakeCapMeshComp->GetNumSections() > 1)
+			{
+				BakeCapMeshComp->ClearMeshSection(1);
+			}
+
 			UE_LOG(LogFloodWaterPlane, Display,
-				TEXT("Cap mesh built | Comp=%s | SubLevels=%d | Verts=%d | Tris=%d | Flipped=%s"),
+				TEXT("Cap mesh built | Comp=%s | SubLevels=%d | Verts=%d | Tris=%d | Flipped=%s | Skirts=%s"),
 				SourceVolume.IsValid() ? *SourceVolume->CompartmentId.ToString() : TEXT("?"),
 				SubLevels, WorkVerts.Num(), WorkTris.Num() / 3,
-				bFlipCapMeshWinding ? TEXT("yes") : TEXT("no"));
+				bFlipCapMeshWinding ? TEXT("yes") : TEXT("no"),
+				bGenerateSkirts ? TEXT("yes") : TEXT("no"));
 		}
 		LastSliceIndex = BestIdx;
 	}
@@ -1080,21 +1200,25 @@ void UFloodWaterPlaneComponent::ApplyCapMeshTransformWithSlosh()
 	// sub-local XY footprint covers the compartment correctly). Slosh tilts add small inertial
 	// pitch/roll on top as a visual response to sub acceleration.
 	//
-	// Note: world Z = sub.world.Z + sub-local water Z. This treats the compartment as if the sub
-	// were level (no per-compartment vertical adjustment when sub is pitched). For typical FP
-	// attitudes (≤15°) the slip is sub-cm; full correctness would require per-compartment world Z
-	// tracking, deferred post-FP.
-	//
-	// Side benefit: vertex Local Position stays anchored to the cap mesh component (which now
-	// follows the sub yaw frame, not the full sub orientation). Material nodes that read Local
-	// Position (heightfield UV, Gerstner) get sub-anchored waves automatically.
+	// World Z source: query USubFloodComponent::GetCompartmentSurfaceWorldZ for this compartment.
+	// This is the **tilt-aware** elevation — at zero tilt it equals `sub.world.Z + WalkableFloor +
+	// WaterHeight` (matches the pre-tilt-aware behaviour); at non-zero tilt it reflects the actual
+	// world-horizontal plane of the compartment's water given its box geometry under tilt
+	// (Approach 1 of 2026-05-10_tilt_aware_flood_algorithms.md). Sim and visual stay coherent
+	// because the same `ComputeSurfaceWorldZ` value drives both flow heads and visual elevation.
 	const FVector SubWorldLoc = Sub->GetActorLocation();
 	const float SubYaw = Sub->GetActorRotation().Yaw;
+
+	float SurfaceWorldZ = SubWorldLoc.Z + CurrentBaseWaterZLocal;
+	if (SourceVolume.IsValid() && Sub->SubFlood)
+	{
+		SurfaceWorldZ = Sub->SubFlood->GetCompartmentSurfaceWorldZ(SourceVolume->CompartmentId);
+	}
 
 	const FVector CapWorldPos(
 		SubWorldLoc.X,
 		SubWorldLoc.Y,
-		SubWorldLoc.Z + CurrentBaseWaterZLocal + SloshOffsetZ);
+		SurfaceWorldZ + SloshOffsetZ);
 
 	const FRotator CapWorldRot(
 		SloshTilt.X * MaxSloshTiltDeg,   // pitch (slosh only)
