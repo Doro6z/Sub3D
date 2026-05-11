@@ -24,6 +24,15 @@
 
 DEFINE_LOG_CATEGORY_STATIC(LogFloodWaterPlane, Log, All);
 
+// Stat group for the water heightfield (P3.9 perf audit). Use `stat Sub3DWater` in PIE to see
+// per-frame breakdown: SimulateStep (wave equation FD), PushTexture (R32F upload), CapMesh (PMC
+// transform + slosh). Total across all compartments must stay <1ms per frame budget.
+DECLARE_STATS_GROUP(TEXT("Sub3DWater"), STATGROUP_Sub3DWater, STATCAT_Advanced);
+DECLARE_CYCLE_STAT(TEXT("Heightfield SimulateStep"), STAT_Sub3DWater_HF_SimStep, STATGROUP_Sub3DWater);
+DECLARE_CYCLE_STAT(TEXT("Heightfield PushTexture"),  STAT_Sub3DWater_HF_PushTex, STATGROUP_Sub3DWater);
+DECLARE_CYCLE_STAT(TEXT("CapMesh Slosh+Transform"),  STAT_Sub3DWater_CapMesh,    STATGROUP_Sub3DWater);
+DECLARE_DWORD_COUNTER_STAT(TEXT("Compartments Ticked"), STAT_Sub3DWater_TickedCount, STATGROUP_Sub3DWater);
+
 namespace
 {
 /**
@@ -433,8 +442,16 @@ bool UFloodWaterPlaneComponent::RefreshBakeCapMesh(float WaterHeightLocalCm)
 				const int32 N = Contour.Num();
 				if (N >= 3)
 				{
-					// Resolve sub transform + compartment floor + current surface world Z for
-					// per-vertex bottom Z computation. Fall back gracefully if any link is missing.
+					// Resolve sub transform + this VOLUME's floor (not the merged compartment floor)
+					// + current surface world Z. When a compartment is composed of multiple
+					// UCompartmentVolumeComponent sharing the same CompartmentId (e.g. Main_Bow
+					// stacked upper+lower), the flood sim merges them into a single
+					// FFloodCompartmentState with a single WalkableFloorZCm (typically the min),
+					// which would make the skirt of the upper volume drop down to the lower
+					// volume's floor — punching through walls/floors in between. Per-volume
+					// `SourceVolume->GetFloodBottomLocalZCm()` returns this volume's authored
+					// floor specifically, so each plane component clamps its skirt to its own
+					// volume's floor regardless of how many siblings the compartment has.
 					const ASubmarineBase* OwnerSub = Cast<ASubmarineBase>(GetOwner());
 					const FTransform SubWorldXf = OwnerSub ? OwnerSub->GetActorTransform() : FTransform::Identity;
 					float WalkableFloorZ_SubLocal = 0.f;
@@ -442,18 +459,9 @@ bool UFloodWaterPlaneComponent::RefreshBakeCapMesh(float WaterHeightLocalCm)
 					bool bHaveFloorInfo = false;
 					if (OwnerSub && OwnerSub->SubFlood && SourceVolume.IsValid())
 					{
-						const FName CompId = SourceVolume->CompartmentId;
-						const TArray<FFloodCompartmentState>& States = OwnerSub->SubFlood->GetCompartmentStates();
-						for (const FFloodCompartmentState& S : States)
-						{
-							if (S.CompartmentId == CompId)
-							{
-								WalkableFloorZ_SubLocal = S.WalkableFloorZCm;
-								CurrentSurfaceWorldZ = OwnerSub->SubFlood->GetCompartmentSurfaceWorldZ(CompId);
-								bHaveFloorInfo = true;
-								break;
-							}
-						}
+						WalkableFloorZ_SubLocal = SourceVolume->GetFloodBottomLocalZCm();
+						CurrentSurfaceWorldZ = OwnerSub->SubFlood->GetCompartmentSurfaceWorldZ(SourceVolume->CompartmentId);
+						bHaveFloorInfo = true;
 					}
 
 					TArray<FVector> SkirtVerts;
@@ -794,6 +802,9 @@ void UFloodWaterPlaneComponent::EnsureHeightfieldInitialized()
 
 void UFloodWaterPlaneComponent::TickHeightfieldStep()
 {
+	SCOPE_CYCLE_COUNTER(STAT_Sub3DWater_HF_SimStep);
+	INC_DWORD_STAT(STAT_Sub3DWater_TickedCount);
+
 	const int32 W = HeightfieldGridX;
 	const int32 H = HeightfieldGridY;
 	if (Heights.Num() != W * H || Velocities.Num() != W * H)
@@ -835,6 +846,8 @@ void UFloodWaterPlaneComponent::TickHeightfieldStep()
 
 void UFloodWaterPlaneComponent::PushHeightfieldToTexture()
 {
+	SCOPE_CYCLE_COUNTER(STAT_Sub3DWater_HF_PushTex);
+
 	if (!HeightfieldTex || Heights.Num() == 0)
 	{
 		return;
@@ -1190,6 +1203,8 @@ void UFloodWaterPlaneComponent::UpdateSloshModal(float Dt)
 
 void UFloodWaterPlaneComponent::ApplyCapMeshTransformWithSlosh()
 {
+	SCOPE_CYCLE_COUNTER(STAT_Sub3DWater_CapMesh);
+
 	if (!BakeCapMeshComp) return;
 
 	const ASubmarineBase* Sub = Cast<ASubmarineBase>(GetOwner());
