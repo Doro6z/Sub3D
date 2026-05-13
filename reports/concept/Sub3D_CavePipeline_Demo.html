@@ -1,0 +1,1119 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<title>Sub3D — Pipeline F : génération de caves intéressantes</title>
+<style>
+  :root {
+    --bg: #060b10;
+    --panel: #0e1820;
+    --border: #1f3540;
+    --accent: #4fc1d0;
+    --accent-dim: #2c7480;
+    --text: #c0d0d8;
+    --text-dim: #6b8088;
+    --eva: #ff9933;
+    --squeeze: #cc4466;
+    --sub: #4fc1d0;
+    --outpost: #3b82f6;
+  }
+  * { box-sizing: border-box; }
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, "Segoe UI", sans-serif;
+    padding: 24px 16px;
+    max-width: 1100px;
+    margin: 0 auto;
+    line-height: 1.55;
+  }
+  h1, h2 { color: var(--accent); font-weight: 400; }
+  h1 {
+    border-bottom: 1px solid var(--border);
+    padding-bottom: 12px;
+    margin-bottom: 8px;
+    font-size: 1.6em;
+  }
+  h2 { margin-top: 0; font-size: 1.2em; }
+  p { margin: 8px 0; }
+  .lead { color: var(--text-dim); margin-bottom: 32px; font-size: 0.95em; }
+  code {
+    background: var(--border);
+    padding: 1px 6px;
+    border-radius: 2px;
+    color: #e0f0f5;
+    font-size: 0.9em;
+  }
+  .stage {
+    background: var(--panel);
+    padding: 18px 22px;
+    margin: 16px 0;
+    border-left: 3px solid var(--accent);
+    border-radius: 0 4px 4px 0;
+  }
+  .stage-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 8px;
+  }
+  .stage-tag {
+    font-size: 0.75em;
+    color: var(--text-dim);
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+  }
+  .canvas-row {
+    display: flex;
+    gap: 16px;
+    align-items: flex-start;
+    flex-wrap: wrap;
+    margin-top: 12px;
+  }
+  canvas {
+    background: #030608;
+    border: 1px solid var(--border);
+    display: block;
+    image-rendering: pixelated;
+  }
+  .canvas-caption {
+    font-size: 0.8em;
+    color: var(--text-dim);
+    margin-top: 4px;
+  }
+  button {
+    background: transparent;
+    color: var(--accent);
+    border: 1px solid var(--accent);
+    padding: 5px 14px;
+    cursor: pointer;
+    font-family: inherit;
+    font-size: 0.85em;
+    transition: background 0.15s;
+  }
+  button:hover { background: rgba(79, 193, 208, 0.12); }
+  .legend {
+    font-size: 0.85em;
+    color: var(--text-dim);
+    margin-top: 8px;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 14px;
+  }
+  .legend span { display: inline-flex; align-items: center; gap: 4px; }
+  .swatch {
+    display: inline-block;
+    width: 24px;
+    height: 3px;
+    vertical-align: middle;
+  }
+  .dot {
+    display: inline-block;
+    width: 9px;
+    height: 9px;
+    border-radius: 50%;
+    vertical-align: middle;
+  }
+  .math {
+    background: var(--bg);
+    border: 1px solid var(--border);
+    padding: 10px 14px;
+    margin: 10px 0;
+    font-family: "Consolas", "Monaco", monospace;
+    font-size: 0.85em;
+    color: #d0e8ee;
+    white-space: pre;
+    overflow-x: auto;
+    border-radius: 3px;
+  }
+  .twocol {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 24px;
+  }
+  @media (max-width: 800px) {
+    .twocol { grid-template-columns: 1fr; }
+  }
+  footer {
+    margin-top: 40px;
+    padding-top: 16px;
+    border-top: 1px solid var(--border);
+    color: var(--text-dim);
+    font-size: 0.85em;
+  }
+</style>
+</head>
+<body>
+
+<h1>Sub3D — Pipeline F : génération de caves intéressantes</h1>
+<p class="lead">
+Démo pédagogique du pipeline §4.4 de <code>Sub3D_WorldDesign_Reference.md</code>. Chaque étape produit un output passé à la suivante. Les visualisations sont 2D pour la lisibilité — l'implé UE5 sera 3D mais la logique reste identique. Bouton <em>Régénérer</em> rejoue avec un nouveau seed.
+</p>
+
+<!-- ============ STAGE 1 ============ -->
+<div class="stage">
+  <div class="stage-header">
+    <h2>Stage 1 — Topology Graph</h2>
+    <span class="stage-tag">graph theory + spatial embedding</span>
+  </div>
+  <p>
+    Vue <strong>top-down</strong> (plan X-Z). À gauche : une lecture inspirée du proto mesh actuel (grosses cavités organiques + rétrécissements). À droite : la même intention structurée en graph. Le graph est la <strong>colonne vertébrale</strong> du système. <strong>Deux couches superposées</strong> :
+  </p>
+  <ul style="font-size: 0.9em; margin: 4px 0 8px 18px;">
+    <li><strong>G_sub</strong> — trunk clairsemé, chambers + outposts, tunnels sub-navigables. Peu d'edges par node, distances longues.</li>
+    <li><strong>G_PCE</strong> — passages cavités étroites (non-navigables sub). Réseau dense, intriqué, avec ses propres loops + joinings. Bridges ponctuels vers chambers.</li>
+  </ul>
+  <p style="font-size: 0.9em;">Le joueur cartographie d'abord G_sub (route principale), puis G_PCE par EVA (exploration intriquée).</p>
+  <div class="math">Proto mesh : F = smin(capsules/sphères à radius variable) + bruit organique
+
+G = G_sub ∪ G_PCE ∪ E_bridge
+G_sub : chambers/outposts + trunk clair, radius large
+G_PCE : nodes pondérés par conductance C(x), edges courts + cycles contrôlés
+C(x)  : soft rock + faults + shell chambers - protected authored masks</div>
+  <div class="canvas-row">
+    <div class="twocol" style="flex: 1 1 100%;">
+      <div>
+        <canvas id="stage1_proto" width="500" height="360"></canvas>
+        <div class="canvas-caption"><strong>(a) Proto mesh inspiré</strong> — masses organiques, blobs, passages fins. Même logique SDF/smooth-min que le proto actuel, mais dessinée en 2D.</div>
+      </div>
+      <div>
+        <canvas id="stage1" width="500" height="360"></canvas>
+        <div class="canvas-caption"><strong>(b) Graphe cible</strong> — G_sub lisible + G_PCE intriqué. La topologie devient contrôlable avant la réalisation mesh.</div>
+      </div>
+    </div>
+    <div style="flex: 1; min-width: 280px;">
+      <button onclick="regenStage1()">Régénérer Stage 1</button>
+      <div class="legend" style="margin-top: 12px; flex-direction: column; gap: 6px;">
+        <span><span class="dot" style="background:var(--outpost); border:1.5px solid #e0f0f5;"></span>&nbsp;Outpost (authored fixed)</span>
+        <span><span class="dot" style="background:transparent; border:2px solid #5fa850;"></span>&nbsp;Chamber (procédural G_sub)</span>
+        <span><span class="dot" style="background:#1a2d35; border:1px solid #ff9933; width:6px;height:6px;"></span>&nbsp;PCE node (procédural G_PCE)</span>
+        <span><span class="swatch" style="background:var(--sub); height:4px;"></span>&nbsp;Trunk sub-navigable (G_sub)</span>
+        <span><span class="swatch" style="background:var(--eva)"></span>&nbsp;Passage PCE (réseau étroit)</span>
+        <span><span class="swatch" style="background:var(--squeeze)"></span>&nbsp;Squeeze (sous-set des PCE)</span>
+        <span><span class="swatch" style="background:#d49050; border-top: 1px dashed; height:2px;"></span>&nbsp;Bridge PCE → chamber</span>
+      </div>
+      <p style="margin-top: 16px; font-size: 0.85em; color: var(--text-dim);">
+        <strong>Observe :</strong> le proto mesh à gauche garde ce que tu apprécies : forme organique, aléatoire, cavités larges, filaments étroits. Le graph à droite explique ce qui manque au proto seul : un <strong>réseau PCE dense interconnecté</strong>, avec rejoins, raccourcis, loops et bridges vers chambers. <strong>Les PCE ne sont pas des dead-ends</strong> : ils forment leur propre carte EVA.
+      </p>
+    </div>
+  </div>
+</div>
+
+<!-- ============ STAGE 2 ============ -->
+<div class="stage">
+  <div class="stage-header">
+    <h2>Stage 2 — Geological Substrate</h2>
+    <span class="stage-tag">voronoi + stratification + faults + FBM</span>
+  </div>
+  <p>
+    Vue <strong>cross-section verticale</strong> (X-Y, 500 m × 300 m). Le champ scalaire <code>S(x, y, z) ∈ [0, 1]</code> représente la <strong>dureté de la roche</strong>. Composé pondéré de 4 termes superposés. <strong>Encode 3 ères géologiques</strong> (Q-6ter validé).
+  </p>
+  <div class="math">S(x, y, z) = w₁ · S_strat(y)               // stratification horizontale
+           + w₂ · S_voronoi(x, y, z)         // blocs tectoniques
+           + w₃ · S_faults({fault_i}, x,y,z) // 3 ères de fault planes
+           + w₄ · FBM(x, y, z, octaves=4)    // rugosité multi-scale</div>
+  <div class="canvas-row">
+    <div>
+      <canvas id="stage2" width="500" height="300"></canvas>
+      <div class="canvas-caption">Cross-section verticale. Bleu sombre = roche tendre. Bleu clair = roche dure. Lignes rosées = fault planes (3 ères).</div>
+    </div>
+    <div style="flex: 1; min-width: 280px;">
+      <button onclick="regenStage2()">Régénérer Stage 2</button>
+      <p style="margin-top: 14px; font-size: 0.85em; color: var(--text-dim);">
+        <strong>Observe :</strong> 3 groupes de fault planes à orientations différentes (3 ères). Les Voronoi blocks créent des "blocs tectoniques" avec boundaries nettes. La stratification donne le gradient vertical. La superposition produit une <strong>story embedded</strong> (C6) : on lit que des faults récentes coupent à travers d'anciennes.
+      </p>
+    </div>
+  </div>
+</div>
+
+<!-- ============ STAGE 3 ============ -->
+<div class="stage">
+  <div class="stage-header">
+    <h2>Stage 3 — Geometric Realization</h2>
+    <span class="stage-tag">SDF + manifold dual contouring</span>
+  </div>
+  <p>
+    Le SDF combine le <strong>skeleton du graph</strong> (Stage 1) et la <strong>modulation par le substrate</strong> (Stage 2). La forme finale n'est plus un cylindre lisse autour du tunnel : elle <strong>suit les fault planes</strong>, s'élargit dans le soft sediment, se rétrécit dans la hard rock.
+  </p>
+  <div class="math">F(x, y, z) = max( -F_tunnel(x, y, z; G, tag) ,   // carving (negative inside tunnels)
+                  S(x, y, z) - threshold )         // substrate hardness
+
+surface = { (x, y, z) : F(x, y, z) = 0 }
+extraction = Manifold Dual Contouring (Schaefer 2007)</div>
+  <div class="twocol">
+    <div>
+      <canvas id="stage3_naive" width="500" height="300"></canvas>
+      <div class="canvas-caption"><strong>(a) Sans substrate</strong> — tunnel comme un cylindre lisse. Géométriquement vide. Pas de plausibilité géologique.</div>
+    </div>
+    <div>
+      <canvas id="stage3_full" width="500" height="300"></canvas>
+      <div class="canvas-caption"><strong>(b) Avec substrate</strong> — parois suivent les boundaries Voronoi et fault planes. Variation de diamètre. C'est <em>la même topologie</em> mais habillée géologiquement.</div>
+    </div>
+  </div>
+  <div style="margin-top: 12px;">
+    <button onclick="regenStage3()">Régénérer Stage 3</button>
+  </div>
+  <p style="font-size: 0.85em; color: var(--text-dim); margin-top: 12px;">
+    <strong>Lecture clé :</strong> c'est l'<strong>interaction Stage 1 ⊕ Stage 2</strong> qui produit l'intérêt visuel. Aucune des deux étapes seule ne suffit. C'est pourquoi un algo single-pass échoue.
+  </p>
+</div>
+
+<!-- ============ STAGE 4 ============ -->
+<div class="stage">
+  <div class="stage-header">
+    <h2>Stage 4 — Detail decorator pass</h2>
+    <span class="stage-tag">poisson + curvature + wetness/heat</span>
+  </div>
+  <p>
+    Une fois le mesh extrait, on scatter les détails micro : stalactites/stalagmites par <strong>curvature-driven placement</strong>, sédiment au fond par gravity-driven, bioluminescence dans les zones humides, accretion minérale près des hydrothermal. <strong>Implémentation native via PCG Framework UE 5.7</strong> — pas besoin de coder ça à la main.
+  </p>
+  <div class="canvas-row">
+    <div>
+      <canvas id="stage4" width="500" height="300"></canvas>
+      <div class="canvas-caption">Surface carved de Stage 3 + decorators. ▲ stalactites au top concave • sédiment au bottom plat • ★ biolum dans les zones humides.</div>
+    </div>
+    <div style="flex: 1; min-width: 280px;">
+      <button onclick="regenStage4()">Régénérer Stage 4</button>
+      <p style="margin-top: 14px; font-size: 0.85em; color: var(--text-dim);">
+        Stage 4 est <em>indépendant</em> de Stages 1-2-3 — il consomme la surface finale + des champs (curvature, wetness, heat) calculés au runtime. C'est ce qui rend possible l'<strong>itération sans rebake</strong> du mesh.
+      </p>
+    </div>
+  </div>
+</div>
+
+<!-- ============ COMPOSITE CANYON ============ -->
+<div class="stage" style="border-left-color: var(--eva);">
+  <div class="stage-header">
+    <h2>Composition complète — Canyon vertical avec cavités (biome scène #1)</h2>
+    <span class="stage-tag">pipeline complet — Q-9 validé</span>
+  </div>
+  <p>
+    Application du pipeline complet à un setup <strong>"canyon vertical"</strong> — biome retenu pour la première scène de référence (Q-9). Vue <strong>side view</strong>, 400 m × 600 m. Le spine descend verticalement. Les cavités branchent latéralement à différentes profondeurs. Substrate avec 3 ères géologiques. Decorators biolum sporadiques.
+  </p>
+  <div class="canvas-row">
+    <div>
+      <canvas id="canyon" width="400" height="600"></canvas>
+      <div class="canvas-caption">400 m large × 600 m profond. Cross-section verticale. L'aspect 3D sera donné par la rotation autour de l'axe vertical en UE5.</div>
+    </div>
+    <div style="flex: 1; min-width: 280px;">
+      <button onclick="regenCanyon()">Régénérer Canyon</button>
+      <p style="margin-top: 14px; font-size: 0.85em; color: var(--text-dim);">
+        <strong>Lecture cartographique</strong> : un seul spine vertical clair, plusieurs cavités latérales mémorables, réseau PCE depuis les chambers. Le joueur peut construire un mental map : "descendre, à droite niveau ~200m la grande cavité, puis réseau étroit qui rejoint plus bas par deux passages".
+      </p>
+      <p style="font-size: 0.85em; color: var(--text-dim); margin-top: 8px;">
+        <strong>Heuristiques §4.8 visibles ici</strong> : variance dimensionnelle des cavités, branching factor 2-3 par node, loops si présents (rares en vertical pur), vertical drops naturels (le spine est un drop), EVA labyrinthes superposés au sub-highway central.
+      </p>
+    </div>
+  </div>
+</div>
+
+<footer>
+  Démo pour <code>Sub3D_WorldDesign_Reference.md</code> §4 — 2026-05-13. Implé 2D pédagogique uniquement ; l'implé runtime sera 3D voxel + MDC + UE5 PCG.
+  Source ouverte (vanilla JS / Canvas), modifiable.
+</footer>
+
+<script>
+// =================== Seeded RNG (Mulberry32) ===================
+function mulberry32(seed) {
+  let a = seed | 0;
+  return function() {
+    a = (a + 0x6D2B79F5) | 0;
+    let t = Math.imul(a ^ (a >>> 15), 1 | a);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+// =================== STAGE 1 : TOPOLOGY GRAPH (proto mesh + deux couches G_sub/G_PCE) ===================
+function stage1Conductance(x, y, W, H) {
+  const nx = x / W, ny = y / H;
+  const faultA = Math.max(0, 1 - Math.abs((ny - 0.18) - 0.42 * (nx - 0.2)) / 0.045);
+  const faultB = Math.max(0, 1 - Math.abs((ny - 0.72) + 0.55 * (nx - 0.55)) / 0.05);
+  const layer = 0.5 + 0.5 * Math.sin((ny * 7.2 + nx * 1.4) * Math.PI);
+  const pocket = 0.5 + 0.5 * Math.sin((nx * 5.1 - ny * 3.7) * Math.PI);
+  return Math.max(0, Math.min(1, 0.18 + faultA * 0.38 + faultB * 0.30 + layer * 0.18 + pocket * 0.12));
+}
+
+function graphEdgeKey(a, b) {
+  return a < b ? `${a}_${b}` : `${b}_${a}`;
+}
+
+function generateGraph(rng, W, H) {
+  // ---------- LAYER 1 : G_sub — trunk sparse (chambers connectées par tunnels sub-navigables) ----------
+  const outposts = [
+    { x: W * 0.18, y: H * 0.28, type: 'outpost' },
+    { x: W * 0.78, y: H * 0.74, type: 'outpost' },
+  ];
+  const chambers = [...outposts];
+  const chamberMinDist = 95;
+  const chamberMin2 = chamberMinDist * chamberMinDist;
+  let tries = 0;
+  while (tries < 1500 && chambers.length < 14) {
+    const c = { x: rng() * W, y: rng() * H, type: 'chamber' };
+    let ok = true;
+    for (const n of chambers) {
+      const dx = n.x - c.x, dy = n.y - c.y;
+      if (dx * dx + dy * dy < chamberMin2) { ok = false; break; }
+    }
+    if (ok) chambers.push(c);
+    tries++;
+  }
+  const subEdges = [];
+  const subSet = new Set();
+  for (let i = 0; i < chambers.length; i++) {
+    const nn = [];
+    for (let j = 0; j < chambers.length; j++) {
+      if (i === j) continue;
+      const dx = chambers[i].x - chambers[j].x;
+      const dy = chambers[i].y - chambers[j].y;
+      nn.push({ j, d: Math.hypot(dx, dy) });
+    }
+    nn.sort((a, b) => a.d - b.d);
+    for (let q = 0; q < Math.min(3, nn.length); q++) {
+      const { j, d } = nn[q];
+      if (d > 220) continue;
+      const key = i < j ? `${i}_${j}` : `${j}_${i}`;
+      if (subSet.has(key)) continue;
+      subSet.add(key);
+      subEdges.push({ a: Math.min(i, j), b: Math.max(i, j), d });
+    }
+  }
+
+  // ---------- LAYER 2 : G_PCE — passages cavités étroites, substrate-biased + interconnecté ----------
+  const pceNodes = [];
+  const pceMinDist = 22;
+  const pceMin2 = pceMinDist * pceMinDist;
+  const chamberKeep2 = 42 * 42;  // PCE nodes peuvent approcher les chambers sans envahir leur coeur
+  let pTries = 0;
+  while (pTries < 7000 && pceNodes.length < 82) {
+    const p = { x: rng() * W, y: rng() * H };
+    const c = stage1Conductance(p.x, p.y, W, H);
+    if (rng() > 0.12 + c * 0.88) { pTries++; continue; }
+    let ok = true;
+    for (const o of pceNodes) {
+      const dx = o.x - p.x, dy = o.y - p.y;
+      if (dx * dx + dy * dy < pceMin2) { ok = false; break; }
+    }
+    if (ok) {
+      for (const ch of chambers) {
+        const dx = ch.x - p.x, dy = ch.y - p.y;
+        const d2 = dx * dx + dy * dy;
+        if (d2 < chamberKeep2) { ok = false; break; }
+      }
+    }
+    if (ok) pceNodes.push({ ...p, conductance: c });
+    pTries++;
+  }
+
+  const pceEdges = [];
+  const pceSet = new Set();
+  for (let i = 0; i < pceNodes.length; i++) {
+    const nn = [];
+    for (let j = 0; j < pceNodes.length; j++) {
+      if (i === j) continue;
+      const dx = pceNodes[i].x - pceNodes[j].x;
+      const dy = pceNodes[i].y - pceNodes[j].y;
+      const d = Math.hypot(dx, dy);
+      const mx = (pceNodes[i].x + pceNodes[j].x) * 0.5;
+      const my = (pceNodes[i].y + pceNodes[j].y) * 0.5;
+      const c = stage1Conductance(mx, my, W, H);
+      const score = d * (1.35 - c * 0.75) + rng() * 14;
+      nn.push({ j, d, score, c });
+    }
+    nn.sort((a, b) => a.score - b.score);
+    const degreeTarget = 2 + Math.floor(rng() * 2);
+    for (let q = 0; q < Math.min(degreeTarget, nn.length); q++) {
+      const { j, d, c } = nn[q];
+      if (d > 86) continue;
+      const key = graphEdgeKey(i, j);
+      if (pceSet.has(key)) continue;
+      pceSet.add(key);
+      const tag = rng() < 0.10 + (1 - c) * 0.18 ? 'squeeze' : 'pce';
+      pceEdges.push({ a: i, b: j, d, tag, bend: (rng() - 0.5) * 22 });
+    }
+  }
+
+  // Extra cycle pass: reconnect near-but-not-closest PCE nodes to avoid "long dead-end branch" feeling.
+  const cycleBudget = Math.min(22, Math.floor(pceNodes.length * 0.28));
+  for (let n = 0; n < cycleBudget; n++) {
+    const i = Math.floor(rng() * pceNodes.length);
+    const ranked = [];
+    for (let j = 0; j < pceNodes.length; j++) {
+      if (i === j) continue;
+      const d = Math.hypot(pceNodes[i].x - pceNodes[j].x, pceNodes[i].y - pceNodes[j].y);
+      if (d < 42 || d > 105) continue;
+      const mx = (pceNodes[i].x + pceNodes[j].x) * 0.5;
+      const my = (pceNodes[i].y + pceNodes[j].y) * 0.5;
+      ranked.push({ j, d, c: stage1Conductance(mx, my, W, H) });
+    }
+    ranked.sort((a, b) => (b.c - a.c) || (a.d - b.d));
+    if (!ranked.length) continue;
+    const pick = ranked[Math.min(ranked.length - 1, Math.floor(rng() * 3))];
+    const key = graphEdgeKey(i, pick.j);
+    if (pceSet.has(key)) continue;
+    pceSet.add(key);
+    pceEdges.push({ a: i, b: pick.j, d: pick.d, tag: rng() < 0.12 ? 'squeeze' : 'pce', bend: (rng() - 0.5) * 28 });
+  }
+
+  // ---------- Bridges : connexions ponctuelles PCE → chamber ----------
+  const bridges = [];
+  for (let i = 0; i < pceNodes.length; i++) {
+    const p = pceNodes[i];
+    let nearestIdx = -1, nearestD = Infinity;
+    for (let j = 0; j < chambers.length; j++) {
+      const dx = chambers[j].x - p.x, dy = chambers[j].y - p.y;
+      const d = Math.hypot(dx, dy);
+      if (d < nearestD) { nearestD = d; nearestIdx = j; }
+    }
+    if (nearestD < 85 && rng() < 0.55) {
+      bridges.push({ pIdx: i, chIdx: nearestIdx });
+    }
+  }
+
+  return { chambers, pceNodes, subEdges, pceEdges, bridges };
+}
+
+function drawCurvedEdge(ctx, a, b, bend = 0) {
+  const dx = b.x - a.x, dy = b.y - a.y;
+  const len = Math.max(1, Math.hypot(dx, dy));
+  const nx = -dy / len, ny = dx / len;
+  const mx = (a.x + b.x) * 0.5 + nx * bend;
+  const my = (a.y + b.y) * 0.5 + ny * bend;
+  ctx.beginPath();
+  ctx.moveTo(a.x, a.y);
+  ctx.quadraticCurveTo(mx, my, b.x, b.y);
+  ctx.stroke();
+}
+
+function renderGraph(canvas, g) {
+  const ctx = canvas.getContext('2d');
+  ctx.fillStyle = '#040608';
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+  // Toy conductance field: shows why PCE prefers bands/faults instead of uniform random space.
+  const field = ctx.createImageData(canvas.width, canvas.height);
+  for (let y = 0; y < canvas.height; y++) {
+    for (let x = 0; x < canvas.width; x++) {
+      const c = stage1Conductance(x, y, canvas.width, canvas.height);
+      const i = (y * canvas.width + x) * 4;
+      field.data[i] = 4 + Math.floor(c * 12);
+      field.data[i + 1] = 8 + Math.floor(c * 20);
+      field.data[i + 2] = 12 + Math.floor(c * 26);
+      field.data[i + 3] = 255;
+    }
+  }
+  ctx.putImageData(field, 0, 0);
+
+  // Subgrid scale
+  ctx.strokeStyle = 'rgba(31, 53, 64, 0.5)';
+  ctx.lineWidth = 1;
+  for (let i = 0; i <= 5; i++) {
+    const x = (i * canvas.width) / 5;
+    const y = (i * canvas.height) / 5;
+    ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, canvas.height); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(canvas.width, y); ctx.stroke();
+  }
+
+  // PCE edges (drawn first, BENEATH sub trunk)
+  for (const e of g.pceEdges) {
+    const a = g.pceNodes[e.a], b = g.pceNodes[e.b];
+    if (e.tag === 'squeeze') {
+      ctx.strokeStyle = '#cc4466';
+      ctx.lineWidth = 1.0;
+    } else {
+      ctx.strokeStyle = '#ff9933';
+      ctx.lineWidth = 1.5;
+    }
+    drawCurvedEdge(ctx, a, b, e.bend || 0);
+  }
+
+  // Bridges (PCE → chamber)
+  ctx.setLineDash([5, 4]);
+  ctx.strokeStyle = '#d49050';
+  ctx.lineWidth = 1.2;
+  for (const br of g.bridges) {
+    const p = g.pceNodes[br.pIdx];
+    const ch = g.chambers[br.chIdx];
+    drawCurvedEdge(ctx, p, ch, 0);
+  }
+  ctx.setLineDash([]);
+
+  // Sub trunk edges (drawn ON TOP, épais cyan)
+  ctx.strokeStyle = '#4fc1d0';
+  ctx.lineWidth = 3.2;
+  for (const e of g.subEdges) {
+    const a = g.chambers[e.a], b = g.chambers[e.b];
+    drawCurvedEdge(ctx, a, b, 0);
+  }
+
+  // PCE nodes (small dots)
+  for (const p of g.pceNodes) {
+    ctx.fillStyle = '#1a2d35';
+    ctx.strokeStyle = '#ff9933';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.arc(p.x, p.y, 2.4, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.stroke();
+  }
+
+  // Chamber + outpost nodes (big)
+  for (const ch of g.chambers) {
+    if (ch.type === 'outpost') {
+      ctx.fillStyle = '#3b82f6';
+      ctx.strokeStyle = '#e0f0f5';
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      ctx.arc(ch.x, ch.y, 8, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.stroke();
+    } else {
+      ctx.fillStyle = '#0e1820';
+      ctx.strokeStyle = '#5fa850';
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.arc(ch.x, ch.y, 6, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.stroke();
+    }
+  }
+}
+
+function stageRand(seed, n) {
+  const v = Math.sin((seed + 1) * 12.9898 + n * 78.233) * 43758.5453;
+  return v - Math.floor(v);
+}
+
+function renderProtoOrganic(canvas, g, seed) {
+  const ctx = canvas.getContext('2d');
+  const W = canvas.width, H = canvas.height;
+  const img = ctx.createImageData(W, H);
+
+  const subPrims = [];
+  const pcePrims = [];
+
+  g.chambers.forEach((ch, i) => {
+    const r = ch.type === 'outpost'
+      ? 13 + stageRand(seed, i) * 5
+      : 20 + stageRand(seed, i) * 22;
+    subPrims.push({ kind: 'circle', x: ch.x, y: ch.y, r });
+  });
+
+  g.subEdges.forEach((e, i) => {
+    const a = g.chambers[e.a], b = g.chambers[e.b];
+    subPrims.push({
+      kind: 'seg',
+      x0: a.x, y0: a.y, x1: b.x, y1: b.y,
+      r: 15 + stageRand(seed, 100 + i) * 18
+    });
+  });
+
+  g.pceEdges.forEach((e, i) => {
+    const a = g.pceNodes[e.a], b = g.pceNodes[e.b];
+    pcePrims.push({
+      kind: 'seg',
+      x0: a.x, y0: a.y, x1: b.x, y1: b.y,
+      r: e.tag === 'squeeze'
+        ? 2.2 + stageRand(seed, 300 + i) * 2.2
+        : 4.5 + stageRand(seed, 500 + i) * 4.8
+    });
+  });
+
+  function sdfPrim(x, y, p) {
+    if (p.kind === 'circle') return Math.hypot(x - p.x, y - p.y) - p.r;
+    return distToSegment(x, y, p) - p.r;
+  }
+
+  for (let y = 0; y < H; y++) {
+    for (let x = 0; x < W; x++) {
+      let subSdf = Infinity;
+      let pceSdf = Infinity;
+      for (const p of subPrims) subSdf = Math.min(subSdf, sdfPrim(x, y, p));
+      for (const p of pcePrims) pceSdf = Math.min(pceSdf, sdfPrim(x, y, p));
+
+      const wobble =
+        Math.sin(x * 0.083 + y * 0.037 + seed * 0.011) * 2.4 +
+        Math.sin(x * 0.021 - y * 0.071 + seed * 0.017) * 1.8;
+      const subD = subSdf + wobble;
+      const pceD = pceSdf + wobble * 0.45;
+      const d = Math.min(subD, pceD);
+      const i = (y * W + x) * 4;
+
+      if (d < 0) {
+        if (subD <= pceD) {
+          const wall = Math.max(0, Math.min(1, -d / 36));
+          img.data[i] = 18 + Math.floor(wall * 40);
+          img.data[i + 1] = 118 + Math.floor(wall * 58);
+          img.data[i + 2] = 140 + Math.floor(wall * 42);
+        } else {
+          img.data[i] = 8;
+          img.data[i + 1] = 86;
+          img.data[i + 2] = 102;
+        }
+      } else if (d < 2.2) {
+        img.data[i] = 245;
+        img.data[i + 1] = 165;
+        img.data[i + 2] = 28;
+      } else {
+        const c = stage1Conductance(x, y, W, H);
+        img.data[i] = 2 + Math.floor(c * 5);
+        img.data[i + 1] = 4 + Math.floor(c * 9);
+        img.data[i + 2] = 7 + Math.floor(c * 12);
+      }
+      img.data[i + 3] = 255;
+    }
+  }
+
+  ctx.putImageData(img, 0, 0);
+
+  // Draw a tiny sub scale marker to keep the mesh view from reading as abstract noise.
+  ctx.fillStyle = '#cc4466';
+  ctx.fillRect(W * 0.18 - 4, H * 0.62 - 2, 8, 4);
+}
+
+let seed1 = (Date.now() & 0xffffffff) ^ 0x1234;
+function regenStage1() {
+  seed1 = (seed1 + 1) | 0;
+  const c = document.getElementById('stage1');
+  const proto = document.getElementById('stage1_proto');
+  const g = generateGraph(mulberry32(seed1), c.width, c.height);
+  renderProtoOrganic(proto, g, seed1);
+  renderGraph(c, g);
+}
+
+// =================== STAGE 2 : SUBSTRATE ===================
+function generateSubstrate(rng, W, H) {
+  // 3 eras of faults (Q-6ter validated)
+  const faults = [];
+  for (let era = 0; era < 3; era++) {
+    const baseAng = (era / 3) * Math.PI + (rng() - 0.5) * 0.5;
+    const n = 2 + Math.floor(rng() * 2);
+    for (let i = 0; i < n; i++) {
+      faults.push({
+        x0: rng() * W,
+        y0: rng() * H,
+        ang: baseAng + (rng() - 0.5) * 0.3,
+        era
+      });
+    }
+  }
+
+  // Voronoi sites
+  const nSites = 9;
+  const sites = [];
+  for (let i = 0; i < nSites; i++) sites.push({ x: rng() * W, y: rng() * H });
+
+  // Lookup noise table for FBM
+  const G = 24;
+  const noiseTable = new Float32Array(G * G);
+  for (let i = 0; i < noiseTable.length; i++) noiseTable[i] = rng();
+
+  function noiseAt(x, y) {
+    // FBM samples at x*2.1 and x*4.3 → coords may exceed W/H; clamp to grid bounds.
+    let u = (x / W) * (G - 1);
+    let v = (y / H) * (G - 1);
+    if (u < 0) u = 0; else if (u > G - 1) u = G - 1;
+    if (v < 0) v = 0; else if (v > G - 1) v = G - 1;
+    const iu = u | 0, iv = v | 0;
+    const fu = u - iu, fv = v - iv;
+    const iu1 = Math.min(iu + 1, G - 1), iv1 = Math.min(iv + 1, G - 1);
+    const n00 = noiseTable[iv * G + iu];
+    const n10 = noiseTable[iv * G + iu1];
+    const n01 = noiseTable[iv1 * G + iu];
+    const n11 = noiseTable[iv1 * G + iu1];
+    return n00 * (1 - fu) * (1 - fv) + n10 * fu * (1 - fv)
+         + n01 * (1 - fu) * fv + n11 * fu * fv;
+  }
+  function fbm(x, y) {
+    return 0.6 * noiseAt(x, y) + 0.3 * noiseAt(x * 2.1, y * 2.1) + 0.1 * noiseAt(x * 4.3, y * 4.3);
+  }
+
+  function sample(x, y) {
+    const strat = 0.5 + 0.5 * Math.sin(y * 0.035);
+    let m1 = Infinity, m2 = Infinity;
+    for (const s of sites) {
+      const dx = s.x - x, dy = s.y - y;
+      const d = Math.sqrt(dx * dx + dy * dy);
+      if (d < m1) { m2 = m1; m1 = d; }
+      else if (d < m2) { m2 = d; }
+    }
+    // Tighter Voronoi boundary band so cell edges read as visible darker veins.
+    const voro = Math.min(1, (m2 - m1) / 16);
+    let fault = 0;
+    for (const f of faults) {
+      const dx = x - f.x0, dy = y - f.y0;
+      const perp = Math.abs(-Math.sin(f.ang) * dx + Math.cos(f.ang) * dy);
+      // Wider fault band so the eroded zone is visible.
+      const k = Math.max(0, 1 - perp / 14);
+      if (k > fault) fault = k;
+    }
+    let s = 0.25 * strat + 0.35 * voro + 0.30 * (1 - fault) + 0.10 * fbm(x, y);
+    // Stretch histogram so soft zones go truly dark and hard zones bright.
+    s = 1.5 * (s - 0.5) + 0.5;
+    if (s < 0) s = 0; else if (s > 1) s = 1;
+    return s;
+  }
+
+  return { sample, faults, sites };
+}
+
+function colorFromS(s) {
+  // Cross-section palette : très sombre (tendre, érodé) → slate-bleu clair (dur, basalte).
+  // Gamma léger pour pousser les mid-tones.
+  const t = Math.pow(s, 0.9);
+  const r = Math.floor(t * 140 + 8);
+  const g = Math.floor(t * 165 + 14);
+  const b = Math.floor(t * 175 + 22);
+  return [r, g, b];
+}
+
+function renderSubstrate(canvas, sub) {
+  const ctx = canvas.getContext('2d');
+  const img = ctx.createImageData(canvas.width, canvas.height);
+  for (let y = 0; y < canvas.height; y++) {
+    for (let x = 0; x < canvas.width; x++) {
+      const s = sub.sample(x, y);
+      const [r, g, b] = colorFromS(s);
+      const i = (y * canvas.width + x) * 4;
+      img.data[i] = r; img.data[i + 1] = g; img.data[i + 2] = b; img.data[i + 3] = 255;
+    }
+  }
+  ctx.putImageData(img, 0, 0);
+
+  // Overlay fault lines tinted by era — 3 ères distinctes par couleur, line épaissie.
+  const eraColors = [
+    'rgba(230, 90, 120, 0.75)',   // ère récente — rouge-rosé
+    'rgba(220, 165, 85, 0.65)',   // ère intermédiaire — ambre
+    'rgba(150, 200, 175, 0.55)'   // ère ancienne — vert sage
+  ];
+  for (const f of sub.faults) {
+    ctx.strokeStyle = eraColors[f.era];
+    ctx.lineWidth = 1.8;
+    const dx = Math.cos(f.ang) * 1000, dy = Math.sin(f.ang) * 1000;
+    ctx.beginPath();
+    ctx.moveTo(f.x0 - dx, f.y0 - dy);
+    ctx.lineTo(f.x0 + dx, f.y0 + dy);
+    ctx.stroke();
+  }
+
+  // Color scale legend (bottom right corner)
+  const lw = 90, lh = 7, lx = canvas.width - lw - 8, ly = canvas.height - lh - 8;
+  const grad = ctx.createImageData(lw, lh);
+  for (let i = 0; i < lw; i++) {
+    const [r, g, b] = colorFromS(i / (lw - 1));
+    for (let j = 0; j < lh; j++) {
+      const idx = (j * lw + i) * 4;
+      grad.data[idx] = r; grad.data[idx + 1] = g; grad.data[idx + 2] = b; grad.data[idx + 3] = 255;
+    }
+  }
+  ctx.putImageData(grad, lx, ly);
+  ctx.strokeStyle = 'rgba(192,208,216,0.5)';
+  ctx.lineWidth = 1;
+  ctx.strokeRect(lx - 0.5, ly - 0.5, lw + 1, lh + 1);
+  ctx.fillStyle = 'rgba(192,208,216,0.85)';
+  ctx.font = '9px Consolas, monospace';
+  ctx.fillText('tendre', lx - 38, ly + lh - 1);
+  ctx.fillText('dur', lx + lw + 4, ly + lh - 1);
+}
+
+let seed2 = (Date.now() & 0xffffffff) ^ 0x5678;
+function regenStage2() {
+  seed2 = (seed2 + 1) | 0;
+  const c = document.getElementById('stage2');
+  const sub = generateSubstrate(mulberry32(seed2), c.width, c.height);
+  renderSubstrate(c, sub);
+  window._substrateStage3 = sub;
+}
+
+// =================== STAGE 3 : CARVED GEOMETRY ===================
+function generateTunnelSegments(rng, W, H, vertical = false) {
+  const segs = [];
+  if (vertical) {
+    let cx = W / 2 + (rng() - 0.5) * 30;
+    let cy = 20;
+    while (cy < H - 30) {
+      const ny = cy + 35 + rng() * 25;
+      const nx = cx + (rng() - 0.5) * 35;
+      segs.push({ x0: cx, y0: cy, x1: nx, y1: ny, r: 14 + rng() * 8 });
+      // Branch lateral
+      if (rng() > 0.55) {
+        const dir = rng() > 0.5 ? 1 : -1;
+        const blen = 55 + rng() * 70;
+        const bx = nx + dir * blen;
+        const by = ny + (rng() - 0.5) * 30;
+        segs.push({ x0: nx, y0: ny, x1: bx, y1: by, r: 10 + rng() * 8 });
+        // PCE mini-network: thin passages can fork, rejoin, or shortcut downward.
+        const pceCount = 2 + Math.floor(rng() * 3);
+        let px = bx, py = by;
+        const pcePoints = [];
+        for (let p = 0; p < pceCount; p++) {
+          const sbAng = (rng() - 0.5) * Math.PI;
+          const sbLen = 24 + rng() * 38;
+          const qx = px + Math.cos(sbAng) * sbLen;
+          const qy = py + Math.sin(sbAng) * sbLen + 12 + rng() * 18;
+          segs.push({ x0: px, y0: py, x1: qx, y1: qy, r: 3.5 + rng() * 4, eva: true });
+          pcePoints.push({ x: qx, y: qy });
+          px = qx; py = qy;
+        }
+        if (pcePoints.length > 1 && rng() > 0.35) {
+          const a = pcePoints[0], b = pcePoints[pcePoints.length - 1];
+          segs.push({ x0: a.x, y0: a.y, x1: b.x + dir * (18 + rng() * 22), y1: b.y - 18, r: 2.5 + rng() * 3, eva: true });
+        }
+        if (rng() > 0.45) {
+          const ry = Math.min(H - 20, ny + 45 + rng() * 55);
+          const rx = nx + (rng() - 0.5) * 28;
+          segs.push({ x0: px, y0: py, x1: rx, y1: ry, r: 3 + rng() * 3.5, eva: true });
+        }
+      }
+      cx = nx; cy = ny;
+    }
+  } else {
+    // Horizontal main tunnel for Stage 3 demo
+    let cx = 30, cy = H / 2 + (rng() - 0.5) * 40;
+    while (cx < W - 30) {
+      const nx = cx + 35 + rng() * 30;
+      const ny = cy + (rng() - 0.5) * 30;
+      segs.push({ x0: cx, y0: cy, x1: nx, y1: ny, r: 14 + rng() * 6 });
+      if (rng() > 0.5) {
+        const dir = rng() > 0.5 ? 1 : -1;
+        const blen = 40 + rng() * 50;
+        const bx = nx + (rng() - 0.5) * 40;
+        const by = ny + dir * blen;
+        segs.push({
+          x0: nx, y0: ny,
+          x1: bx,
+          y1: by,
+          r: 6 + rng() * 4,
+          eva: true
+        });
+        if (rng() > 0.35) {
+          const lx = bx + 25 + rng() * 55;
+          const ly = by + dir * (18 + rng() * 34);
+          const rx = nx + 42 + rng() * 55;
+          const ry = ny + (rng() - 0.5) * 45;
+          segs.push({ x0: bx, y0: by, x1: lx, y1: ly, r: 3 + rng() * 3, eva: true });
+          segs.push({ x0: lx, y0: ly, x1: rx, y1: ry, r: 2.5 + rng() * 2.5, eva: true });
+          if (rng() > 0.45) {
+            segs.push({ x0: bx, y0: by, x1: rx, y1: ry, r: 2.5 + rng() * 2.5, eva: true });
+          }
+        }
+      }
+      cx = nx; cy = ny;
+    }
+  }
+  return segs;
+}
+
+function distToSegment(px, py, s) {
+  const dx = s.x1 - s.x0, dy = s.y1 - s.y0;
+  const l2 = dx * dx + dy * dy;
+  if (l2 < 1e-6) return Math.hypot(px - s.x0, py - s.y0);
+  let t = ((px - s.x0) * dx + (py - s.y0) * dy) / l2;
+  if (t < 0) t = 0; else if (t > 1) t = 1;
+  return Math.hypot(px - (s.x0 + t * dx), py - (s.y0 + t * dy));
+}
+
+function renderCarved(canvas, segs, substrate, useSubstrate) {
+  const ctx = canvas.getContext('2d');
+  const W = canvas.width, H = canvas.height;
+  const img = ctx.createImageData(W, H);
+  for (let y = 0; y < H; y++) {
+    for (let x = 0; x < W; x++) {
+      let mind = Infinity, segR = 0;
+      for (const s of segs) {
+        const d = distToSegment(x, y, s);
+        if (d < mind) { mind = d; segR = s.r; }
+      }
+      const s = substrate ? substrate.sample(x, y) : 0.5;
+      // Modulate radius: soft → wider (1.4x), hard → narrower (0.75x)
+      const effR = useSubstrate ? segR * (1.4 - s * 0.65) : segR;
+      const i = (y * W + x) * 4;
+      if (mind < effR) {
+        // Tunnel interior — almost black with faint blue tint near walls
+        const wallProx = mind / effR;
+        const tint = Math.floor(wallProx * 18);
+        img.data[i] = 3 + tint;
+        img.data[i + 1] = 5 + tint * 1.5;
+        img.data[i + 2] = 10 + tint * 2;
+      } else {
+        const [r, g, b] = colorFromS(s);
+        img.data[i] = r; img.data[i + 1] = g; img.data[i + 2] = b;
+      }
+      img.data[i + 3] = 255;
+    }
+  }
+  ctx.putImageData(img, 0, 0);
+}
+
+let seed3 = (Date.now() & 0xffffffff) ^ 0x9abc;
+function regenStage3() {
+  seed3 = (seed3 + 1) | 0;
+  const cA = document.getElementById('stage3_naive');
+  const cB = document.getElementById('stage3_full');
+  const rng = mulberry32(seed3);
+  const segs = generateTunnelSegments(rng, cB.width, cB.height, false);
+  const subRng = mulberry32(seed3 + 7);
+  const sub = generateSubstrate(subRng, cB.width, cB.height);
+  // Naive: flat background, tunnels = circles
+  const ctx = cA.getContext('2d');
+  ctx.fillStyle = '#26333a';
+  ctx.fillRect(0, 0, cA.width, cA.height);
+  // Draw tunnels as filled disks/capsules
+  ctx.fillStyle = '#050810';
+  for (const s of segs) {
+    drawCapsule(ctx, s.x0, s.y0, s.x1, s.y1, s.r);
+  }
+  // Full
+  renderCarved(cB, segs, sub, true);
+}
+
+function drawCapsule(ctx, x0, y0, x1, y1, r) {
+  const dx = x1 - x0, dy = y1 - y0;
+  const len = Math.hypot(dx, dy);
+  if (len < 1e-6) {
+    ctx.beginPath(); ctx.arc(x0, y0, r, 0, Math.PI * 2); ctx.fill(); return;
+  }
+  const nx = -dy / len, ny = dx / len;
+  ctx.beginPath();
+  ctx.moveTo(x0 + nx * r, y0 + ny * r);
+  ctx.lineTo(x1 + nx * r, y1 + ny * r);
+  ctx.arc(x1, y1, r, Math.atan2(ny, nx), Math.atan2(-ny, -nx), false);
+  ctx.lineTo(x0 - nx * r, y0 - ny * r);
+  ctx.arc(x0, y0, r, Math.atan2(-ny, -nx), Math.atan2(ny, nx), false);
+  ctx.closePath();
+  ctx.fill();
+}
+
+// =================== STAGE 4 : DECORATORS ===================
+function regenStage4() {
+  const c = document.getElementById('stage4');
+  const seed = (Date.now() & 0xffffffff) ^ 0xdef0;
+  const rng = mulberry32(seed);
+  const segs = generateTunnelSegments(rng, c.width, c.height, false);
+  const sub = generateSubstrate(mulberry32(seed + 7), c.width, c.height);
+  renderCarved(c, segs, sub, true);
+
+  // Scatter decorators inside tunnel space
+  const ctx = c.getContext('2d');
+  const samples = [];
+  const minD = 14, minD2 = minD * minD;
+  let attempts = 0;
+  while (samples.length < 80 && attempts < 1500) {
+    const x = rng() * c.width;
+    const y = rng() * c.height;
+    // Check inside tunnel
+    let mind = Infinity, segR = 0;
+    for (const s of segs) {
+      const d = distToSegment(x, y, s);
+      if (d < mind) { mind = d; segR = s.r; }
+    }
+    const sv = sub.sample(x, y);
+    const effR = segR * (1.4 - sv * 0.65);
+    if (mind < effR * 0.85) {
+      // Check Poisson minDist
+      let ok = true;
+      for (const p of samples) {
+        const dx = p.x - x, dy = p.y - y;
+        if (dx * dx + dy * dy < minD2) { ok = false; break; }
+      }
+      if (ok) {
+        // Decide type by position vs effR (wall proximity) and y (top/bottom)
+        const wallProx = mind / effR;
+        const fromTop = mind > effR * 0.7 && Math.random() < 0.4; // stalactite candidate
+        const wet = sv < 0.4 && rng() < 0.3;
+        let type = 'sediment';
+        if (wallProx > 0.7) type = 'stalactite';
+        else if (wet) type = 'biolum';
+        samples.push({ x, y, type });
+      }
+    }
+    attempts++;
+  }
+  for (const p of samples) {
+    if (p.type === 'stalactite') {
+      ctx.fillStyle = '#a8b5bc';
+      ctx.beginPath();
+      ctx.moveTo(p.x, p.y - 4);
+      ctx.lineTo(p.x - 3, p.y + 2);
+      ctx.lineTo(p.x + 3, p.y + 2);
+      ctx.closePath();
+      ctx.fill();
+    } else if (p.type === 'biolum') {
+      ctx.fillStyle = '#5fdab0';
+      ctx.shadowBlur = 6;
+      ctx.shadowColor = '#5fdab0';
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, 2, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.shadowBlur = 0;
+    } else {
+      ctx.fillStyle = '#4a5a60';
+      ctx.fillRect(p.x - 1.5, p.y - 1, 3, 2);
+    }
+  }
+}
+
+// =================== CANYON COMPOSITION ===================
+function regenCanyon() {
+  const c = document.getElementById('canyon');
+  const seed = (Date.now() & 0xffffffff) ^ 0x1357;
+  const rng = mulberry32(seed);
+  const sub = generateSubstrate(mulberry32(seed + 11), c.width, c.height);
+  const segs = generateTunnelSegments(rng, c.width, c.height, true);
+  renderCarved(c, segs, sub, true);
+
+  // Add biolum decorators sparsely
+  const ctx = c.getContext('2d');
+  const decoRng = mulberry32(seed + 99);
+  for (let i = 0; i < 25; i++) {
+    const x = decoRng() * c.width;
+    const y = decoRng() * c.height;
+    let mind = Infinity, segR = 0;
+    for (const s of segs) {
+      const d = distToSegment(x, y, s);
+      if (d < mind) { mind = d; segR = s.r; }
+    }
+    const sv = sub.sample(x, y);
+    const effR = segR * (1.4 - sv * 0.65);
+    if (mind < effR * 0.7 && sv < 0.4) {
+      ctx.fillStyle = '#5fdab0';
+      ctx.shadowBlur = 6;
+      ctx.shadowColor = '#5fdab0';
+      ctx.beginPath();
+      ctx.arc(x, y, 2, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.shadowBlur = 0;
+    }
+  }
+
+  // Depth markers + scale
+  ctx.fillStyle = 'rgba(192,208,216,0.45)';
+  ctx.font = '10px Consolas, monospace';
+  const depthLabels = [100, 200, 300, 400, 500];
+  for (let i = 0; i < depthLabels.length; i++) {
+    const y = (i + 1) * (c.height / (depthLabels.length + 1));
+    ctx.fillText(`-${depthLabels[i]} m`, 4, y - 2);
+    ctx.strokeStyle = 'rgba(31,53,64,0.6)';
+    ctx.lineWidth = 1;
+    ctx.setLineDash([2, 4]);
+    ctx.beginPath(); ctx.moveTo(40, y); ctx.lineTo(c.width - 8, y); ctx.stroke();
+    ctx.setLineDash([]);
+  }
+
+  // Entry indicator at top
+  ctx.fillStyle = '#4fc1d0';
+  ctx.font = '12px Consolas, monospace';
+  ctx.fillText('↓ Strate 1 entry', c.width / 2 - 30, 14);
+}
+
+// =================== INIT ===================
+window.addEventListener('load', () => {
+  regenStage1();
+  regenStage2();
+  regenStage3();
+  regenStage4();
+  regenCanyon();
+});
+</script>
+</body>
+</html>
