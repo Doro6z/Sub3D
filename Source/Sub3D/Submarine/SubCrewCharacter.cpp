@@ -2,7 +2,7 @@
 #include "Sub3DDebugSettings.h"
 #include "CompartmentVolumeComponent.h"
 #include "Debug/CrewAnimDebugComponent.h"
-#include "CrewUnderwaterPPComponent.h"
+#include "CrewWaterStateComponent.h"
 #include "SubCrewNetTypes.h"
 #include "SubHullBoundaryComponent.h"
 #include "Engine/DamageEvents.h"
@@ -15,11 +15,13 @@
 #include "SubMovementComponent.h"
 #include "SubmarineSystemsComponent.h"
 #include "SubInteractionComponent.h"
+#include "SubEquipmentComponent.h"
 #include "InteractableComponent.h"
 #include "Generator/SubmarineDefinition.h"
 #include "Camera/CameraComponent.h"
 #include "Components/CapsuleComponent.h"
 #include "Components/PrimitiveComponent.h"
+#include "Components/SceneComponent.h"
 #include "Engine/World.h"
 #include "GameFramework/CharacterMovementComponent.h"
 #include "GameFramework/SpringArmComponent.h"
@@ -123,10 +125,27 @@ ASubCrewCharacter::ASubCrewCharacter(const FObjectInitializer& ObjectInitializer
 	TPSCamera->bUsePawnControlRotation = false;
 
 	InteractionComponent = CreateDefaultSubobject<USubInteractionComponent>(TEXT("InteractionComponent"));
+	EquipmentComponent = CreateDefaultSubobject<USubEquipmentComponent>(TEXT("EquipmentComponent"));
 
-	UnderwaterPP = CreateDefaultSubobject<UCrewUnderwaterPPComponent>(TEXT("UnderwaterPP"));
+	UnderwaterPP = CreateDefaultSubobject<UCrewWaterStateComponent>(TEXT("UnderwaterPP"));
 
 	CrewAnimDebugComponent = CreateDefaultSubobject<UCrewAnimDebugComponent>(TEXT("CrewAnimDebugComponent"));
+
+	ViewProbe = CreateDefaultSubobject<USceneComponent>(TEXT("ViewProbe"));
+	ViewProbe->SetupAttachment(FPSCamera);
+	ViewProbe->SetRelativeLocation(FVector::ZeroVector);
+
+	HeadProbe = CreateDefaultSubobject<USceneComponent>(TEXT("HeadProbe"));
+	HeadProbe->SetupAttachment(GetRootComponent());
+	HeadProbe->SetRelativeLocation(FVector(0.f, 0.f, 78.f));
+
+	TorsoProbe = CreateDefaultSubobject<USceneComponent>(TEXT("TorsoProbe"));
+	TorsoProbe->SetupAttachment(GetRootComponent());
+	TorsoProbe->SetRelativeLocation(FVector(0.f, 0.f, 35.f));
+
+	FeetProbe = CreateDefaultSubobject<USceneComponent>(TEXT("FeetProbe"));
+	FeetProbe->SetupAttachment(GetRootComponent());
+	FeetProbe->SetRelativeLocation(FVector(0.f, 0.f, -75.f));
 
 	if (UCapsuleComponent* Capsule = GetCapsuleComponent())
 	{
@@ -399,6 +418,31 @@ void ASubCrewCharacter::ApplyCrewVerticalMoveInput(float Axis)
 	if (USubCrewMovementComponent* CrewMovement = GetCrewMovement())
 	{
 		CrewMovement->ApplyCrewVerticalMoveInput(Axis);
+	}
+}
+
+void ASubCrewCharacter::RequestCrewJump()
+{
+	Jump();
+}
+
+void ASubCrewCharacter::StopCrewJump()
+{
+	StopJumping();
+}
+
+void ASubCrewCharacter::ServerSetWaterSprinting_Implementation(bool bNewWaterSprinting)
+{
+	if (USubCrewMovementComponent* CrewMovement = GetCrewMovement())
+	{
+		if (bNewWaterSprinting)
+		{
+			CrewMovement->RequestWaterSprintStart();
+		}
+		else
+		{
+			CrewMovement->RequestWaterSprintStop();
+		}
 	}
 }
 
@@ -1064,6 +1108,22 @@ void ASubCrewCharacter::ApplyWaterMovementState(float WaterImmersion01)
 		CrewWalkSpeedMultiplier = CrewMovement->GetDesiredWalkSpeedMultiplier();
 	}
 
+	const bool bCurrentlySwimming = MovementComponent->MovementMode == MOVE_Swimming;
+	const float EnterSwimThreshold = FMath::Clamp(SwimThreshold01, 0.f, 1.f);
+	const float ExitSwimThreshold = FMath::Clamp(FMath::Min(SwimExitThreshold01, EnterSwimThreshold), 0.f, 1.f);
+	const bool bShouldSwim = bCurrentlySwimming
+		? WaterImmersion01 >= ExitSwimThreshold
+		: WaterImmersion01 >= EnterSwimThreshold;
+
+	if (bShouldSwim)
+	{
+		bIsSwimmingByFlood = true;
+		ApplySwimmingMovementState(SwimSpeedMultiplier);
+		return;
+	}
+
+	bIsSwimmingByFlood = false;
+
 	if (WaterImmersion01 >= DeepWadeThreshold01)
 	{
 		const float RangeAlpha = FMath::GetRangePct(DeepWadeThreshold01, FMath::Max(DeepWadeThreshold01 + KINDA_SMALL_NUMBER, 1.f), WaterImmersion01);
@@ -1094,7 +1154,11 @@ void ASubCrewCharacter::ApplySwimmingMovementState(float SpeedMultiplier)
 	}
 
 	const float MovementProtection = FMath::Max(0.f, WaterMovementProtectionMultiplier);
-	MovementComponent->MaxSwimSpeed = DefaultSwimSpeed * FMath::Max(0.f, SpeedMultiplier) * MovementProtection;
+	const USubCrewMovementComponent* CrewMovement = GetCrewMovement();
+	const float WaterSprintScale = CrewMovement && CrewMovement->IsWaterSprinting()
+		? FMath::Max(1.f, WaterSprintSpeedMultiplier)
+		: 1.f;
+	MovementComponent->MaxSwimSpeed = DefaultSwimSpeed * FMath::Max(0.f, SpeedMultiplier) * WaterSprintScale * MovementProtection;
 	MovementComponent->BrakingDecelerationSwimming = FMath::Max(0.f, SwimBrakingDeceleration);
 	MovementComponent->GravityScale = SwimGravityScale;
 

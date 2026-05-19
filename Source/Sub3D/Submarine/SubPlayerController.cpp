@@ -11,6 +11,7 @@
 #include "SubmarineCompartmentComponent.h"
 #include "SubMovementComponent.h"
 #include "SubCrewCharacter.h"
+#include "SubCrewMovementComponent.h"
 #include "SubPlayerHUDWidget.h"
 #include "SubCrewAnimInstance.h"
 #include "Components/SkeletalMeshComponent.h"
@@ -235,6 +236,107 @@ void ASubPlayerController::SetSonarLeanActive(bool bActive)
 
 	bSonarLeanActive = bNewValue;
 	BP_OnSonarLeanChanged(bSonarLeanActive);
+}
+
+void ASubPlayerController::ApplyCrewPlanarMoveInput(FVector2D MoveAxis)
+{
+	if (CurrentControlMode != ECrewControlMode::OnFoot)
+	{
+		return;
+	}
+
+	if (ASubCrewCharacter* Crew = Cast<ASubCrewCharacter>(GetPawn()))
+	{
+		Crew->ApplyCrewPlanarMoveInput(MoveAxis);
+	}
+}
+
+void ASubPlayerController::ApplyCrewVerticalMoveInput(float Axis)
+{
+	if (CurrentControlMode != ECrewControlMode::OnFoot)
+	{
+		return;
+	}
+
+	if (ASubCrewCharacter* Crew = Cast<ASubCrewCharacter>(GetPawn()))
+	{
+		Crew->ApplyCrewVerticalMoveInput(Axis);
+	}
+}
+
+void ASubPlayerController::RequestCrewRunStart()
+{
+	if (CurrentControlMode != ECrewControlMode::OnFoot)
+	{
+		return;
+	}
+
+	if (const ASubCrewCharacter* Crew = Cast<ASubCrewCharacter>(GetPawn()))
+	{
+		if (USubCrewMovementComponent* CrewMovement = Crew->GetCrewMovement())
+		{
+			CrewMovement->RequestRunStart();
+		}
+	}
+}
+
+void ASubPlayerController::RequestCrewRunStop()
+{
+	if (const ASubCrewCharacter* Crew = Cast<ASubCrewCharacter>(GetPawn()))
+	{
+		if (USubCrewMovementComponent* CrewMovement = Crew->GetCrewMovement())
+		{
+			CrewMovement->RequestRunStop();
+		}
+	}
+}
+
+void ASubPlayerController::RequestCrewWaterSprintStart()
+{
+	if (CurrentControlMode != ECrewControlMode::OnFoot)
+	{
+		return;
+	}
+
+	if (const ASubCrewCharacter* Crew = Cast<ASubCrewCharacter>(GetPawn()))
+	{
+		if (USubCrewMovementComponent* CrewMovement = Crew->GetCrewMovement())
+		{
+			CrewMovement->RequestWaterSprintStart();
+		}
+	}
+}
+
+void ASubPlayerController::RequestCrewWaterSprintStop()
+{
+	if (const ASubCrewCharacter* Crew = Cast<ASubCrewCharacter>(GetPawn()))
+	{
+		if (USubCrewMovementComponent* CrewMovement = Crew->GetCrewMovement())
+		{
+			CrewMovement->RequestWaterSprintStop();
+		}
+	}
+}
+
+void ASubPlayerController::RequestCrewJump()
+{
+	if (CurrentControlMode != ECrewControlMode::OnFoot)
+	{
+		return;
+	}
+
+	if (ASubCrewCharacter* Crew = Cast<ASubCrewCharacter>(GetPawn()))
+	{
+		Crew->RequestCrewJump();
+	}
+}
+
+void ASubPlayerController::StopCrewJump()
+{
+	if (ASubCrewCharacter* Crew = Cast<ASubCrewCharacter>(GetPawn()))
+	{
+		Crew->StopCrewJump();
+	}
 }
 
 void ASubPlayerController::ServerRouteHelmThrust_Implementation(float Value)

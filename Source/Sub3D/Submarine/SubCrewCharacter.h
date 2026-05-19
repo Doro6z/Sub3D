@@ -6,6 +6,7 @@
 #include "SubCrewCharacter.generated.h"
 
 class UCameraComponent;
+class USceneComponent;
 class USpringArmComponent;
 class ASubmarineBase;
 class UInteractableComponent;
@@ -13,9 +14,10 @@ class USubInteractionComponent;
 class USubCrewMovementComponent;
 class UCompartmentVolumeComponent;
 class USubHullBoundaryComponent;
-class UCrewUnderwaterPPComponent;
+class UCrewWaterStateComponent;
 class UCrewAnimDebugComponent;
 class UMaterialInterface;
+class USubEquipmentComponent;
 
 /**
  * Crew member character.
@@ -48,16 +50,31 @@ public:
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
 	USubInteractionComponent* InteractionComponent;
 
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
+	USubEquipmentComponent* EquipmentComponent;
+
 	/**
 	 * Drives the underwater post-process effect. Passive C++: compares camera Z to
 	 * current compartment's water surface Z, blends PP weight, fires BP events for
 	 * designer hooks (droplets, splash). Material-driven visual intelligence.
 	 */
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
-	UCrewUnderwaterPPComponent* UnderwaterPP;
+	UCrewWaterStateComponent* UnderwaterPP;
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
 	UCrewAnimDebugComponent* CrewAnimDebugComponent;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components|Water Probes")
+	TObjectPtr<USceneComponent> ViewProbe = nullptr;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components|Water Probes")
+	TObjectPtr<USceneComponent> HeadProbe = nullptr;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components|Water Probes")
+	TObjectPtr<USceneComponent> TorsoProbe = nullptr;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components|Water Probes")
+	TObjectPtr<USceneComponent> FeetProbe = nullptr;
 
 	/** Default underwater post-process material applied to UnderwaterPP at BeginPlay. Art designer sets this on the BP class. */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "Crew|Underwater")
@@ -74,6 +91,15 @@ public:
 	/** Blueprint input wrapper for swim vertical movement. Axis +1 = up, -1 = down. */
 	UFUNCTION(BlueprintCallable, Category = "Crew|Movement")
 	void ApplyCrewVerticalMoveInput(float Axis);
+
+	UFUNCTION(BlueprintCallable, Category = "Crew|Movement")
+	void RequestCrewJump();
+
+	UFUNCTION(BlueprintCallable, Category = "Crew|Movement")
+	void StopCrewJump();
+
+	UFUNCTION(Server, Reliable)
+	void ServerSetWaterSprinting(bool bNewWaterSprinting);
 
 	UFUNCTION(BlueprintCallable, Category = "Crew|Camera")
 	void ToggleCameraMode();
@@ -175,9 +201,13 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crew|Environment|Water", meta = (ClampMin = "0.0", ClampMax = "1.0"))
 	float DeepWadeThreshold01 = 0.5f;
 
-	/** Reserved for the future immersion-based swim transition. Not used by the current water movement path. */
+	/** Immersion threshold required to enter interior flood swimming. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crew|Environment|Water", meta = (ClampMin = "0.0", ClampMax = "1.0"))
 	float SwimThreshold01 = 0.7f;
+
+	/** Lower exit threshold so walking/swimming does not flicker around the waterline. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crew|Environment|Water", meta = (ClampMin = "0.0", ClampMax = "1.0"))
+	float SwimExitThreshold01 = 0.55f;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crew|Environment|Water", meta = (ClampMin = "0.0", ClampMax = "1.0"))
 	float ShallowWadeSpeedMultiplier = 0.85f;
@@ -189,13 +219,16 @@ public:
 	float NearSwimSpeedMultiplier = 0.4f;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crew|Environment|Water", meta = (ClampMin = "0.0", ClampMax = "5.0"))
-	float SwimSpeedMultiplier = 0.35f;
+	float SwimSpeedMultiplier = 0.7f;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crew|Environment|Water", meta = (ClampMin = "0.0", ClampMax = "5.0"))
 	float WaterMovementProtectionMultiplier = 1.f;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crew|Environment|Swim", meta = (ClampMin = "0.0", ClampMax = "5.0"))
 	float ExteriorSwimSpeedMultiplier = 1.f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crew|Environment|Swim", meta = (ClampMin = "1.0", ClampMax = "5.0"))
+	float WaterSprintSpeedMultiplier = 2.f;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crew|Environment|Swim", meta = (ClampMin = "0.0"))
 	float SwimBrakingDeceleration = 900.f;

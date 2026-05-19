@@ -227,6 +227,14 @@ public:
 	UPROPERTY(BlueprintReadOnly, Replicated, Category = "Submarine|Crew|Movement")
 	bool bIsRunning = false;
 
+	/** Whether the character is currently using the temporary underwater sprint. */
+	UPROPERTY(BlueprintReadOnly, Replicated, Category = "Submarine|Crew|Movement|Swim")
+	bool bIsWaterSprinting = false;
+
+	/** Local water sprint resource. 1 = full burst available, 0 = exhausted. */
+	UPROPERTY(BlueprintReadOnly, Category = "Submarine|Crew|Movement|Swim")
+	float WaterSprintEnergy01 = 1.f;
+
 	UPROPERTY(BlueprintReadOnly, Category = "Submarine|Crew|Movement")
 	FCrewMoveIntent LastMoveIntent;
 
@@ -235,15 +243,47 @@ public:
 
 	/** Run speed multiplier applied to MaxWalkSpeed */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Submarine|Crew|Movement", meta = (ClampMin = "1.0", ClampMax = "3.0"))
-	float RunSpeedMultiplier = 1.8f;
+	float RunSpeedMultiplier = 2.8f;
 
 	/** Vertical swim input scale. +1 is up, -1 is down. Used only while MovementMode is Swimming. */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Submarine|Crew|Movement|Swim", meta = (ClampMin = "0.0", ClampMax = "2.0"))
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Submarine|Crew|Movement|Swim", meta = (ClampMin = "0.0", ClampMax = "3.0"))
 	float SwimVerticalInputScale = 1.f;
 
-	/** Fluid friction used by Sub3D exterior swimming when no UE water PhysicsVolume is present. */
+	/** Input dead zone applied only while swimming. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Submarine|Crew|Movement|Swim", meta = (ClampMin = "0.0", ClampMax = "0.95"))
+	float SwimInputDeadZone = 0.08f;
+
+	/** 0 = yaw-only swim forward, 1 = full camera pitch swim forward. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Submarine|Crew|Movement|Swim", meta = (ClampMin = "0.0", ClampMax = "1.0"))
+	float SwimCameraPitchInfluence = 0.75f;
+
+	/** Side swim input scale. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Submarine|Crew|Movement|Swim", meta = (ClampMin = "0.0", ClampMax = "2.0"))
+	float SwimStrafeInputScale = 0.75f;
+
+	/** Reverse swim input scale. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Submarine|Crew|Movement|Swim", meta = (ClampMin = "0.0", ClampMax = "2.0"))
+	float SwimReverseInputScale = 0.6f;
+
+	/** Fluid friction used by Sub3D swimming when no native UE water PhysicsVolume owns the swim physics. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Submarine|Crew|Movement|Swim", meta = (ClampMin = "0.0"))
-	float Sub3DExteriorSwimFluidFriction = 0.5f;
+	float Sub3DExteriorSwimFluidFriction = 1.1f;
+
+	/** Seconds of continuous water sprint from full energy to exhausted. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Submarine|Crew|Movement|Swim", meta = (ClampMin = "0.1"))
+	float WaterSprintMaxHoldSeconds = 5.0f;
+
+	/** Seconds to recover water sprint from empty to full while not sprinting. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Submarine|Crew|Movement|Swim", meta = (ClampMin = "0.1"))
+	float WaterSprintRecoverySeconds = 2.5f;
+
+	/** Minimum energy required to start a new water sprint burst. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Submarine|Crew|Movement|Swim", meta = (ClampMin = "0.0", ClampMax = "1.0"))
+	float WaterSprintMinStartEnergy01 = 0.04f;
+
+	/** Minimum immersion that allows water sprint input to arm before CMC has fully entered Swimming. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Submarine|Crew|Movement|Swim", meta = (ClampMin = "0.0", ClampMax = "1.0"))
+	float WaterSprintRequiredImmersion01 = 0.35f;
 
 	/**
 	 * Sole locomotion input entry point for crew walking/swimming.
@@ -272,6 +312,23 @@ public:
 	/** Request sprint stop. Called from input (Shift released). */
 	UFUNCTION(BlueprintCallable, Category = "Submarine|Crew|Movement")
 	void RequestRunStop();
+
+	/** Request temporary underwater sprint start. Called from input while swimming. */
+	UFUNCTION(BlueprintCallable, Category = "Submarine|Crew|Movement|Swim")
+	void RequestWaterSprintStart();
+
+	/** Request temporary underwater sprint stop. Called from input release or resource exhaustion. */
+	UFUNCTION(BlueprintCallable, Category = "Submarine|Crew|Movement|Swim")
+	void RequestWaterSprintStop();
+
+	UFUNCTION(BlueprintPure, Category = "Submarine|Crew|Movement|Swim")
+	bool IsWaterSprinting() const { return bIsWaterSprinting; }
+
+	UFUNCTION(BlueprintPure, Category = "Submarine|Crew|Movement|Swim")
+	bool CanWaterSprint() const;
+
+	UFUNCTION(BlueprintPure, Category = "Submarine|Crew|Movement|Swim")
+	float GetWaterSprintEnergy01() const { return WaterSprintEnergy01; }
 
 	UFUNCTION(BlueprintPure, Category = "Submarine|Crew|Posture")
 	ECrewPostureState GetPostureState() const;
@@ -445,6 +502,9 @@ private:
 
 	void TickPosture(float DeltaTime);
 	void SetRunningState(bool bNewRunning);
+	void SetWaterSprintingState(bool bNewWaterSprinting);
+	bool CanWaterSprintInCurrentState() const;
+	void UpdateWaterSprint(float DeltaTime);
 	FVector BuildWorldMoveInput(FVector2D MoveAxis, float VerticalAxis) const;
 	FCrewMoveIntent BuildMoveIntent(FVector2D MoveAxis, float VerticalAxis) const;
 	void UpdateLocomotionFrame();

@@ -94,6 +94,30 @@ public:
 	UFUNCTION(BlueprintImplementableEvent, Category = "Crew Control|Sonar")
 	void BP_OnSonarLeanChanged(bool bActive);
 
+	UFUNCTION(BlueprintCallable, Category = "Crew Control|Movement")
+	void ApplyCrewPlanarMoveInput(FVector2D MoveAxis);
+
+	UFUNCTION(BlueprintCallable, Category = "Crew Control|Movement")
+	void ApplyCrewVerticalMoveInput(float Axis);
+
+	UFUNCTION(BlueprintCallable, Category = "Crew Control|Movement")
+	void RequestCrewRunStart();
+
+	UFUNCTION(BlueprintCallable, Category = "Crew Control|Movement")
+	void RequestCrewRunStop();
+
+	UFUNCTION(BlueprintCallable, Category = "Crew Control|Movement")
+	void RequestCrewWaterSprintStart();
+
+	UFUNCTION(BlueprintCallable, Category = "Crew Control|Movement")
+	void RequestCrewWaterSprintStop();
+
+	UFUNCTION(BlueprintCallable, Category = "Crew Control|Movement")
+	void RequestCrewJump();
+
+	UFUNCTION(BlueprintCallable, Category = "Crew Control|Movement")
+	void StopCrewJump();
+
 	// Route driving inputs directly from controller to station or sub
 	UFUNCTION(BlueprintCallable, Server, Unreliable, Category = "Crew Control")
 	void ServerRouteHelmThrust(float Value);

@@ -157,7 +157,8 @@ void FAnimNode_CrewProcedural::Evaluate_AnyThread(FPoseContext& Output)
 		const FRotator& AddRot = SnapshotRotations[Entry.RotIndex];
 		if (!AddRot.IsNearlyZero(0.01f))
 		{
-			BoneXform.SetRotation(AddRot.Quaternion() * BoneXform.GetRotation());
+			const FQuat LocalAdditiveRotation = BoneXform.GetRotation() * AddRot.Quaternion();
+			BoneXform.SetRotation(LocalAdditiveRotation.GetNormalized());
 		}
 
 		if (Entry.bHasTranslation && !SnapshotPelvisOffset.IsNearlyZero(0.01f))

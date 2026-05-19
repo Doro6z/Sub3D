@@ -141,9 +141,9 @@ USubCrewMovementComponent::USubCrewMovementComponent()
 {
 	SetIsReplicatedByDefault(true);
 
-	// EVA swim is state-driven from hull-boundary crossings, not PhysicsVolume-driven.
-	MaxSwimSpeed = 240.f;
-	BrakingDecelerationSwimming = 900.f;
+	// EVA/interior swim is state-driven by Sub3D crew state, not by PhysicsVolume alone.
+	MaxSwimSpeed = 640.f;
+	BrakingDecelerationSwimming = 1400.f;
 	Buoyancy = 1.f;
 	NavAgentProps.bCanSwim = true;
 
@@ -164,6 +164,32 @@ USubCrewMovementComponent::USubCrewMovementComponent()
 
 void USubCrewMovementComponent::SetMovementMode(EMovementMode NewMovementMode, uint8 NewCustomMode)
 {
+	if (IsGridAuthoritative() && NewMovementMode == MOVE_Swimming)
+	{
+		const ASubCrewCharacter* Crew = Cast<ASubCrewCharacter>(CharacterOwner);
+		const float RequiredImmersion01 = Crew ? FMath::Clamp(Crew->SwimThreshold01, 0.f, 1.f) : 1.f;
+		const bool bSub3DInteriorWaterAllowsSwimming = Crew && Crew->CurrentWaterImmersion01 >= RequiredImmersion01;
+		if (!bSub3DInteriorWaterAllowsSwimming)
+		{
+			UE_LOG(
+				LogSubCrewMovement,
+				Log,
+				TEXT("Interior native Swimming blocked | Crew=%s | Immersion=%.2f | Required=%.2f | PhysicsVolume=%s water=%d"),
+				*GetNameSafe(CharacterOwner),
+				Crew ? Crew->CurrentWaterImmersion01 : 0.f,
+				RequiredImmersion01,
+				*GetNameSafe(GetPhysicsVolume()),
+				(GetPhysicsVolume() && GetPhysicsVolume()->bWaterVolume) ? 1 : 0);
+			NewMovementMode = MOVE_Walking;
+			NewCustomMode = 0;
+		}
+	}
+
+	if (NewMovementMode != MOVE_Swimming && bIsWaterSprinting)
+	{
+		SetWaterSprintingState(false);
+	}
+
 	if (EmbarkState == ECrewEmbarkState::Outside && NewMovementMode == MOVE_Falling)
 	{
 		UE_LOG(
@@ -183,11 +209,18 @@ void USubCrewMovementComponent::SetMovementMode(EMovementMode NewMovementMode, u
 
 bool USubCrewMovementComponent::IsInWater() const
 {
+	if (IsGridAuthoritative())
+	{
+		return MovementMode == MOVE_Swimming;
+	}
+
 	return EmbarkState == ECrewEmbarkState::Outside || Super::IsInWater();
 }
 
 void USubCrewMovementComponent::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
 {
+	UpdateWaterSprint(DeltaTime);
+
 	if (!bReceivedMoveInputThisFrame)
 	{
 		PendingPlanarMoveAxis = FVector2D::ZeroVector;
@@ -375,7 +408,6 @@ void USubCrewMovementComponent::TickComponent(float DeltaTime, ELevelTick TickTy
 		UpdateFootIKTraces();
 		CheckAndLogBaseChange();
 		LogPeriodicState(DeltaTime);
-		DebugDrawState();
 
 		if (bTraceMotionChain)
 		{
@@ -423,6 +455,7 @@ void USubCrewMovementComponent::TickComponent(float DeltaTime, ELevelTick TickTy
 		ResetGridFacingYaw();
 	}
 
+	DebugDrawState();
 	UpdateLocomotionFrame();
 	LogMotionChainTick(DeltaTime);
 }
@@ -625,6 +658,21 @@ void USubCrewMovementComponent::SmoothCorrection(const FVector& OldLocation, con
 
 void USubCrewMovementComponent::PhysicsVolumeChanged(APhysicsVolume* NewVolume)
 {
+	if (IsGridAuthoritative())
+	{
+		if (NewVolume && NewVolume->bWaterVolume)
+		{
+			UE_LOG(
+				LogSubCrewMovement,
+				Log,
+				TEXT("Interior PhysicsVolume water ignored | Crew=%s | Volume=%s | Mode=%s"),
+				*GetNameSafe(CharacterOwner),
+				*GetNameSafe(NewVolume),
+				MovementModeToDebugName(MovementMode));
+		}
+		return;
+	}
+
 	if (EmbarkState == ECrewEmbarkState::Outside && (!NewVolume || !NewVolume->bWaterVolume))
 	{
 		return;
@@ -635,6 +683,14 @@ void USubCrewMovementComponent::PhysicsVolumeChanged(APhysicsVolume* NewVolume)
 
 void USubCrewMovementComponent::SetDefaultMovementMode()
 {
+	if (IsGridAuthoritative())
+	{
+		const ASubCrewCharacter* Crew = Cast<ASubCrewCharacter>(CharacterOwner);
+		const float RequiredImmersion01 = Crew ? FMath::Clamp(Crew->SwimThreshold01, 0.f, 1.f) : 1.f;
+		SetMovementMode(Crew && Crew->CurrentWaterImmersion01 >= RequiredImmersion01 ? MOVE_Swimming : MOVE_Walking);
+		return;
+	}
+
 	if (EmbarkState == ECrewEmbarkState::Outside)
 	{
 		SetMovementMode(MOVE_Swimming);
@@ -647,7 +703,8 @@ void USubCrewMovementComponent::SetDefaultMovementMode()
 void USubCrewMovementComponent::PhysSwimming(float DeltaTime, int32 Iterations)
 {
 	const APhysicsVolume* PhysicsVolume = GetPhysicsVolume();
-	if (EmbarkState != ECrewEmbarkState::Outside || (PhysicsVolume && PhysicsVolume->bWaterVolume))
+	const bool bUseNativeWaterVolumeSwimming = !IsGridAuthoritative() && PhysicsVolume && PhysicsVolume->bWaterVolume;
+	if (bUseNativeWaterVolumeSwimming)
 	{
 		Super::PhysSwimming(DeltaTime, Iterations);
 		return;
@@ -795,8 +852,8 @@ bool USubCrewMovementComponent::IsCrewSwimming() const
 
 FVector USubCrewMovementComponent::BuildWorldMoveInput(FVector2D MoveAxis, float VerticalAxis) const
 {
-	const FVector2D ClampedMoveAxis = ClampMoveAxis(MoveAxis);
-	const float ClampedVerticalAxis = ClampInputAxis(VerticalAxis);
+	FVector2D ClampedMoveAxis = ClampMoveAxis(MoveAxis);
+	float ClampedVerticalAxis = ClampInputAxis(VerticalAxis);
 
 	float ControlYawDeg = CharacterOwner ? CharacterOwner->GetActorRotation().Yaw : 0.f;
 	FRotator ControlRotation(0.f, ControlYawDeg, 0.f);
@@ -818,10 +875,24 @@ FVector USubCrewMovementComponent::BuildWorldMoveInput(FVector2D MoveAxis, float
 		return (YawForward * ClampedMoveAxis.X + YawRight * ClampedMoveAxis.Y).GetClampedToMaxSize(1.f);
 	}
 
-	const FVector CameraForward = ControlRotation.Vector();
+	const float DeadZone = FMath::Clamp(SwimInputDeadZone, 0.f, 0.95f);
+	if (ClampedMoveAxis.Size() < DeadZone)
+	{
+		ClampedMoveAxis = FVector2D::ZeroVector;
+	}
+	if (FMath::Abs(ClampedVerticalAxis) < DeadZone)
+	{
+		ClampedVerticalAxis = 0.f;
+	}
+
+	const FVector CameraForward = ControlRotation.Vector().GetSafeNormal();
+	const float PitchInfluence = FMath::Clamp(SwimCameraPitchInfluence, 0.f, 1.f);
+	const FVector SwimForward = (YawForward * (1.f - PitchInfluence) + CameraForward * PitchInfluence).GetSafeNormal();
+	const float ForwardScale = ClampedMoveAxis.X < 0.f ? FMath::Max(0.f, SwimReverseInputScale) : 1.f;
+
 	const FVector SwimInput =
-		(CameraForward * ClampedMoveAxis.X)
-		+ (YawRight * ClampedMoveAxis.Y)
+		(SwimForward * ClampedMoveAxis.X * ForwardScale)
+		+ (YawRight * ClampedMoveAxis.Y * FMath::Max(0.f, SwimStrafeInputScale))
 		+ (FVector::UpVector * ClampedVerticalAxis * FMath::Max(0.f, SwimVerticalInputScale));
 
 	return SwimInput.GetClampedToMaxSize(1.f);
@@ -902,6 +973,7 @@ void USubCrewMovementComponent::UpdateLocomotionFrame()
 
 	Frame.bIsGridAuthoritative = bGrid;
 	Frame.bIsSwimming = bSwimming;
+	Frame.bIsWaterSprinting = bIsWaterSprinting;
 	Frame.bIsRunning = bIsRunning;
 	Frame.PostureAlpha = PostureAlpha;
 	Frame.SupportQuality01 = SupportQuality01;
@@ -914,12 +986,19 @@ void USubCrewMovementComponent::UpdateLocomotionFrame()
 
 	if (Sub)
 	{
-		Frame.BodyLocalYawDeg = FRotator::NormalizeAxis(Frame.BodyWorldYawDeg - Sub->GetActorRotation().Yaw);
+		const FRotator SubRotation = Sub->GetActorRotation();
+		Frame.BodyLocalYawDeg = FRotator::NormalizeAxis(Frame.BodyWorldYawDeg - SubRotation.Yaw);
+		Frame.SubTiltPitchDeg = FRotator::NormalizeAxis(SubRotation.Pitch);
+		Frame.SubTiltRollDeg = FRotator::NormalizeAxis(SubRotation.Roll);
 	}
 	else
 	{
 		Frame.BodyLocalYawDeg = Frame.BodyWorldYawDeg;
 	}
+
+	Frame.LocalSubLinearAcceleration = LocalSubLinearAcceleration;
+	Frame.LocalSubAngularVelocityDegrees = LocalSubAngularVelocityDegrees;
+	Frame.LocalSubAngularAccelerationDegrees = LocalSubAngularAccelerationDegrees;
 
 	if (bGrid)
 	{
@@ -1965,6 +2044,16 @@ void USubCrewMovementComponent::RequestRunStop()
 	SetRunningState(false);
 }
 
+void USubCrewMovementComponent::RequestWaterSprintStart()
+{
+	SetWaterSprintingState(true);
+}
+
+void USubCrewMovementComponent::RequestWaterSprintStop()
+{
+	SetWaterSprintingState(false);
+}
+
 ECrewPostureState USubCrewMovementComponent::GetPostureState() const
 {
 	if (PostureAlpha <= 0.25f)
@@ -2005,6 +2094,10 @@ void USubCrewMovementComponent::SetRunningState(bool bNewRunning)
 	}
 
 	bIsRunning = bResolvedRunning;
+	if (bIsRunning)
+	{
+		SetWaterSprintingState(false);
+	}
 
 	if (Crew && !Crew->HasAuthority())
 	{
@@ -2014,6 +2107,86 @@ void USubCrewMovementComponent::SetRunningState(bool bNewRunning)
 
 
 // ── Hand IK Probes ──────────────────────────────────────────────
+
+void USubCrewMovementComponent::SetWaterSprintingState(bool bNewWaterSprinting)
+{
+	ASubCrewCharacter* Crew = Cast<ASubCrewCharacter>(CharacterOwner);
+	const float StartEnergy = FMath::Clamp(WaterSprintMinStartEnergy01, 0.f, 1.f);
+	const bool bHasEnoughEnergy = bIsWaterSprinting
+		? WaterSprintEnergy01 > KINDA_SMALL_NUMBER
+		: WaterSprintEnergy01 >= StartEnergy;
+	const bool bResolvedWaterSprinting =
+		bNewWaterSprinting
+		&& CanWaterSprintInCurrentState()
+		&& bHasEnoughEnergy;
+
+	if (bIsWaterSprinting == bResolvedWaterSprinting)
+	{
+		return;
+	}
+
+	bIsWaterSprinting = bResolvedWaterSprinting;
+	if (bIsWaterSprinting)
+	{
+		SetRunningState(false);
+	}
+
+	if (Crew && !Crew->HasAuthority())
+	{
+		Crew->ServerSetWaterSprinting(bIsWaterSprinting);
+	}
+}
+
+bool USubCrewMovementComponent::CanWaterSprint() const
+{
+	const float StartEnergy = FMath::Clamp(WaterSprintMinStartEnergy01, 0.f, 1.f);
+	return WaterSprintEnergy01 >= StartEnergy && CanWaterSprintInCurrentState();
+}
+
+bool USubCrewMovementComponent::CanWaterSprintInCurrentState() const
+{
+	if (IsCrewSwimming())
+	{
+		return true;
+	}
+
+	const ASubCrewCharacter* Crew = Cast<ASubCrewCharacter>(CharacterOwner);
+	return Crew && Crew->CurrentWaterImmersion01 >= FMath::Clamp(WaterSprintRequiredImmersion01, 0.f, 1.f);
+}
+
+void USubCrewMovementComponent::UpdateWaterSprint(float DeltaTime)
+{
+	if (DeltaTime <= 0.f)
+	{
+		return;
+	}
+
+	if (bIsWaterSprinting)
+	{
+		if (!CanWaterSprintInCurrentState())
+		{
+			SetWaterSprintingState(false);
+			return;
+		}
+
+		if (!IsCrewSwimming())
+		{
+			return;
+		}
+
+		const float DrainRate = 1.f / FMath::Max(0.1f, WaterSprintMaxHoldSeconds);
+		WaterSprintEnergy01 = FMath::Max(0.f, WaterSprintEnergy01 - DeltaTime * DrainRate);
+		if (WaterSprintEnergy01 <= KINDA_SMALL_NUMBER)
+		{
+			WaterSprintEnergy01 = 0.f;
+			SetWaterSprintingState(false);
+		}
+		return;
+	}
+
+	const float RecoveryRate = 1.f / FMath::Max(0.1f, WaterSprintRecoverySeconds);
+	WaterSprintEnergy01 = FMath::Min(1.f, WaterSprintEnergy01 + DeltaTime * RecoveryRate);
+}
 
 void USubCrewMovementComponent::UpdateHandIKProbes()
 {
@@ -2173,6 +2346,7 @@ void USubCrewMovementComponent::GetLifetimeReplicatedProps(TArray<FLifetimePrope
 	Super::GetLifetimeReplicatedProps(OutLifetimeProps);
 	DOREPLIFETIME(USubCrewMovementComponent, PostureAlpha);
 	DOREPLIFETIME(USubCrewMovementComponent, bIsRunning);
+	DOREPLIFETIME(USubCrewMovementComponent, bIsWaterSprinting);
 	// Owner computes GridSpaceTransform / EmbarkState locally via its own rebase + hull boundary;
 	// non-owning clients get the server-authoritative values for their peer-crew rendering.
 	DOREPLIFETIME_CONDITION(USubCrewMovementComponent, GridSpaceTransform, COND_SkipOwner);

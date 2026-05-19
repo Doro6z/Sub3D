@@ -88,6 +88,21 @@ struct SUB3D_API FCrewLocomotionFrame
 	float LocalTurnRateDegPerSec = 0.f;
 
 	UPROPERTY(BlueprintReadOnly, Category = "Crew|Locomotion")
+	float SubTiltPitchDeg = 0.f;
+
+	UPROPERTY(BlueprintReadOnly, Category = "Crew|Locomotion")
+	float SubTiltRollDeg = 0.f;
+
+	UPROPERTY(BlueprintReadOnly, Category = "Crew|Locomotion")
+	FVector LocalSubLinearAcceleration = FVector::ZeroVector;
+
+	UPROPERTY(BlueprintReadOnly, Category = "Crew|Locomotion")
+	FVector LocalSubAngularVelocityDegrees = FVector::ZeroVector;
+
+	UPROPERTY(BlueprintReadOnly, Category = "Crew|Locomotion")
+	FVector LocalSubAngularAccelerationDegrees = FVector::ZeroVector;
+
+	UPROPERTY(BlueprintReadOnly, Category = "Crew|Locomotion")
 	float SupportQuality01 = 0.f;
 
 	UPROPERTY(BlueprintReadOnly, Category = "Crew|Locomotion")
@@ -107,6 +122,9 @@ struct SUB3D_API FCrewLocomotionFrame
 
 	UPROPERTY(BlueprintReadOnly, Category = "Crew|Locomotion")
 	bool bIsSwimming = false;
+
+	UPROPERTY(BlueprintReadOnly, Category = "Crew|Locomotion")
+	bool bIsWaterSprinting = false;
 
 	UPROPERTY(BlueprintReadOnly, Category = "Crew|Locomotion")
 	bool bIsRunning = false;
